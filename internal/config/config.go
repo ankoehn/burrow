@@ -22,12 +22,15 @@ type TunnelSpec struct {
 
 // ServerConfig configures burrowd.
 type ServerConfig struct {
-	Listen    string `koanf:"listen" validate:"required"`
-	TLSCert   string `koanf:"tls_cert" validate:"required"`
-	TLSKey    string `koanf:"tls_key" validate:"required"`
-	AuthToken string `koanf:"auth_token" validate:"required"`
-	LogLevel  string `koanf:"log_level"`
-	LogFormat string `koanf:"log_format"`
+	Listen     string `koanf:"listen" validate:"required"`
+	TLSCert    string `koanf:"tls_cert" validate:"required"`
+	TLSKey     string `koanf:"tls_key" validate:"required"`
+	AuthToken  string `koanf:"auth_token" validate:"required"`
+	LogLevel   string `koanf:"log_level"`
+	LogFormat  string `koanf:"log_format"`
+	PublicBind string `koanf:"public_bind"`
+	PortMin    int    `koanf:"port_min" validate:"gte=1,lte=65535"`
+	PortMax    int    `koanf:"port_max" validate:"gte=1,lte=65535,gtefield=PortMin"`
 }
 
 // ClientConfig configures burrow.
@@ -56,6 +59,7 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	_ = k.Load(confmap.Provider(map[string]any{
 		"listen": ":7000", "tls_cert": "certs/dev-server.pem",
 		"tls_key": "certs/dev-server-key.pem", "log_level": "info", "log_format": "text",
+		"public_bind": "0.0.0.0", "port_min": 9000, "port_max": 9100,
 	}, "."), nil)
 	_ = k.Load(envProvider("BURROW_"), nil)
 	if overrides != nil {
