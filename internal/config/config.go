@@ -63,6 +63,8 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"listen": ":7000", "tls_cert": "certs/dev-server.pem",
 		"tls_key": "certs/dev-server-key.pem", "log_level": "info", "log_format": "text",
 		"public_bind": "0.0.0.0", "port_min": 9000, "port_max": 9100,
+		// database_path is resolved relative to the process working directory;
+		// supply an absolute path via BURROW_DATABASE_PATH in production.
 		"database_path": "./burrow.db", "http_listen": ":8080",
 	}, "."), nil)
 	_ = k.Load(envProvider("BURROW_"), nil)

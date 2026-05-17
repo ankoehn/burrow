@@ -21,3 +21,13 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   `strftime`, or store expiry as a unix-epoch `INTEGER`. Removes the entire
   Go-`String()`-vs-`CURRENT_TIMESTAMP`-vs-offset fragility class.
   _Source: Phase 4a Task 5 independent code review._
+
+## Testing
+
+- **Restore TLS cert/key required-validation coverage.** Phase 4a Task 7 replaced
+  `TestServerValidationRequiresToken` (which implicitly exercised the validator
+  firing) with `TestServerNoTokenRequired`. The `validate:"required"` tags on
+  `ServerConfig.TLSCert`/`TLSKey` are unchanged, but no test now explicitly
+  asserts `LoadServer` errors when they are empty. Add a `TestServerTLSRequired`
+  (e.g. `LoadServer(map[string]any{"tls_cert":"","tls_key":""})` → error).
+  _Source: Phase 4a Task 7 independent code review._

@@ -2,7 +2,8 @@ package config
 
 import "testing"
 
-func TestServerDefaultsAndEnvOverride(t *testing.T) {
+func TestServerDefaultListen(t *testing.T) {
+	// No env set: assert the compiled-in default is :7000.
 	c, err := LoadServer(nil)
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
@@ -10,6 +11,9 @@ func TestServerDefaultsAndEnvOverride(t *testing.T) {
 	if c.Listen != ":7000" {
 		t.Fatalf("default listen = %q", c.Listen)
 	}
+}
+
+func TestServerEnvOverrideListen(t *testing.T) {
 	// Prove env-override works on a still-existing field.
 	t.Setenv("BURROW_LISTEN", ":7777")
 	c2, err := LoadServer(nil)
