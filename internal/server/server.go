@@ -14,19 +14,23 @@ import (
 
 // Options configures a Server.
 type Options struct {
-	Listen  string
-	TLSCert string
-	TLSKey  string
-	Token   string
-	Logger  *slog.Logger
+	Listen     string
+	TLSCert    string
+	TLSKey     string
+	Token      string
+	Logger     *slog.Logger
+	PublicBind string
+	PortMin    int
+	PortMax    int
 }
 
-// Server is the burrowd relay control server (Phase 2: control plane only).
+// Server is the burrowd relay control server.
 type Server struct {
-	opts Options
-	log  *slog.Logger
-	reg  *Registry
-	tlsC *tls.Config
+	opts  Options
+	log   *slog.Logger
+	reg   *Registry
+	tlsC  *tls.Config
+	ports *portAllocator
 
 	mu sync.Mutex
 	ln net.Listener
@@ -38,14 +42,25 @@ func New(o Options) (*Server, error) {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
+	if o.PublicBind == "" {
+		o.PublicBind = "0.0.0.0"
+	}
+	if o.PortMin == 0 {
+		o.PortMin = 9000
+	}
+	if o.PortMax == 0 {
+		o.PortMax = 9100
+	}
 	cert, err := tls.LoadX509KeyPair(o.TLSCert, o.TLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("load tls keypair: %w", err)
 	}
-	return &Server{
+	s := &Server{
 		opts: o, log: o.Logger, reg: NewRegistry(),
 		tlsC: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
-	}, nil
+	}
+	s.ports = newPortAllocator(o.PortMin, o.PortMax)
+	return s, nil
 }
 
 // Addr returns the bound listen address ("" until listening).
@@ -112,13 +127,31 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer s.reg.RemoveSession(cs)
 	s.log.Info("client authenticated", "session_id", cs.SessionID, "remote_addr", cs.RemoteAddr)
 
+	defer func() {
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			if tn.Listener != nil {
+				_ = tn.Listener.Close()
+			}
+			s.ports.Release(tn.RemotePort)
+		}
+	}()
+
 	ctrl, err := ysess.AcceptStream()
 	if err != nil {
 		return
 	}
 	cs.SetControl(ctrl)
+	go func() {
+		for {
+			st, e := ysess.AcceptStream()
+			if e != nil {
+				return
+			}
+			go s.handleDataStream(cs, st)
+		}
+	}()
 	go s.heartbeat(ctx, ysess, cs)
-	RunControlLoop(ctrl, s.reg, cs)
+	s.RunControlLoop(ctrl, s.reg, cs)
 	s.log.Info("client disconnected", "session_id", cs.SessionID)
 }
 

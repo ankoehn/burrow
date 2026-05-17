@@ -44,7 +44,7 @@ func HandleHandshake(conn net.Conn, expectedToken, sessionID string) (*ClientSes
 }
 
 // RunControlLoop processes control-stream messages until the stream closes.
-func RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession) {
+func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession) {
 	defer stream.Close()
 	for {
 		var env proto.Envelope
@@ -58,15 +58,27 @@ func RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession)
 				_ = cs.SendControl(proto.MsgError, proto.Error{Message: "bad tunnel_register"})
 				continue
 			}
-			tn := &Tunnel{ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, RemotePort: tr.RemotePort, LocalAddr: tr.LocalAddr}
-			if tn.RemotePort == 0 {
-				tn.RemotePort = 9000 // Phase 2: simple assignment; Phase 3 binds the listener
+			port, perr := s.ports.Allocate(tr.RemotePort)
+			if perr != nil {
+				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: perr.Error()})
+				continue
+			}
+			tn := &Tunnel{ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, RemotePort: port, LocalAddr: tr.LocalAddr, sess: cs}
+			if lerr := s.startPublicListener(tn); lerr != nil {
+				s.ports.Release(port)
+				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: lerr.Error()})
+				continue
 			}
 			reg.AddTunnel(cs, tn)
-			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: tn.RemotePort})
+			s.log.Info("tunnel registered", "tunnel_id", tn.ID, "remote_port", port, "session_id", cs.SessionID)
+			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: port})
 		case proto.MsgTunnelUnregister:
 			var tu proto.TunnelUnregister
 			if err := proto.DecodePayload(env, &tu); err == nil {
+				if tn := reg.Tunnel(cs, tu.TunnelID); tn != nil && tn.Listener != nil {
+					_ = tn.Listener.Close()
+					s.ports.Release(tn.RemotePort)
+				}
 				reg.RemoveTunnel(cs, tu.TunnelID)
 			}
 		case proto.MsgPing:

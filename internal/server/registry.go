@@ -97,6 +97,24 @@ func (r *Registry) Sessions() []*ClientSession {
 	return out
 }
 
+// Tunnel returns the named tunnel for a session, or nil.
+func (r *Registry) Tunnel(cs *ClientSession, id string) *Tunnel {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.Tunnels[id]
+}
+
+// snapshotTunnels returns a copy of a session's tunnels (safe to range after).
+func (r *Registry) snapshotTunnels(cs *ClientSession) []*Tunnel {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	out := make([]*Tunnel, 0, len(cs.Tunnels))
+	for _, t := range cs.Tunnels {
+		out = append(out, t)
+	}
+	return out
+}
+
 // SetControl records the control stream used for serialized server→client writes.
 func (cs *ClientSession) SetControl(w io.Writer) {
 	cs.ctrlMu.Lock()

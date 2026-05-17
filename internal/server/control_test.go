@@ -1,6 +1,8 @@
 package server
 
 import (
+	"io"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -66,9 +68,23 @@ func TestControlLoopRegisterAndPing(t *testing.T) {
 	cs := &ClientSession{SessionID: "s", Tunnels: map[string]*Tunnel{}}
 	reg.AddSession(cs)
 	cs.SetControl(srv)
-	go RunControlLoop(srv, reg, cs)
+	s := &Server{
+		opts:  Options{PublicBind: "127.0.0.1", PortMin: 18000, PortMax: 18099},
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ports: newPortAllocator(18000, 18099),
+	}
+	// Close all tunnel listeners on test cleanup to avoid port conflicts across runs.
+	t.Cleanup(func() {
+		for _, tn := range reg.snapshotTunnels(cs) {
+			if tn.Listener != nil {
+				_ = tn.Listener.Close()
+			}
+			s.ports.Release(tn.RemotePort)
+		}
+	})
+	go s.RunControlLoop(srv, reg, cs)
 
-	_ = proto.WriteMessage(cli, proto.MsgTunnelRegister, proto.TunnelRegister{Name: "web", Type: "tcp", RemotePort: 9000, LocalAddr: "127.0.0.1:3000"})
+	_ = proto.WriteMessage(cli, proto.MsgTunnelRegister, proto.TunnelRegister{Name: "web", Type: "tcp", RemotePort: 18000, LocalAddr: "127.0.0.1:3000"})
 	var env proto.Envelope
 	cli.SetReadDeadline(time.Now().Add(time.Second))
 	_ = proto.ReadFrame(cli, &env)
@@ -77,7 +93,7 @@ func TestControlLoopRegisterAndPing(t *testing.T) {
 	}
 	var rr proto.TunnelRegisterResponse
 	_ = proto.DecodePayload(env, &rr)
-	if !rr.OK || rr.TunnelID == "" || rr.RemotePort != 9000 {
+	if !rr.OK || rr.TunnelID == "" || rr.RemotePort < 18000 || rr.RemotePort > 18099 {
 		t.Fatalf("bad register response: %+v", rr)
 	}
 	if len(cs.Tunnels) != 1 {
