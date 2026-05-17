@@ -3,6 +3,7 @@ module github.com/ankoehn/burrow
 go 1.25.0
 
 require (
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
