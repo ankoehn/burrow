@@ -74,3 +74,21 @@ func TestServerConfigPhase4(t *testing.T) {
 		t.Fatalf("phase4 fields: %+v", c)
 	}
 }
+
+func TestServerHTTPSecureCookiesDefaultAndOverride(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.HTTPSecureCookies {
+		t.Fatalf("default http_secure_cookies must be false, got true")
+	}
+	t.Setenv("BURROW_HTTP_SECURE_COOKIES", "true")
+	c2, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if !c2.HTTPSecureCookies {
+		t.Fatalf("env override BURROW_HTTP_SECURE_COOKIES=true not applied")
+	}
+}

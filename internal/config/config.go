@@ -22,18 +22,19 @@ type TunnelSpec struct {
 
 // ServerConfig configures burrowd.
 type ServerConfig struct {
-	Listen        string `koanf:"listen" validate:"required"`
-	TLSCert       string `koanf:"tls_cert" validate:"required"`
-	TLSKey        string `koanf:"tls_key" validate:"required"`
-	LogLevel      string `koanf:"log_level"`
-	LogFormat     string `koanf:"log_format"`
-	PublicBind    string `koanf:"public_bind"`
-	PortMin       int    `koanf:"port_min" validate:"gte=1,lte=65535"`
-	PortMax       int    `koanf:"port_max" validate:"gte=1,lte=65535,gtefield=PortMin"`
-	DatabasePath  string `koanf:"database_path"`
-	AdminEmail    string `koanf:"admin_email"`
-	AdminPassword string `koanf:"admin_password"`
-	HTTPListen    string `koanf:"http_listen"`
+	Listen            string `koanf:"listen" validate:"required"`
+	TLSCert           string `koanf:"tls_cert" validate:"required"`
+	TLSKey            string `koanf:"tls_key" validate:"required"`
+	LogLevel          string `koanf:"log_level"`
+	LogFormat         string `koanf:"log_format"`
+	PublicBind        string `koanf:"public_bind"`
+	PortMin           int    `koanf:"port_min" validate:"gte=1,lte=65535"`
+	PortMax           int    `koanf:"port_max" validate:"gte=1,lte=65535,gtefield=PortMin"`
+	DatabasePath      string `koanf:"database_path"`
+	AdminEmail        string `koanf:"admin_email"`
+	AdminPassword     string `koanf:"admin_password"`
+	HTTPListen        string `koanf:"http_listen"`
+	HTTPSecureCookies bool   `koanf:"http_secure_cookies"`
 }
 
 // ClientConfig configures burrow.
@@ -65,7 +66,7 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"public_bind": "0.0.0.0", "port_min": 9000, "port_max": 9100,
 		// database_path is resolved relative to the process working directory;
 		// supply an absolute path via BURROW_DATABASE_PATH in production.
-		"database_path": "./burrow.db", "http_listen": ":8080",
+		"database_path": "./burrow.db", "http_listen": ":8080", "http_secure_cookies": false,
 	}, "."), nil)
 	_ = k.Load(envProvider("BURROW_"), nil)
 	if overrides != nil {
