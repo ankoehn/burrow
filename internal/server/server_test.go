@@ -34,6 +34,7 @@ func TestServerEndToEndAuthRegister(t *testing.T) {
 	srv, err := New(Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
 		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret",
+		PublicBind: "127.0.0.1", // loopback-only: avoids Windows Firewall prompts in tests
 	})
 	if err != nil {
 		t.Fatal(err)

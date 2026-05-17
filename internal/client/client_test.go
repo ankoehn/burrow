@@ -26,6 +26,7 @@ func startServer(t *testing.T, dir, token string) (*server.Server, context.Cance
 	s, err := server.New(server.Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
 		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: token,
+		PublicBind: "127.0.0.1", // loopback-only: avoids Windows Firewall prompts in tests
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +83,7 @@ func TestClientReconnectsAfterServerRestart(t *testing.T) {
 	c.resetRegisteredForTest()
 	// restart on the SAME addr
 	s2, err := server.New(server.Options{Listen: addr, TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret"})
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret", PublicBind: "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
