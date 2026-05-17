@@ -1,0 +1,20 @@
+services:
+  burrow:
+    image: ghcr.io/ankoehn/burrow:latest
+    ports:
+      - "8080:8080"   # dashboard
+      - "7000:7000"   # control channel
+      - "9000-9100:9000-9100"  # tunneled ports
+    environment:
+      BURROW_ADMIN_EMAIL: admin@example.com
+      BURROW_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      BURROW_DATABASE_PATH: /data/burrow.db
+    volumes:
+      - ./data:/data
+    secrets:
+      - admin_password
+    restart: unless-stopped
+
+secrets:
+  admin_password:
+    file: ./admin_password.txt
