@@ -114,6 +114,7 @@ func (c *Client) connectOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer ctrl.Close()
 	for _, tn := range c.opts.Tunnels {
 		if err := proto.WriteMessage(ctrl, proto.MsgTunnelRegister, proto.TunnelRegister{
 			Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort, LocalAddr: tn.LocalAddr,

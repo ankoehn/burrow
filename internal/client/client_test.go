@@ -56,6 +56,7 @@ func TestClientConnectsAndRegisters(t *testing.T) {
 }
 
 func TestClientReconnectsAfterServerRestart(t *testing.T) {
+	defer testutil.AssertNoGoroutineLeak(t)()
 	dir := t.TempDir()
 	s, cancel := startServer(t, dir, "secret")
 	caPEM, _ := os.ReadFile(filepath.Join(dir, "dev-ca.pem"))
