@@ -115,6 +115,17 @@ func (r *Registry) snapshotTunnels(cs *ClientSession) []*Tunnel {
 	return out
 }
 
+// snapshotTunnelsForTest exposes a session's tunnels for white-box tests.
+func (cs *ClientSession) snapshotTunnelsForTest() []*Tunnel {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	out := make([]*Tunnel, 0, len(cs.Tunnels))
+	for _, t := range cs.Tunnels {
+		out = append(out, t)
+	}
+	return out
+}
+
 // SetControl records the control stream used for serialized server→client writes.
 func (cs *ClientSession) SetControl(w io.Writer) {
 	cs.ctrlMu.Lock()

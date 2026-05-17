@@ -199,9 +199,30 @@ func TestDataPlaneEndToEnd(t *testing.T) {
 	if _, err := io.ReadFull(vc, resp); err != nil || string(resp) != "echo:HELLO" {
 		t.Fatalf("visitor got %q err=%v", resp, err)
 	}
+
+	// Phase-3 done-criterion: per-tunnel byte counters incremented.
+	var bin, bout uint64
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		bin, bout = 0, 0
+		for _, s := range srv.reg.Sessions() {
+			for _, tn := range s.snapshotTunnelsForTest() {
+				bin += tn.BytesIn.Load()
+				bout += tn.BytesOut.Load()
+			}
+		}
+		if bin > 0 && bout > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if bin == 0 || bout == 0 {
+		t.Fatalf("byte counters not incremented: in=%d out=%d", bin, bout)
+	}
 }
 
 func TestRegisterPortInUseFails(t *testing.T) {
+	defer testutil.AssertNoGoroutineLeak(t)()
 	dir := t.TempDir()
 	_ = devcert.Generate(dir, true)
 	srv, _ := New(Options{
