@@ -83,3 +83,23 @@ func TestNoGoroutineOrMapLeak(t *testing.T) {
 		t.Fatalf("want 0 subscribers after all cancel, got %d", n)
 	}
 }
+
+func TestConcurrentPublishSubscribeCancel(t *testing.T) {
+	b := NewBus()
+	const goroutines = 50
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(3)
+		go func() { defer wg.Done(); b.PublishTunnelsChanged("u1") }()
+		go func() {
+			defer wg.Done()
+			_, cancel := b.Subscribe("u1")
+			cancel()
+		}()
+		go func() { defer wg.Done(); b.PublishTunnelsChanged("u1") }()
+	}
+	wg.Wait()
+	if n := b.subscriberCount("u1"); n != 0 {
+		t.Fatalf("want 0 subscribers after all cancel, got %d", n)
+	}
+}
