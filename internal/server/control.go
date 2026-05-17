@@ -72,6 +72,10 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 				continue
 			}
 			reg.AddTunnel(cs, tn)
+			// Best-effort persist. RunControlLoop is serial (ping/pong/register/
+			// unregister on one goroutine), so any TunnelStore wired here MUST be
+			// fast and non-blocking — a slow store would stall heartbeat handling
+			// for this client. (Task 8 wires local sqlite; offload if ever remote.)
 			if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
 				s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
 			}

@@ -18,6 +18,9 @@ type TokenAuthenticator interface {
 }
 
 // TunnelStore persists tunnel rows (best-effort; never blocks the data path).
+// Implementations MUST be fast and non-blocking: SaveTunnel is called inline on
+// the serial control loop, and MarkTunnelSeen is called at session/tunnel
+// teardown to record the last-observed state (it is NOT a liveness heartbeat).
 type TunnelStore interface {
 	SaveTunnel(ctx context.Context, userID string, t *Tunnel) error
 	MarkTunnelSeen(ctx context.Context, tunnelID string) error
