@@ -30,4 +30,7 @@ func TestOpenAndMigrateIdempotent(t *testing.T) {
 	if fk != 1 {
 		t.Fatalf("foreign_keys must be ON, got %d", fk)
 	}
+	if _, err := d.Exec(`INSERT INTO sessions(id, user_id, expires_at) VALUES('s1','nonexistent',CURRENT_TIMESTAMP)`); err == nil {
+		t.Fatal("FK constraint must reject an orphaned session insert")
+	}
 }

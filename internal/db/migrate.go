@@ -19,7 +19,7 @@ func Migrate(d *sql.DB) error {
 	}
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
-		return err
+		return fmt.Errorf("list embedded migrations: %w", err)
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -42,6 +42,9 @@ func Migrate(d *sql.DB) error {
 			return err
 		}
 		up := upBlock(string(raw))
+		if up == "" {
+			return fmt.Errorf("migration %s: empty up block", name)
+		}
 		tx, err := d.Begin()
 		if err != nil {
 			return err
@@ -55,7 +58,7 @@ func Migrate(d *sql.DB) error {
 			return fmt.Errorf("record %s: %w", name, err)
 		}
 		if err := tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("commit %s: %w", name, err)
 		}
 	}
 	return nil
