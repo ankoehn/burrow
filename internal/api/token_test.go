@@ -12,20 +12,26 @@ import (
 
 type tokUsers struct {
 	authUsers
-	issued  string
-	tokens  []db.ClientToken
-	revoked string
-	revErr  error
+	issued     string
+	issuedUID  string
+	tokens     []db.ClientToken
+	listedUID  string
+	revoked    string
+	revokedUID string
+	revErr     error
 }
 
-func (u *tokUsers) IssueClientToken(_ context.Context, _, name string) (string, error) {
+func (u *tokUsers) IssueClientToken(_ context.Context, uid, name string) (string, error) {
 	u.issued = name
+	u.issuedUID = uid
 	return "bur_PLAINTEXT", nil
 }
-func (u *tokUsers) ListClientTokens(_ context.Context, _ string) ([]db.ClientToken, error) {
+func (u *tokUsers) ListClientTokens(_ context.Context, uid string) ([]db.ClientToken, error) {
+	u.listedUID = uid
 	return u.tokens, nil
 }
-func (u *tokUsers) RevokeClientToken(_ context.Context, id, _ string) error {
+func (u *tokUsers) RevokeClientToken(_ context.Context, id, uid string) error {
+	u.revokedUID = uid
 	if u.revErr != nil {
 		return u.revErr
 	}
@@ -62,6 +68,9 @@ func TestCreateAndListTokens(t *testing.T) {
 	if u.issued != "laptop" {
 		t.Fatalf("issued name = %q", u.issued)
 	}
+	if u.issuedUID != "u1" {
+		t.Fatalf("IssueClientToken must receive authenticated userID, got %q", u.issuedUID)
+	}
 
 	lr, _ := cl.Get(ts.URL + "/api/v1/tokens")
 	lb := readBody(t, lr)
@@ -70,6 +79,9 @@ func TestCreateAndListTokens(t *testing.T) {
 	}
 	if strings.Contains(lb, "SECRETHASH") || strings.Contains(lb, "token_hash") {
 		t.Fatalf("list MUST NOT leak token hash: %s", lb)
+	}
+	if u.listedUID != "u1" {
+		t.Fatalf("ListClientTokens must receive authenticated userID, got %q", u.listedUID)
 	}
 }
 
@@ -86,6 +98,9 @@ func TestRevokeToken(t *testing.T) {
 	if dr.StatusCode != http.StatusNoContent || u.revoked != "t1" {
 		t.Fatalf("revoke status=%d revoked=%q", dr.StatusCode, u.revoked)
 	}
+	if u.revokedUID != "u1" {
+		t.Fatalf("RevokeClientToken must receive authenticated userID, got %q", u.revokedUID)
+	}
 
 	u.revErr = db.ErrNotFound
 	req2, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/tokens/missing", nil)
@@ -93,5 +108,37 @@ func TestRevokeToken(t *testing.T) {
 	dr2.Body.Close()
 	if dr2.StatusCode != http.StatusNotFound {
 		t.Fatalf("revoke unknown want 404, got %d", dr2.StatusCode)
+	}
+}
+
+func TestCreateTokenEmptyName(t *testing.T) {
+	u := &tokUsers{}
+	u.verify = func(_, _ string) (bool, error) { return true, nil }
+	ts := newTestServer(Deps{Users: u, Log: discardLog()})
+	defer ts.Close()
+	cl := loggedInClient(t, &httptestServer{ts})
+	r, err := cl.Post(ts.URL+"/api/v1/tokens", "application/json", strings.NewReader(`{"name":""}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty name want 400, got %d", r.StatusCode)
+	}
+	if u.issued != "" {
+		t.Fatalf("must not issue a token for empty name (issued=%q)", u.issued)
+	}
+}
+
+func TestListTokensEmptyIsJSONArray(t *testing.T) {
+	u := &tokUsers{tokens: nil}
+	u.verify = func(_, _ string) (bool, error) { return true, nil }
+	ts := newTestServer(Deps{Users: u, Log: discardLog()})
+	defer ts.Close()
+	cl := loggedInClient(t, &httptestServer{ts})
+	r, _ := cl.Get(ts.URL + "/api/v1/tokens")
+	b := strings.TrimSpace(readBody(t, r))
+	if r.StatusCode != http.StatusOK || b != "[]" {
+		t.Fatalf("empty token list must be JSON [] (status=%d body=%q)", r.StatusCode, b)
 	}
 }
