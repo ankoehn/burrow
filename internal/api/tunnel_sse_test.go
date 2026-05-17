@@ -77,3 +77,32 @@ func TestSSEReceivesEventThenDisconnects(t *testing.T) {
 		t.Fatalf("SSE handler leaked a subscriber: %d", n)
 	}
 }
+
+func TestEventsStreamNilEventsIs500(t *testing.T) {
+	u := &tokUsers{}
+	u.verify = func(_, _ string) (bool, error) { return true, nil }
+	ts := newTestServer(Deps{Users: u, Log: discardLog()}) // Events nil
+	defer ts.Close()
+	cl := loggedInClient(t, &httptestServer{ts})
+	r, err := cl.Get(ts.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("nil Events want 500, got %d", r.StatusCode)
+	}
+}
+
+func TestListTunnelsNilListerIsEmptyArray(t *testing.T) {
+	u := &tokUsers{}
+	u.verify = func(_, _ string) (bool, error) { return true, nil }
+	ts := newTestServer(Deps{Users: u, Log: discardLog()}) // Tunnels nil
+	defer ts.Close()
+	cl := loggedInClient(t, &httptestServer{ts})
+	r, _ := cl.Get(ts.URL + "/api/v1/tunnels")
+	b := strings.TrimSpace(readBody(t, r))
+	if r.StatusCode != http.StatusOK || b != "[]" {
+		t.Fatalf("nil Tunnels must yield 200 [] (status=%d body=%q)", r.StatusCode, b)
+	}
+}

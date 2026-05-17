@@ -16,6 +16,7 @@ func (d Deps) EventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
@@ -24,6 +25,9 @@ func (d Deps) EventsStream(w http.ResponseWriter, r *http.Request) {
 
 	keepAlive := time.NewTicker(25 * time.Second)
 	defer keepAlive.Stop()
+	// Write errors are intentionally ignored: r.Context().Done() is the
+	// authoritative exit (client disconnect), and a write to a dead conn
+	// returns promptly rather than blocking.
 	for {
 		select {
 		case <-r.Context().Done():
