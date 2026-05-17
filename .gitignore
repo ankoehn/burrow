@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+/tmp/
+
+# Local env / secrets / local DB
+.env
+*.db
+
+# Frontend build output / deps (Phase 4)
+/web/dist/
+/web/node_modules/
+
+# Go
+*.test
+*.out
+__debug_bin*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
