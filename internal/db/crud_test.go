@@ -16,8 +16,9 @@ func testDB(t *testing.T) *DB {
 	if err := Migrate(d); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Close() })
-	return Wrap(d)
+	x := Wrap(d)
+	t.Cleanup(func() { _ = x.Close() })
+	return x
 }
 
 func TestUserCRUDAndCascade(t *testing.T) {

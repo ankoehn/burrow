@@ -20,6 +20,7 @@ func (x *DB) CreateSession(ctx context.Context, s Session) error {
 }
 
 // GetSession returns the session with the given ID, or ErrNotFound.
+// Note: the returned session may be expired; callers must check ExpiresAt.
 func (x *DB) GetSession(ctx context.Context, id string) (Session, error) {
 	var s Session
 	err := x.sqlDB.QueryRowContext(ctx,
