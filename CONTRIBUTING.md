@@ -4,7 +4,7 @@ Thanks for your interest. Burrow is Apache 2.0 and pre-alpha — expect churn.
 
 ## Prerequisites
 
-- Go **1.22+**
+- Go **1.25+** (raised from 1.22 in Phase 4a — required by the pure-Go `modernc.org/sqlite` driver)
 - `git`
 - (optional) `make`; on Windows use [`task`](https://taskfile.dev) instead
 - (optional) `golangci-lint`, `air`, `goreleaser` for lint / hot-reload / release
