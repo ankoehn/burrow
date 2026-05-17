@@ -48,7 +48,7 @@ func (x *DB) DeleteSession(ctx context.Context, id string) error {
 // and returns the number of rows deleted.
 func (x *DB) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	res, err := x.sqlDB.ExecContext(ctx,
-		`DELETE FROM sessions WHERE expires_at <= ?`, time.Now(),
+		`DELETE FROM sessions WHERE expires_at <= ?`, time.Now().UTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired sessions: %w", err)

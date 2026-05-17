@@ -78,12 +78,20 @@ func (x *DB) TouchClientTokenLastUsed(ctx context.Context, id string) error {
 }
 
 // DeleteClientToken removes the token with the given ID, scoped to the owning user.
+// Returns ErrNotFound if no row matched (token does not exist or belongs to another user).
 func (x *DB) DeleteClientToken(ctx context.Context, id, userID string) error {
-	_, err := x.sqlDB.ExecContext(ctx,
+	res, err := x.sqlDB.ExecContext(ctx,
 		`DELETE FROM client_tokens WHERE id=? AND user_id=?`, id, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete client token: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete client token rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("delete client token: %w", ErrNotFound)
 	}
 	return nil
 }

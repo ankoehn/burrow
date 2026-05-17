@@ -57,8 +57,8 @@ func TestSessionExpiryAndTokens(t *testing.T) {
 	ctx := context.Background()
 	x := testDB(t)
 	_ = x.CreateUser(ctx, User{ID: "u1", Email: "a@b.c", PasswordHash: "h", Role: "admin"})
-	_ = x.CreateSession(ctx, Session{ID: "live", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
-	_ = x.CreateSession(ctx, Session{ID: "dead", UserID: "u1", ExpiresAt: time.Now().Add(-time.Hour)})
+	_ = x.CreateSession(ctx, Session{ID: "live", UserID: "u1", ExpiresAt: time.Now().UTC().Add(time.Hour)})
+	_ = x.CreateSession(ctx, Session{ID: "dead", UserID: "u1", ExpiresAt: time.Now().UTC().Add(-time.Hour)})
 	if s, err := x.GetSession(ctx, "live"); err != nil || s.UserID != "u1" {
 		t.Fatalf("GetSession live: %+v %v", s, err)
 	}

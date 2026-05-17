@@ -17,6 +17,9 @@ import (
 // ErrUnauthorized is returned when a client token does not match.
 var ErrUnauthorized = errors.New("store: unauthorized")
 
+// sessionTTL is the lifetime of a browser session.
+const sessionTTL = 7 * 24 * time.Hour
+
 // SaveTunnelArg is the subset of a tunnel the store persists.
 // The server adapter in cmd/server converts *server.Tunnel to this type,
 // keeping store free of any import of internal/server.
@@ -26,6 +29,7 @@ type SaveTunnelArg struct {
 }
 
 // Store is the DB-backed implementation of the server/API dependencies.
+// The caller retains ownership of the underlying *sql.DB and must close it (Store has no Close).
 type Store struct{ q *db.DB }
 
 // New builds a Store over an open, migrated *sql.DB.
@@ -37,6 +41,7 @@ func (s *Store) SeedAdmin(ctx context.Context, email, password string) error {
 	if email == "" || password == "" {
 		return nil
 	}
+	// CountUsers→CreateUser is safe: runs once at startup before serving and SetMaxOpenConns(1) serialises it.
 	n, err := s.q.CountUsers(ctx)
 	if err != nil {
 		return err
@@ -149,7 +154,7 @@ func (s *Store) CreateSession(ctx context.Context, userID, ua, ip string) (id st
 	if err := s.q.CreateSession(ctx, db.Session{
 		ID:        id,
 		UserID:    userID,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(sessionTTL),
 		UserAgent: ua,
 		IP:        ip,
 	}); err != nil {
@@ -169,7 +174,7 @@ func (s *Store) ValidateSession(ctx context.Context, id string) (userID string, 
 	if err != nil {
 		return "", err
 	}
-	if time.Now().After(sess.ExpiresAt) {
+	if time.Now().UTC().After(sess.ExpiresAt) {
 		_ = s.q.DeleteSession(ctx, id)
 		return "", ErrUnauthorized
 	}
