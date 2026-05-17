@@ -64,3 +64,6 @@ func (b *Bus) subscriberCount(userID string) int {
 	defer b.mu.Unlock()
 	return len(b.subs[userID])
 }
+
+// SubscriberCountForTest reports live subscribers for userID (cross-package tests).
+func (b *Bus) SubscriberCountForTest(userID string) int { return b.subscriberCount(userID) }
