@@ -1,13 +1,16 @@
 // Command burrowd is the Burrow relay server.
 //
-// `serve` runs the Phase 2 control server (TLS + yamux auth and tunnel
-// registration); the TCP data plane, HTTP API, and dashboard arrive in
-// MVP Phases 3-5.
+// `serve` runs the control server: it opens/migrates the SQLite database,
+// seeds the first admin from config, authenticates clients against
+// DB-issued tokens, and persists registered tunnels. The HTTP API and
+// dashboard arrive in MVP Phases 4b/4c.
+//
+// `token` is an operator/dev helper that mints a client token for an
+// existing user directly against the database (no HTTP API needed yet).
 package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"os"
 	"os/signal"
@@ -17,15 +20,31 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ankoehn/burrow/internal/config"
+	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
 	"github.com/ankoehn/burrow/internal/logging"
 	"github.com/ankoehn/burrow/internal/server"
+	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/version"
 )
 
 func versionLine() string {
 	return fmt.Sprintf("burrowd %s (commit %s, built %s, %s/%s)",
 		version.Version, version.Commit, version.Date, runtime.GOOS, runtime.GOARCH)
+}
+
+// tunnelStoreAdapter converts the server's *Tunnel to the store's persistence
+// shape, so internal/store stays decoupled from internal/server (E8).
+type tunnelStoreAdapter struct{ s *store.Store }
+
+func (a tunnelStoreAdapter) SaveTunnel(ctx context.Context, userID string, t *server.Tunnel) error {
+	return a.s.SaveTunnel(ctx, userID, &store.SaveTunnelArg{
+		ID: t.ID, Name: t.Name, Type: t.Type, RemotePort: t.RemotePort, LocalAddr: t.LocalAddr,
+	})
+}
+
+func (a tunnelStoreAdapter) MarkTunnelSeen(ctx context.Context, tunnelID string) error {
+	return a.s.MarkTunnelSeen(ctx, tunnelID)
 }
 
 func main() {
@@ -61,19 +80,22 @@ func main() {
 					return err
 				}
 			}
-			// INTERIM (Phase 4a Task 6, updated Task 7): preserves the Phase-2/3 env-token
-			// behavior so the module stays buildable. Config no longer carries AuthToken
-			// (dropped in Task 7); reads BURROW_AUTH_TOKEN directly from env.
-			// Task 8 replaces this with DB-backed store auth.
+			database, err := db.Open(cfg.DatabasePath)
+			if err != nil {
+				return err
+			}
+			defer database.Close()
+			if err := db.Migrate(database); err != nil {
+				return err
+			}
+			st := store.New(database)
+			if err := st.SeedAdmin(cmd.Context(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
+				return err
+			}
 			srv, err := server.New(server.Options{
 				Listen: cfg.Listen, TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey,
-				Auth: server.AuthFunc(func(_ context.Context, tok string) (string, error) {
-					if subtle.ConstantTimeCompare([]byte(tok), []byte(os.Getenv("BURROW_AUTH_TOKEN"))) == 1 {
-						return "env", nil
-					}
-					return "", fmt.Errorf("invalid token")
-				}),
-				Logger: log,
+				PublicBind: cfg.PublicBind, PortMin: cfg.PortMin, PortMax: cfg.PortMax,
+				Auth: st, Tunnels: tunnelStoreAdapter{st}, Logger: log,
 			})
 			if err != nil {
 				return err
@@ -92,6 +114,46 @@ func main() {
 	serveCmd.Flags().String("tls-key", "", "TLS key PEM")
 	serveCmd.Flags().Bool("dev-certs", false, "generate ./certs dev certs if missing")
 	root.AddCommand(serveCmd)
+
+	tokenCmd := &cobra.Command{
+		Use:   "token",
+		Short: "Mint a client token for an existing user (dev/operator helper)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			email, _ := cmd.Flags().GetString("email")
+			name, _ := cmd.Flags().GetString("name")
+			cfg, err := config.LoadServer(nil)
+			if err != nil {
+				return err
+			}
+			database, err := db.Open(cfg.DatabasePath)
+			if err != nil {
+				return err
+			}
+			defer database.Close()
+			if err := db.Migrate(database); err != nil {
+				return err
+			}
+			st := store.New(database)
+			u, err := st.GetUserByEmail(cmd.Context(), email)
+			if err != nil {
+				if err == db.ErrNotFound {
+					return fmt.Errorf("no user with email %q (seed an admin via BURROW_ADMIN_EMAIL/PASSWORD and run `serve` once)", email)
+				}
+				return err
+			}
+			tok, err := st.IssueClientToken(cmd.Context(), u.ID, name)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "issued client token %q for %s:\n", name, email)
+			fmt.Println(tok)
+			return nil
+		},
+	}
+	tokenCmd.Flags().String("email", "", "user email to mint a token for (required)")
+	tokenCmd.Flags().String("name", "cli", "token name/label")
+	_ = tokenCmd.MarkFlagRequired("email")
+	root.AddCommand(tokenCmd)
 
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
