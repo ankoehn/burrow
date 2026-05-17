@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -89,7 +90,7 @@ func main() {
 				return err
 			}
 			st := store.New(database)
-			if err := st.SeedAdmin(cmd.Context(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
+			if err := st.SeedAdmin(context.Background(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
 				return err
 			}
 			srv, err := server.New(server.Options{
@@ -134,18 +135,18 @@ func main() {
 				return err
 			}
 			st := store.New(database)
-			u, err := st.GetUserByEmail(cmd.Context(), email)
+			u, err := st.GetUserByEmail(context.Background(), email)
 			if err != nil {
-				if err == db.ErrNotFound {
+				if errors.Is(err, db.ErrNotFound) {
 					return fmt.Errorf("no user with email %q (seed an admin via BURROW_ADMIN_EMAIL/PASSWORD and run `serve` once)", email)
 				}
 				return err
 			}
-			tok, err := st.IssueClientToken(cmd.Context(), u.ID, name)
+			tok, err := st.IssueClientToken(context.Background(), u.ID, name)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "issued client token %q for %s:\n", name, email)
+			fmt.Fprintf(os.Stderr, "issued token named %s for %s:\n", name, email)
 			fmt.Println(tok)
 			return nil
 		},
