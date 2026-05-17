@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/burrowd ./cmd/server"
+  bin = "./tmp/burrowd"
+  full_bin = "./tmp/burrowd serve"
+  include_ext = ["go"]
+  exclude_dir = ["bin", "dist", "tmp", "web", "docs", ".git"]
+  delay = 1000
+
+[log]
+  time = true

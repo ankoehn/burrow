@@ -1,0 +1,50 @@
+version: "3"
+
+vars:
+  BINDIR: bin
+  VERSION:
+    sh: git describe --tags --always --dirty
+  LDFLAGS: -X github.com/ankoehn/burrow/internal/version.Version={{.VERSION}}
+
+tasks:
+  build:
+    desc: Build burrowd and burrow into ./bin
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BINDIR}}/burrowd ./cmd/server
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BINDIR}}/burrow ./cmd/client
+
+  test:
+    desc: Run tests with race detector and coverage
+    cmds:
+      - go test -race -cover ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run
+
+  dev:
+    desc: Hot-reload the server (requires air)
+    cmds:
+      - air -c .air.toml
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - cmd: rm -rf {{.BINDIR}} dist tmp
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue {{.BINDIR}}, dist, tmp"
+        platforms: [windows]
+
+  release-snapshot:
+    desc: Build a local snapshot release with GoReleaser
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  certs:
+    desc: Generate local dev TLS certs (Phase 2 - script not present yet)
+    cmds:
+      - cmd: ./scripts/dev-certs.sh
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -Command "Write-Error 'scripts/dev-certs.sh arrives in MVP Phase 2'"
+        platforms: [windows]
