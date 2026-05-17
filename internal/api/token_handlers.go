@@ -1,0 +1,68 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/ankoehn/burrow/internal/db"
+)
+
+type tokenResp struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	LastUsed  *time.Time `json:"last_used"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// ListTokens returns the caller's client tokens (never the hash).
+func (d Deps) ListTokens(w http.ResponseWriter, r *http.Request) {
+	ts, err := d.Users.ListClientTokens(r.Context(), userID(r.Context()))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	out := make([]tokenResp, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, tokenResp{ID: t.ID, Name: t.Name, LastUsed: t.LastUsed, CreatedAt: t.CreatedAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type createTokenReq struct {
+	Name string `json:"name"`
+}
+
+// CreateToken mints a new client token and returns the plaintext exactly once.
+func (d Deps) CreateToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var in createTokenReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
+		writeErr(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	pt, err := d.Users.IssueClientToken(r.Context(), userID(r.Context()), in.Name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "issue failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": in.Name, "token": pt})
+}
+
+// RevokeToken deletes one of the caller's tokens.
+func (d Deps) RevokeToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	err := d.Users.RevokeClientToken(r.Context(), id, userID(r.Context()))
+	if errors.Is(err, db.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "token not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "revoke failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
