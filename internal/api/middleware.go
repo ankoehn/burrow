@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -48,7 +49,11 @@ func (d Deps) requestLogger(next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(sw, r)
-		d.Log.Info("http", "method", r.Method, "path", r.URL.Path,
+		lvl := slog.LevelInfo
+		if sw.status >= 500 {
+			lvl = slog.LevelError
+		}
+		d.Log.Log(r.Context(), lvl, "http", "method", r.Method, "path", r.URL.Path,
 			"status", sw.status, "dur", time.Since(start).String())
 	})
 }

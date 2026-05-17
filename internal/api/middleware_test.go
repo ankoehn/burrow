@@ -97,3 +97,15 @@ func TestRequireSessionStoreError(t *testing.T) {
 		t.Fatalf("want 500, got %d", rr.Code)
 	}
 }
+
+func TestRequireSessionEmptyCookieValue(t *testing.T) {
+	d := testDeps(func(string) (string, error) { return "", store.ErrUnauthorized })
+	h := d.RequireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: ""})
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 for present-but-empty cookie, got %d", rr.Code)
+	}
+}

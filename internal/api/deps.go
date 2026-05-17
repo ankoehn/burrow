@@ -11,6 +11,7 @@ import (
 // UserStore is the subset of internal/store the API needs. *store.Store satisfies it.
 type UserStore interface {
 	VerifyUserPassword(ctx context.Context, email, password string) (bool, error)
+	// GetUserByEmail is used by the login handler after VerifyUserPassword (spec F3).
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	GetUserByID(ctx context.Context, id string) (db.User, error)
 	IssueClientToken(ctx context.Context, userID, name string) (string, error)
@@ -56,7 +57,9 @@ type ctxKey int
 
 const userIDKey ctxKey = 0
 
-// userID returns the authenticated user id stored by RequireSession.
+// userID returns the authenticated user id stored by RequireSession, or "" if
+// the context has none (safe default; every authenticated route MUST be guarded
+// by RequireSession — public handlers calling this get "").
 func userID(ctx context.Context) string {
 	v, _ := ctx.Value(userIDKey).(string)
 	return v
