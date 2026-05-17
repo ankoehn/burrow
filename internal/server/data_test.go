@@ -8,10 +8,10 @@ import (
 func TestPendingStreamsResolveAndTimeout(t *testing.T) {
 	p := newPendingStreams()
 	go func() { time.Sleep(20 * time.Millisecond); p.Resolve("a", nil) }()
-	if _, err := p.Await("a", time.Second); err != nil {
+	if _, err := p.Await("a", time.Second, nil); err != nil {
 		t.Fatalf("await a: %v", err)
 	}
-	if _, err := p.Await("missing", 50*time.Millisecond); err == nil {
+	if _, err := p.Await("missing", 50*time.Millisecond, nil); err == nil {
 		t.Fatal("expected timeout for missing id")
 	}
 	if p.Resolve("nobody", nil) {

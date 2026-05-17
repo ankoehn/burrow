@@ -25,8 +25,10 @@ func newPendingStreams() *pendingStreams {
 	return &pendingStreams{waiters: make(map[string]chan *yamux.Stream)}
 }
 
-// Await registers a waiter for id and blocks until Resolve(id,...) or timeout.
-func (p *pendingStreams) Await(id string, timeout time.Duration) (*yamux.Stream, error) {
+// Await registers a waiter for id, runs after() (e.g. send the new_connection
+// notify — done AFTER registration so Resolve can't race ahead of the waiter),
+// then blocks until Resolve(id,...) or timeout.
+func (p *pendingStreams) Await(id string, timeout time.Duration, after func() error) (*yamux.Stream, error) {
 	ch := make(chan *yamux.Stream, 1)
 	p.mu.Lock()
 	p.waiters[id] = ch
@@ -36,6 +38,11 @@ func (p *pendingStreams) Await(id string, timeout time.Duration) (*yamux.Stream,
 		delete(p.waiters, id)
 		p.mu.Unlock()
 	}()
+	if after != nil {
+		if err := after(); err != nil {
+			return nil, err
+		}
+	}
 	select {
 	case s := <-ch:
 		return s, nil
@@ -124,28 +131,16 @@ func (s *Server) startPublicListener(tun *Tunnel) error {
 func (s *Server) bridgeVisitor(tun *Tunnel, visitor net.Conn) {
 	defer visitor.Close()
 	streamID := uuid.NewString()
-	// Open a new yamux data stream to the client.
-	stream, err := tun.sess.Yamux.OpenStream()
+	stream, err := tun.sess.Pending().Await(streamID, 10*time.Second, func() error {
+		return tun.sess.SendControl(proto.MsgNewConnection, proto.NewConnection{
+			TunnelID: tun.ID, StreamID: streamID, SourceIP: visitor.RemoteAddr().String(),
+		})
+	})
 	if err != nil {
-		s.log.Warn("open data stream failed", "tunnel_id", tun.ID, "err", err)
+		s.log.Warn("client did not open stream", "tunnel_id", tun.ID, "err", err)
 		return
 	}
 	defer stream.Close()
-	// Write the StreamHeader so the client knows which tunnel/stream this is.
-	if err := proto.WriteMessage(stream, proto.MsgStreamOpen, proto.StreamHeader{
-		TunnelID: tun.ID, StreamID: streamID,
-	}); err != nil {
-		s.log.Warn("write stream header failed", "tunnel_id", tun.ID, "err", err)
-		return
-	}
-	// Also notify the client via the control channel (for DP7 / Task 7 client).
-	if err := tun.sess.SendControl(proto.MsgNewConnection, proto.NewConnection{
-		TunnelID: tun.ID, StreamID: streamID, SourceIP: visitor.RemoteAddr().String(),
-	}); err != nil {
-		s.log.Warn("notify failed", "tunnel_id", tun.ID, "err", err)
-		// Don't return — the data stream is still open; bridge can proceed
-		// even if the control notify failed (client may still bridge via data stream).
-	}
 	bridge.Pipe(visitor, stream, &tun.BytesIn, &tun.BytesOut)
 }
 

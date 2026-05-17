@@ -154,17 +154,26 @@ func TestDataPlaneEndToEnd(t *testing.T) {
 		t.Fatalf("register: %+v", rr)
 	}
 
-	// client side: accept the data stream the server will ask for, dial local
 	go func() {
 		for {
-			st, e := sess.AcceptStream()
-			if e != nil {
+			var ce proto.Envelope
+			if proto.ReadFrame(ctrl, &ce) != nil {
 				return
 			}
-			go func(st *yamux.Stream) {
+			if ce.Type != proto.MsgNewConnection {
+				continue
+			}
+			var nc proto.NewConnection
+			if proto.DecodePayload(ce, &nc) != nil {
+				continue
+			}
+			go func(nc proto.NewConnection) {
+				st, e := sess.OpenStream()
+				if e != nil {
+					return
+				}
 				defer st.Close()
-				var he proto.Envelope
-				if proto.ReadFrame(st, &he) != nil || he.Type != proto.MsgStreamOpen {
+				if proto.WriteMessage(st, proto.MsgStreamOpen, proto.StreamHeader{StreamID: nc.StreamID, TunnelID: nc.TunnelID}) != nil {
 					return
 				}
 				lc, e := net.Dial("tcp", "127.0.0.1:"+lport)
@@ -172,27 +181,9 @@ func TestDataPlaneEndToEnd(t *testing.T) {
 					return
 				}
 				defer lc.Close()
-				var a, b atomicU64
-				bridge.Pipe(lc, st, &a.v, &b.v)
-			}(st)
-		}
-	}()
-	// also read control stream for new_connection
-	go func() {
-		for {
-			var ce proto.Envelope
-			if proto.ReadFrame(ctrl, &ce) != nil {
-				return
-			}
-			if ce.Type == proto.MsgNewConnection {
-				var nc proto.NewConnection
-				_ = proto.DecodePayload(ce, &nc)
-				st, e := sess.OpenStream()
-				if e != nil {
-					return
-				}
-				_ = proto.WriteMessage(st, proto.MsgStreamOpen, proto.StreamHeader{StreamID: nc.StreamID, TunnelID: nc.TunnelID})
-			}
+				var x, y atomicU64
+				bridge.Pipe(lc, st, &x.v, &y.v)
+			}(nc)
 		}
 	}()
 
