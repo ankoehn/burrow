@@ -256,6 +256,8 @@ func (s *Server) byteTicker(ctx context.Context) {
 				}
 				if len(s.reg.snapshotTunnels(cs)) > 0 {
 					seen[cs.UserID] = struct{}{}
+					// Best-effort invalidate ping; a publish for a mid-teardown
+					// session is harmless (client refetches and sees the update).
 					s.opts.Events.PublishTunnelsChanged(cs.UserID)
 				}
 			}
