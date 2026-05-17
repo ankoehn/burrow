@@ -1,7 +1,7 @@
 package server
 
 import (
-	"crypto/subtle"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -14,10 +14,11 @@ import (
 
 const authReadTimeout = 10 * time.Second
 
-// HandleHandshake reads the auth frame from a raw conn, validates the token in
-// constant time, replies auth_response, and returns a new ClientSession on
-// success. On failure it writes an error/auth_response and returns nil.
-func HandleHandshake(conn net.Conn, expectedToken, sessionID string) (*ClientSession, error) {
+// HandleHandshake reads the auth frame from a raw conn, validates the token via
+// the supplied TokenAuthenticator, replies auth_response, and returns a new
+// ClientSession on success. On failure it writes an error/auth_response and
+// returns nil.
+func HandleHandshake(conn net.Conn, auth TokenAuthenticator, sessionID string) (*ClientSession, error) {
 	_ = conn.SetReadDeadline(time.Now().Add(authReadTimeout))
 	var env proto.Envelope
 	if err := proto.ReadFrame(conn, &env); err != nil {
@@ -32,15 +33,16 @@ func HandleHandshake(conn net.Conn, expectedToken, sessionID string) (*ClientSes
 		_ = proto.WriteMessage(conn, proto.MsgError, proto.Error{Message: "bad auth payload"})
 		return nil, err
 	}
-	if subtle.ConstantTimeCompare([]byte(ar.Token), []byte(expectedToken)) != 1 {
+	userID, err := auth.Authenticate(context.Background(), ar.Token)
+	if err != nil {
 		_ = proto.WriteMessage(conn, proto.MsgAuthResponse, proto.AuthResponse{OK: false, Error: "invalid token"})
-		return nil, fmt.Errorf("invalid token")
+		return nil, fmt.Errorf("token auth: %w", err)
 	}
 	_ = conn.SetReadDeadline(time.Time{}) // clear deadline
 	if err := proto.WriteMessage(conn, proto.MsgAuthResponse, proto.AuthResponse{OK: true, SessionID: sessionID}); err != nil {
 		return nil, err
 	}
-	return &ClientSession{SessionID: sessionID, RemoteAddr: conn.RemoteAddr().String(), Tunnels: map[string]*Tunnel{}}, nil
+	return &ClientSession{SessionID: sessionID, UserID: userID, RemoteAddr: conn.RemoteAddr().String(), Tunnels: map[string]*Tunnel{}}, nil
 }
 
 // RunControlLoop processes control-stream messages until the stream closes.
@@ -70,6 +72,9 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 				continue
 			}
 			reg.AddTunnel(cs, tn)
+			if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
+				s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
+			}
 			s.log.Info("tunnel registered", "tunnel_id", tn.ID, "remote_port", port, "session_id", cs.SessionID)
 			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: port})
 		case proto.MsgTunnelUnregister:

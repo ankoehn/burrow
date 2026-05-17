@@ -31,6 +31,7 @@ type Tunnel struct {
 // ClientSession is one authenticated client connection.
 type ClientSession struct {
 	SessionID  string
+	UserID     string
 	RemoteAddr string
 	Yamux      *yamux.Session
 	mu         sync.Mutex

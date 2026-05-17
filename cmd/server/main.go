@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"os"
 	"os/signal"
@@ -60,9 +61,17 @@ func main() {
 					return err
 				}
 			}
+			// INTERIM (Phase 4a Task 6): preserves the Phase-2/3 env-token behavior so the
+			// module stays buildable. Task 8 replaces this with DB-backed store auth.
 			srv, err := server.New(server.Options{
 				Listen: cfg.Listen, TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey,
-				Token: cfg.AuthToken, Logger: log,
+				Auth: server.AuthFunc(func(_ context.Context, tok string) (string, error) {
+					if subtle.ConstantTimeCompare([]byte(tok), []byte(cfg.AuthToken)) == 1 {
+						return "env", nil
+					}
+					return "", fmt.Errorf("invalid token")
+				}),
+				Logger: log,
 			})
 			if err != nil {
 				return err

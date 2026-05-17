@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -10,13 +12,30 @@ import (
 	"github.com/ankoehn/burrow/internal/proto"
 )
 
+// fakeAuth is a test TokenAuthenticator. Shared by control_test.go and
+// server_test.go (both package server).
+type fakeAuth struct {
+	uid string
+	err error
+}
+
+func (f fakeAuth) Authenticate(_ context.Context, tok string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if tok == "" {
+		return "", fmt.Errorf("empty token")
+	}
+	return f.uid, nil
+}
+
 func dialPair() (net.Conn, net.Conn) { return net.Pipe() }
 
 func TestHandshakeSuccess(t *testing.T) {
 	cli, srv := dialPair()
 	defer cli.Close()
 	done := make(chan *ClientSession, 1)
-	go func() { cs, _ := HandleHandshake(srv, "good", "sid-1"); done <- cs }()
+	go func() { cs, _ := HandleHandshake(srv, fakeAuth{uid: "u1"}, "sid-1"); done <- cs }()
 
 	_ = proto.WriteMessage(cli, proto.MsgAuthRequest, proto.AuthRequest{ProtocolVersion: 1, Token: "good"})
 	var env proto.Envelope
@@ -29,7 +48,7 @@ func TestHandshakeSuccess(t *testing.T) {
 	if !ar.OK || ar.SessionID != "sid-1" {
 		t.Fatalf("bad auth response: %+v", ar)
 	}
-	if cs := <-done; cs == nil || cs.SessionID != "sid-1" {
+	if cs := <-done; cs == nil || cs.SessionID != "sid-1" || cs.UserID != "u1" {
 		t.Fatalf("handshake returned %+v", cs)
 	}
 }
@@ -37,7 +56,7 @@ func TestHandshakeSuccess(t *testing.T) {
 func TestHandshakeBadToken(t *testing.T) {
 	cli, srv := dialPair()
 	defer cli.Close()
-	go func() { _, _ = HandleHandshake(srv, "good", "sid") }()
+	go func() { _, _ = HandleHandshake(srv, fakeAuth{err: fmt.Errorf("nope")}, "sid") }()
 	_ = proto.WriteMessage(cli, proto.MsgAuthRequest, proto.AuthRequest{ProtocolVersion: 1, Token: "bad"})
 	var env proto.Envelope
 	cli.SetReadDeadline(time.Now().Add(time.Second))
@@ -52,7 +71,7 @@ func TestHandshakeBadToken(t *testing.T) {
 func TestHandshakeWrongFirstMessage(t *testing.T) {
 	cli, srv := dialPair()
 	defer cli.Close()
-	go func() { _, _ = HandleHandshake(srv, "good", "sid") }()
+	go func() { _, _ = HandleHandshake(srv, fakeAuth{uid: "u1"}, "sid") }()
 	_ = proto.WriteMessage(cli, proto.MsgPing, proto.Ping{})
 	var env proto.Envelope
 	cli.SetReadDeadline(time.Now().Add(time.Second))
@@ -69,7 +88,7 @@ func TestControlLoopRegisterAndPing(t *testing.T) {
 	reg.AddSession(cs)
 	cs.SetControl(srv)
 	s := &Server{
-		opts:  Options{PublicBind: "127.0.0.1", PortMin: 18000, PortMax: 18099},
+		opts:  Options{PublicBind: "127.0.0.1", PortMin: 18000, PortMax: 18099, Tunnels: noopTunnelStore{}},
 		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ports: newPortAllocator(18000, 18099),
 	}

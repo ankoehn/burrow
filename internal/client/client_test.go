@@ -23,9 +23,10 @@ func startServer(t *testing.T, dir, token string) (*server.Server, context.Cance
 	if err := devcert.Generate(dir, true); err != nil {
 		t.Fatal(err)
 	}
+	_ = token // server-side validation is now an authenticator; client still sends --token
 	s, err := server.New(server.Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: token,
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Auth: testAuth(),
 		PublicBind: "127.0.0.1", // loopback-only: avoids Windows Firewall prompts in tests
 	})
 	if err != nil {
@@ -37,6 +38,16 @@ func startServer(t *testing.T, dir, token string) (*server.Server, context.Cance
 		time.Sleep(10 * time.Millisecond)
 	}
 	return s, cancel
+}
+
+// testAuth accepts any non-empty token (clients still send --token secret).
+func testAuth() server.AuthFunc {
+	return func(_ context.Context, tok string) (string, error) {
+		if tok == "" {
+			return "", fmt.Errorf("empty token")
+		}
+		return "u1", nil
+	}
 }
 
 func TestClientConnectsAndRegisters(t *testing.T) {
@@ -83,7 +94,7 @@ func TestClientReconnectsAfterServerRestart(t *testing.T) {
 	c.resetRegisteredForTest()
 	// restart on the SAME addr
 	s2, err := server.New(server.Options{Listen: addr, TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret", PublicBind: "127.0.0.1"})
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Auth: testAuth(), PublicBind: "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}

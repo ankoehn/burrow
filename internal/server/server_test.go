@@ -33,7 +33,7 @@ func TestServerEndToEndAuthRegister(t *testing.T) {
 	}
 	srv, err := New(Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret",
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Auth: fakeAuth{uid: "u1"},
 		PublicBind: "127.0.0.1", // loopback-only: avoids Windows Firewall prompts in tests
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestDataPlaneEndToEnd(t *testing.T) {
 	}
 	srv, err := New(Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret",
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Auth: fakeAuth{uid: "u1"},
 		PublicBind: "127.0.0.1", PortMin: 19000, PortMax: 19050,
 	})
 	if err != nil {
@@ -228,7 +228,7 @@ func TestRegisterPortInUseFails(t *testing.T) {
 	_ = devcert.Generate(dir, true)
 	srv, _ := New(Options{
 		Listen: "127.0.0.1:0", TLSCert: filepath.Join(dir, "dev-server.pem"),
-		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Token: "secret",
+		TLSKey: filepath.Join(dir, "dev-server-key.pem"), Auth: fakeAuth{uid: "u1"},
 		PublicBind: "127.0.0.1", PortMin: 19060, PortMax: 19060,
 	})
 	ctx, cancel := context.WithCancel(context.Background())

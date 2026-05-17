@@ -12,12 +12,38 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
+// TokenAuthenticator validates a client's plaintext token, returning its user id.
+type TokenAuthenticator interface {
+	Authenticate(ctx context.Context, token string) (userID string, err error)
+}
+
+// TunnelStore persists tunnel rows (best-effort; never blocks the data path).
+type TunnelStore interface {
+	SaveTunnel(ctx context.Context, userID string, t *Tunnel) error
+	MarkTunnelSeen(ctx context.Context, tunnelID string) error
+}
+
+// AuthFunc adapts a function to TokenAuthenticator.
+type AuthFunc func(ctx context.Context, token string) (string, error)
+
+// Authenticate implements TokenAuthenticator.
+func (f AuthFunc) Authenticate(ctx context.Context, token string) (string, error) {
+	return f(ctx, token)
+}
+
+// noopTunnelStore is the default TunnelStore: it persists nothing.
+type noopTunnelStore struct{}
+
+func (noopTunnelStore) SaveTunnel(context.Context, string, *Tunnel) error { return nil }
+func (noopTunnelStore) MarkTunnelSeen(context.Context, string) error      { return nil }
+
 // Options configures a Server.
 type Options struct {
 	Listen     string
 	TLSCert    string
 	TLSKey     string
-	Token      string
+	Auth       TokenAuthenticator
+	Tunnels    TunnelStore
 	Logger     *slog.Logger
 	PublicBind string
 	PortMin    int
@@ -39,6 +65,12 @@ type Server struct {
 
 // New validates options and loads the TLS keypair.
 func New(o Options) (*Server, error) {
+	if o.Auth == nil {
+		return nil, fmt.Errorf("server: Auth (TokenAuthenticator) is required")
+	}
+	if o.Tunnels == nil {
+		o.Tunnels = noopTunnelStore{}
+	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
@@ -111,7 +143,7 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	sid := uuid.NewString()
-	cs, err := HandleHandshake(conn, s.opts.Token, sid)
+	cs, err := HandleHandshake(conn, s.opts.Auth, sid)
 	if err != nil {
 		s.log.Warn("handshake failed", "remote_addr", conn.RemoteAddr().String(), "err", err)
 		return
@@ -133,6 +165,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 				_ = tn.Listener.Close()
 			}
 			s.ports.Release(tn.RemotePort)
+			_ = s.opts.Tunnels.MarkTunnelSeen(context.Background(), tn.ID)
 		}
 	}()
 
