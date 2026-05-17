@@ -3,11 +3,13 @@ package client
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,6 +161,68 @@ func TestClientBridgesDataEndToEnd(t *testing.T) {
 	got := make([]byte, 7)
 	if _, err := io.ReadFull(vc, got); err != nil || string(got) != "R:PINGS" {
 		t.Fatalf("got %q err=%v", got, err)
+	}
+}
+
+func TestConcurrentVisitors(t *testing.T) {
+	defer testutil.AssertNoGoroutineLeak(t)()
+	ls, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ls.Close()
+	go func() {
+		for {
+			c, e := ls.Accept()
+			if e != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b := make([]byte, 4)
+				if _, e := io.ReadFull(c, b); e == nil {
+					_, _ = c.Write(b)
+				}
+			}(c)
+		}
+	}()
+	_, lport, _ := net.SplitHostPort(ls.Addr().String())
+	dir := t.TempDir()
+	s, cancel := startServer(t, dir, "secret")
+	defer func() { cancel(); s.Wait() }()
+	caPEM, _ := os.ReadFile(filepath.Join(dir, "dev-ca.pem"))
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(caPEM)
+	cl := New(Options{Server: s.Addr(), Token: "secret", RootCAs: pool, ServerName: "localhost",
+		Tunnels: []TunnelSpec{{Type: "tcp", RemotePort: 0, LocalAddr: "127.0.0.1:" + lport}}})
+	ctx, c2 := context.WithCancel(context.Background())
+	defer c2()
+	go func() { _ = cl.Run(ctx) }()
+	if !waitTrue(cl.Registered, 3*time.Second) {
+		t.Fatal("register failed")
+	}
+	port := itoa(cl.lastRemotePortForTest())
+	var wg sync.WaitGroup
+	errc := make(chan error, 50)
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			vc, e := net.DialTimeout("tcp", "127.0.0.1:"+port, 3*time.Second)
+			if e != nil {
+				errc <- e
+				return
+			}
+			defer vc.Close()
+			_, _ = vc.Write([]byte("abcd"))
+			vc.SetReadDeadline(time.Now().Add(3 * time.Second))
+			b := make([]byte, 4)
+			if _, e := io.ReadFull(vc, b); e != nil || string(b) != "abcd" {
+				errc <- fmt.Errorf("got %q err=%v", b, e)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errc)
+	for e := range errc {
+		t.Fatalf("concurrent visitor failed: %v", e)
 	}
 }
 
