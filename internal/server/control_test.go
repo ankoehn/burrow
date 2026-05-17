@@ -65,6 +65,7 @@ func TestControlLoopRegisterAndPing(t *testing.T) {
 	reg := NewRegistry()
 	cs := &ClientSession{SessionID: "s", Tunnels: map[string]*Tunnel{}}
 	reg.AddSession(cs)
+	cs.SetControl(srv)
 	go RunControlLoop(srv, reg, cs)
 
 	_ = proto.WriteMessage(cli, proto.MsgTunnelRegister, proto.TunnelRegister{Name: "web", Type: "tcp", RemotePort: 9000, LocalAddr: "127.0.0.1:3000"})

@@ -116,6 +116,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	if err != nil {
 		return
 	}
+	cs.SetControl(ctrl)
 	go s.heartbeat(ctx, ysess, cs)
 	RunControlLoop(ctrl, s.reg, cs)
 	s.log.Info("client disconnected", "session_id", cs.SessionID)

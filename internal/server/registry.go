@@ -1,18 +1,31 @@
 package server
 
 import (
+	"io"
+	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hashicorp/yamux"
+
+	"github.com/ankoehn/burrow/internal/proto"
 )
 
-// Tunnel is a registered (Phase 2: bookkeeping only) tunnel.
+// Tunnel is a registered tunnel.
 type Tunnel struct {
 	ID         string
 	Name       string
 	Type       string
 	RemotePort int
 	LocalAddr  string
+
+	// Listener is the public port listener (Phase 3); nil until started.
+	Listener net.Listener
+	// BytesIn counts visitor→local bytes; BytesOut counts local→visitor.
+	BytesIn  atomic.Uint64
+	BytesOut atomic.Uint64
+	// sess is the owning session (for control-channel notifies).
+	sess *ClientSession
 }
 
 // ClientSession is one authenticated client connection.
@@ -22,6 +35,10 @@ type ClientSession struct {
 	Yamux      *yamux.Session
 	mu         sync.Mutex
 	Tunnels    map[string]*Tunnel
+
+	pending *pendingStreams
+	ctrlMu  sync.Mutex
+	ctrl    io.Writer
 }
 
 // Registry tracks live sessions and their tunnels (in-memory, mutex-guarded).
@@ -78,4 +95,32 @@ func (r *Registry) Sessions() []*ClientSession {
 		out = append(out, s)
 	}
 	return out
+}
+
+// SetControl records the control stream used for serialized server→client writes.
+func (cs *ClientSession) SetControl(w io.Writer) {
+	cs.ctrlMu.Lock()
+	cs.ctrl = w
+	cs.ctrlMu.Unlock()
+}
+
+// SendControl writes one control message to the client, serialized against all
+// other senders (control-loop replies and visitor notifies).
+func (cs *ClientSession) SendControl(typ proto.MessageType, payload any) error {
+	cs.ctrlMu.Lock()
+	defer cs.ctrlMu.Unlock()
+	if cs.ctrl == nil {
+		return io.ErrClosedPipe
+	}
+	return proto.WriteMessage(cs.ctrl, typ, payload)
+}
+
+// Pending returns the session's pending-stream registry (lazily created).
+func (cs *ClientSession) Pending() *pendingStreams {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.pending == nil {
+		cs.pending = newPendingStreams()
+	}
+	return cs.pending
 }

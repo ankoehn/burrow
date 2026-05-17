@@ -55,7 +55,7 @@ func RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession)
 		case proto.MsgTunnelRegister:
 			var tr proto.TunnelRegister
 			if err := proto.DecodePayload(env, &tr); err != nil {
-				_ = proto.WriteMessage(stream, proto.MsgError, proto.Error{Message: "bad tunnel_register"})
+				_ = cs.SendControl(proto.MsgError, proto.Error{Message: "bad tunnel_register"})
 				continue
 			}
 			tn := &Tunnel{ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, RemotePort: tr.RemotePort, LocalAddr: tr.LocalAddr}
@@ -63,7 +63,7 @@ func RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession)
 				tn.RemotePort = 9000 // Phase 2: simple assignment; Phase 3 binds the listener
 			}
 			reg.AddTunnel(cs, tn)
-			_ = proto.WriteMessage(stream, proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: tn.RemotePort})
+			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: tn.RemotePort})
 		case proto.MsgTunnelUnregister:
 			var tu proto.TunnelUnregister
 			if err := proto.DecodePayload(env, &tu); err == nil {
@@ -72,11 +72,11 @@ func RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *ClientSession)
 		case proto.MsgPing:
 			var p proto.Ping
 			_ = proto.DecodePayload(env, &p)
-			_ = proto.WriteMessage(stream, proto.MsgPong, proto.Pong{Nonce: p.Nonce})
+			_ = cs.SendControl(proto.MsgPong, proto.Pong{Nonce: p.Nonce})
 		case proto.MsgPong:
 			// handled by heartbeat monitor (Task 9); ignore here
 		default:
-			_ = proto.WriteMessage(stream, proto.MsgError, proto.Error{Message: "unexpected: " + string(env.Type)})
+			_ = cs.SendControl(proto.MsgError, proto.Error{Message: "unexpected: " + string(env.Type)})
 		}
 	}
 }
