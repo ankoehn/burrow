@@ -31,3 +31,12 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   asserts `LoadServer` errors when they are empty. Add a `TestServerTLSRequired`
   (e.g. `LoadServer(map[string]any{"tls_cert":"","tls_key":""})` → error).
   _Source: Phase 4a Task 7 independent code review._
+
+## HTTP API security (Phase 4b)
+
+- **Session row IP hardening.** `api.Login` stores `r.Request.RemoteAddr` (host:port,
+  and post-`middleware.RealIP` it is the X-Forwarded-For value, spoofable on a
+  direct-internet deployment) into `sessions.ip`. For MVP single-admin this is
+  informational only. Hardening: strip the port via `net.SplitHostPort`, and only
+  trust forwarded headers behind a configured trusted proxy. Document the proxy-trust
+  assumption. _Source: Phase 4b Task 4 independent code review._

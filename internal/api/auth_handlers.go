@@ -12,6 +12,7 @@ type loginReq struct {
 
 // Login verifies credentials, creates a session, and sets the cookie.
 func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var in loginReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Email == "" {
 		writeErr(w, http.StatusBadRequest, "invalid request body")

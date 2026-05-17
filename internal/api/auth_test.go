@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/store"
 )
 
 type authUsers struct {
@@ -32,7 +35,7 @@ func (a *authUsers) ValidateSession(_ context.Context, id string) (string, error
 	if id == "sid-1" {
 		return "u1", nil
 	}
-	return "", nil
+	return "", store.ErrUnauthorized
 }
 
 func newTestServer(d Deps) *httptest.Server { return httptest.NewServer(NewRouter(d)) }
@@ -96,5 +99,39 @@ func TestMeAndLogout(t *testing.T) {
 	lo.Body.Close()
 	if lo.StatusCode != http.StatusNoContent || au.deleted != "sid-1" {
 		t.Fatalf("logout status=%d deleted=%q", lo.StatusCode, au.deleted)
+	}
+}
+
+func TestLoginMalformedJSON(t *testing.T) {
+	au := &authUsers{verify: func(_, _ string) (bool, error) { return true, nil }}
+	ts := newTestServer(Deps{Users: au, Log: discardLog()})
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/api/v1/auth/login", "application/json",
+		strings.NewReader(`{bad json`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed JSON want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestLoginInfraErrorIs500(t *testing.T) {
+	au := &authUsers{verify: func(_, _ string) (bool, error) { return false, errors.New("db down") }}
+	ts := newTestServer(Deps{Users: au, Log: discardLog()})
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/api/v1/auth/login", "application/json",
+		strings.NewReader(`{"email":"a@x","password":"pw"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("infra error want 500, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "db down") {
+		t.Fatalf("internal error detail leaked to client: %s", body)
 	}
 }
