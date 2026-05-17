@@ -1,0 +1,90 @@
+package server
+
+import (
+	"net"
+	"testing"
+	"time"
+
+	"github.com/ankoehn/burrow/internal/proto"
+)
+
+func dialPair() (net.Conn, net.Conn) { return net.Pipe() }
+
+func TestHandshakeSuccess(t *testing.T) {
+	cli, srv := dialPair()
+	defer cli.Close()
+	done := make(chan *ClientSession, 1)
+	go func() { cs, _ := HandleHandshake(srv, "good", "sid-1"); done <- cs }()
+
+	_ = proto.WriteMessage(cli, proto.MsgAuthRequest, proto.AuthRequest{ProtocolVersion: 1, Token: "good"})
+	var env proto.Envelope
+	cli.SetReadDeadline(time.Now().Add(time.Second))
+	if err := proto.ReadFrame(cli, &env); err != nil || env.Type != proto.MsgAuthResponse {
+		t.Fatalf("want auth_response, got %v err=%v", env.Type, err)
+	}
+	var ar proto.AuthResponse
+	_ = proto.DecodePayload(env, &ar)
+	if !ar.OK || ar.SessionID != "sid-1" {
+		t.Fatalf("bad auth response: %+v", ar)
+	}
+	if cs := <-done; cs == nil || cs.SessionID != "sid-1" {
+		t.Fatalf("handshake returned %+v", cs)
+	}
+}
+
+func TestHandshakeBadToken(t *testing.T) {
+	cli, srv := dialPair()
+	defer cli.Close()
+	go func() { _, _ = HandleHandshake(srv, "good", "sid") }()
+	_ = proto.WriteMessage(cli, proto.MsgAuthRequest, proto.AuthRequest{ProtocolVersion: 1, Token: "bad"})
+	var env proto.Envelope
+	cli.SetReadDeadline(time.Now().Add(time.Second))
+	_ = proto.ReadFrame(cli, &env)
+	var ar proto.AuthResponse
+	_ = proto.DecodePayload(env, &ar)
+	if ar.OK {
+		t.Fatal("bad token must be rejected")
+	}
+}
+
+func TestHandshakeWrongFirstMessage(t *testing.T) {
+	cli, srv := dialPair()
+	defer cli.Close()
+	go func() { _, _ = HandleHandshake(srv, "good", "sid") }()
+	_ = proto.WriteMessage(cli, proto.MsgPing, proto.Ping{})
+	var env proto.Envelope
+	cli.SetReadDeadline(time.Now().Add(time.Second))
+	if err := proto.ReadFrame(cli, &env); err != nil || env.Type != proto.MsgError {
+		t.Fatalf("want error message, got %v err=%v", env.Type, err)
+	}
+}
+
+func TestControlLoopRegisterAndPing(t *testing.T) {
+	cli, srv := dialPair()
+	defer cli.Close()
+	reg := NewRegistry()
+	cs := &ClientSession{SessionID: "s", Tunnels: map[string]*Tunnel{}}
+	reg.AddSession(cs)
+	go RunControlLoop(srv, reg, cs)
+
+	_ = proto.WriteMessage(cli, proto.MsgTunnelRegister, proto.TunnelRegister{Name: "web", Type: "tcp", RemotePort: 9000, LocalAddr: "127.0.0.1:3000"})
+	var env proto.Envelope
+	cli.SetReadDeadline(time.Now().Add(time.Second))
+	_ = proto.ReadFrame(cli, &env)
+	if env.Type != proto.MsgTunnelRegisterResp {
+		t.Fatalf("want register response, got %v", env.Type)
+	}
+	var rr proto.TunnelRegisterResponse
+	_ = proto.DecodePayload(env, &rr)
+	if !rr.OK || rr.TunnelID == "" || rr.RemotePort != 9000 {
+		t.Fatalf("bad register response: %+v", rr)
+	}
+	if len(cs.Tunnels) != 1 {
+		t.Fatalf("tunnel not recorded")
+	}
+	_ = proto.WriteMessage(cli, proto.MsgPing, proto.Ping{Nonce: "n1"})
+	_ = proto.ReadFrame(cli, &env)
+	if env.Type != proto.MsgPong {
+		t.Fatalf("want pong, got %v", env.Type)
+	}
+}
