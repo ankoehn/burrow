@@ -88,7 +88,7 @@ func TestControlLoopRegisterAndPing(t *testing.T) {
 	reg.AddSession(cs)
 	cs.SetControl(srv)
 	s := &Server{
-		opts:  Options{PublicBind: "127.0.0.1", PortMin: 18000, PortMax: 18099, Tunnels: noopTunnelStore{}},
+		opts:  Options{PublicBind: "127.0.0.1", PortMin: 18000, PortMax: 18099, Tunnels: noopTunnelStore{}, Events: noopEventPublisher{}},
 		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ports: newPortAllocator(18000, 18099),
 	}

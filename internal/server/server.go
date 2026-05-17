@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/yamux"
@@ -40,6 +41,28 @@ type noopTunnelStore struct{}
 func (noopTunnelStore) SaveTunnel(context.Context, string, *Tunnel) error { return nil }
 func (noopTunnelStore) MarkTunnelSeen(context.Context, string) error      { return nil }
 
+// EventPublisher receives "this user's tunnels changed" notifications
+// (best-effort, must never block the control loop). *events.Bus satisfies it.
+type EventPublisher interface {
+	PublishTunnelsChanged(userID string)
+}
+
+type noopEventPublisher struct{}
+
+func (noopEventPublisher) PublishTunnelsChanged(string) {}
+
+// TunnelView is a read-only snapshot of a live tunnel for the HTTP API.
+type TunnelView struct {
+	ID         string
+	Name       string
+	Type       string
+	RemotePort int
+	LocalAddr  string
+	BytesIn    uint64
+	BytesOut   uint64
+	Connected  bool
+}
+
 // Options configures a Server.
 type Options struct {
 	Listen     string
@@ -47,6 +70,7 @@ type Options struct {
 	TLSKey     string
 	Auth       TokenAuthenticator
 	Tunnels    TunnelStore
+	Events     EventPublisher
 	Logger     *slog.Logger
 	PublicBind string
 	PortMin    int
@@ -73,6 +97,9 @@ func New(o Options) (*Server, error) {
 	}
 	if o.Tunnels == nil {
 		o.Tunnels = noopTunnelStore{}
+	}
+	if o.Events == nil {
+		o.Events = noopEventPublisher{}
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
@@ -123,6 +150,10 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.log.Info("control server listening", "addr", ln.Addr().String())
 
 	go func() { <-ctx.Done(); _ = ln.Close() }()
+
+	s.wg.Add(1)
+	go s.byteTicker(ctx)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -170,6 +201,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.ports.Release(tn.RemotePort)
 			_ = s.opts.Tunnels.MarkTunnelSeen(context.Background(), tn.ID)
 		}
+		if cs.UserID != "" {
+			s.opts.Events.PublishTunnelsChanged(cs.UserID)
+		}
 	}()
 
 	ctrl, err := ysess.AcceptStream()
@@ -198,4 +232,51 @@ func (s *Server) heartbeat(ctx context.Context, y *yamux.Session, _ *ClientSessi
 		_ = y.Close()
 	case <-y.CloseChan():
 	}
+}
+
+// byteTicker publishes a per-user "tunnels changed" ping ~1/s while any of
+// that user's tunnels are live, so dashboards refresh byte counters. It is
+// WaitGroup-tracked and exits on ctx cancellation.
+func (s *Server) byteTicker(ctx context.Context) {
+	defer s.wg.Done()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			seen := map[string]struct{}{}
+			for _, cs := range s.reg.Sessions() {
+				if cs.UserID == "" {
+					continue
+				}
+				if _, dup := seen[cs.UserID]; dup {
+					continue
+				}
+				if len(s.reg.snapshotTunnels(cs)) > 0 {
+					seen[cs.UserID] = struct{}{}
+					s.opts.Events.PublishTunnelsChanged(cs.UserID)
+				}
+			}
+		}
+	}
+}
+
+// ListUserTunnels returns a snapshot of the live tunnels owned by userID.
+func (s *Server) ListUserTunnels(userID string) []TunnelView {
+	var out []TunnelView
+	for _, cs := range s.reg.Sessions() {
+		if cs.UserID != userID {
+			continue
+		}
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			out = append(out, TunnelView{
+				ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
+				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
+				Connected: true,
+			})
+		}
+	}
+	return out
 }

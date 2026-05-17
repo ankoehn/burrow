@@ -79,6 +79,7 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 			if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
 				s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
 			}
+			s.opts.Events.PublishTunnelsChanged(cs.UserID)
 			s.log.Info("tunnel registered", "tunnel_id", tn.ID, "remote_port", port, "session_id", cs.SessionID)
 			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: port})
 		case proto.MsgTunnelUnregister:
