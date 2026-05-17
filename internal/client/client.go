@@ -6,8 +6,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"log/slog"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +19,9 @@ import (
 	"github.com/ankoehn/burrow/internal/proto"
 	"github.com/ankoehn/burrow/internal/version"
 )
+
+// atomicCounter wraps atomic.Uint64 so callers can pass &atomicCounter.v as *atomic.Uint64.
+type atomicCounter struct{ v atomic.Uint64 }
 
 // TunnelSpec is one tunnel to register.
 type TunnelSpec struct {
@@ -43,6 +48,10 @@ type Client struct {
 	log        *slog.Logger
 	bo         *backoff.Backoff
 	registered atomic.Bool
+
+	mu             sync.Mutex
+	tunnelLocal    map[string]string // tunnelID → localAddr
+	lastRemotePort int
 }
 
 // New builds a Client.
@@ -50,7 +59,19 @@ func New(o Options) *Client {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	return &Client{opts: o, log: o.Logger, bo: backoff.New(500*time.Millisecond, 30*time.Second)}
+	return &Client{
+		opts:        o,
+		log:         o.Logger,
+		bo:          backoff.New(500*time.Millisecond, 30*time.Second),
+		tunnelLocal: map[string]string{},
+	}
+}
+
+// lastRemotePortForTest returns the remote port from the last successful registration (test helper).
+func (c *Client) lastRemotePortForTest() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastRemotePort
 }
 
 // Registered reports whether at least one tunnel is currently registered.
@@ -129,16 +150,23 @@ func (c *Client) connectOnce(ctx context.Context) error {
 			return fmt.Errorf("register failed: %s", rr.Error)
 		}
 		c.log.Info("tunnel registered", "tunnel_id", rr.TunnelID, "remote_port", rr.RemotePort)
+		c.mu.Lock()
+		c.tunnelLocal[rr.TunnelID] = tn.LocalAddr
+		c.lastRemotePort = rr.RemotePort
+		c.mu.Unlock()
 	}
 	c.registered.Store(true)
 
 	go c.pingLoop(ctx, ctrl)
-	// Block until the session dies (server gone) or ctx cancelled.
+	readErr := make(chan error, 1)
+	go func() { readErr <- c.controlReadLoop(ysess, ctrl) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-ysess.CloseChan():
 		return fmt.Errorf("session closed")
+	case err := <-readErr:
+		return err
 	}
 }
 
@@ -152,6 +180,34 @@ func (c *Client) pingLoop(ctx context.Context, ctrl *yamux.Stream) {
 		case <-t.C:
 			if err := proto.WriteMessage(ctrl, proto.MsgPing, proto.Ping{Nonce: "hb"}); err != nil {
 				return
+			}
+		}
+	}
+}
+
+func (c *Client) controlReadLoop(sess *yamux.Session, ctrl io.Reader) error {
+	for {
+		var env proto.Envelope
+		if err := proto.ReadFrame(ctrl, &env); err != nil {
+			return err
+		}
+		switch env.Type {
+		case proto.MsgNewConnection:
+			var nc proto.NewConnection
+			if proto.DecodePayload(env, &nc) != nil {
+				continue
+			}
+			c.mu.Lock()
+			local := c.tunnelLocal[nc.TunnelID]
+			c.mu.Unlock()
+			if local == "" {
+				continue
+			}
+			go c.handleNewConnection(sess, nc, local)
+		case proto.MsgPong, proto.MsgError:
+			// pong: heartbeat ack (deferred handling); error: log
+			if env.Type == proto.MsgError {
+				c.log.Warn("server error message")
 			}
 		}
 	}

@@ -3,8 +3,11 @@ package client
 import (
 	"context"
 	"crypto/x509"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -99,3 +102,64 @@ func waitTrue(f func() bool, d time.Duration) bool {
 	}
 	return false
 }
+
+func TestClientBridgesDataEndToEnd(t *testing.T) {
+	defer testutil.AssertNoGoroutineLeak(t)()
+	// local echo service
+	ls, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ls.Close()
+	go func() {
+		for {
+			c, e := ls.Accept()
+			if e != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b := make([]byte, 5)
+				if _, e := io.ReadFull(c, b); e == nil {
+					_, _ = c.Write(append([]byte("R:"), b...))
+				}
+			}(c)
+		}
+	}()
+	_, lport, _ := net.SplitHostPort(ls.Addr().String())
+
+	dir := t.TempDir()
+	s, cancel := startServer(t, dir, "secret") // Phase-2 helper; New() now defaults PublicBind/ports
+	defer func() { cancel(); s.Wait() }()
+	caPEM, _ := os.ReadFile(filepath.Join(dir, "dev-ca.pem"))
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(caPEM)
+
+	c := New(Options{
+		Server: s.Addr(), Token: "secret", RootCAs: pool, ServerName: "localhost",
+		Tunnels: []TunnelSpec{{Name: "echo", Type: "tcp", RemotePort: 0, LocalAddr: "127.0.0.1:" + lport}},
+	})
+	ctx, c2 := context.WithCancel(context.Background())
+	defer c2()
+	go func() { _ = c.Run(ctx) }()
+	if !waitTrue(c.Registered, 3*time.Second) {
+		t.Fatal("client never registered")
+	}
+	port := c.lastRemotePortForTest()
+	if port == 0 {
+		t.Fatal("no remote port assigned")
+	}
+	vc, err := net.DialTimeout("tcp", "127.0.0.1:"+itoa(port), 3*time.Second)
+	if err != nil {
+		t.Fatalf("visitor dial :%d: %v", port, err)
+	}
+	defer vc.Close()
+	_, _ = vc.Write([]byte("PINGS"))
+	vc.SetReadDeadline(time.Now().Add(3 * time.Second))
+	got := make([]byte, 7)
+	if _, err := io.ReadFull(vc, got); err != nil || string(got) != "R:PINGS" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+}
+
+func itoa(i int) string { return strconv.Itoa(i) }
