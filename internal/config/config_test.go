@@ -3,7 +3,6 @@ package config
 import "testing"
 
 func TestServerDefaultsAndEnvOverride(t *testing.T) {
-	t.Setenv("BURROW_AUTH_TOKEN", "envtok")
 	c, err := LoadServer(nil)
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
@@ -11,14 +10,31 @@ func TestServerDefaultsAndEnvOverride(t *testing.T) {
 	if c.Listen != ":7000" {
 		t.Fatalf("default listen = %q", c.Listen)
 	}
-	if c.AuthToken != "envtok" {
-		t.Fatalf("env override failed: %q", c.AuthToken)
+	// Prove env-override works on a still-existing field.
+	t.Setenv("BURROW_LISTEN", ":7777")
+	c2, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer (env override): %v", err)
+	}
+	if c2.Listen != ":7777" {
+		t.Fatalf("env override failed: got %q, want :7777", c2.Listen)
 	}
 }
 
-func TestServerValidationRequiresToken(t *testing.T) {
-	if _, err := LoadServer(nil); err == nil {
-		t.Fatal("expected validation error when BURROW_AUTH_TOKEN unset")
+func TestServerNoTokenRequired(t *testing.T) {
+	// Server no longer requires an auth token — auth is DB-backed (Phase 4).
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("expected no error when BURROW_AUTH_TOKEN unset, got: %v", err)
+	}
+	if c.Listen != ":7000" {
+		t.Fatalf("default listen = %q", c.Listen)
+	}
+	if c.DatabasePath != "./burrow.db" {
+		t.Fatalf("default database_path = %q", c.DatabasePath)
+	}
+	if c.HTTPListen != ":8080" {
+		t.Fatalf("default http_listen = %q", c.HTTPListen)
 	}
 }
 
@@ -34,12 +50,23 @@ func TestClientValidation(t *testing.T) {
 }
 
 func TestServerPublicDefaults(t *testing.T) {
-	t.Setenv("BURROW_AUTH_TOKEN", "x")
 	c, err := LoadServer(nil)
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
 	}
 	if c.PublicBind != "0.0.0.0" || c.PortMin != 9000 || c.PortMax != 9100 {
 		t.Fatalf("got PublicBind=%q PortMin=%d PortMax=%d", c.PublicBind, c.PortMin, c.PortMax)
+	}
+}
+
+func TestServerConfigPhase4(t *testing.T) {
+	t.Setenv("BURROW_ADMIN_EMAIL", "a@x")
+	t.Setenv("BURROW_ADMIN_PASSWORD", "pw")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.DatabasePath != "./burrow.db" || c.AdminEmail != "a@x" || c.AdminPassword != "pw" || c.HTTPListen != ":8080" {
+		t.Fatalf("phase4 fields: %+v", c)
 	}
 }

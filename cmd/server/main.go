@@ -61,12 +61,14 @@ func main() {
 					return err
 				}
 			}
-			// INTERIM (Phase 4a Task 6): preserves the Phase-2/3 env-token behavior so the
-			// module stays buildable. Task 8 replaces this with DB-backed store auth.
+			// INTERIM (Phase 4a Task 6, updated Task 7): preserves the Phase-2/3 env-token
+			// behavior so the module stays buildable. Config no longer carries AuthToken
+			// (dropped in Task 7); reads BURROW_AUTH_TOKEN directly from env.
+			// Task 8 replaces this with DB-backed store auth.
 			srv, err := server.New(server.Options{
 				Listen: cfg.Listen, TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey,
 				Auth: server.AuthFunc(func(_ context.Context, tok string) (string, error) {
-					if subtle.ConstantTimeCompare([]byte(tok), []byte(cfg.AuthToken)) == 1 {
+					if subtle.ConstantTimeCompare([]byte(tok), []byte(os.Getenv("BURROW_AUTH_TOKEN"))) == 1 {
 						return "env", nil
 					}
 					return "", fmt.Errorf("invalid token")
