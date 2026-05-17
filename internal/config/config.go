@@ -50,7 +50,7 @@ func envProvider(prefix string) *env.Env {
 	})
 }
 
-// LoadServer: defaults < BURROW_ env < overrides.
+// LoadServer loads the server config, merging defaults < BURROW_ env < overrides.
 func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	k := base()
 	_ = k.Load(confmap.Provider(map[string]any{
@@ -71,7 +71,7 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	return &c, nil
 }
 
-// LoadClient: defaults < BURROW_ env < overrides.
+// LoadClient loads the client config, merging defaults < BURROW_ env < overrides.
 func LoadClient(overrides map[string]any) (*ClientConfig, error) {
 	k := base()
 	_ = k.Load(confmap.Provider(map[string]any{
