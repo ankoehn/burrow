@@ -20,6 +20,7 @@ const (
 	MsgPing               MessageType = "ping"
 	MsgPong               MessageType = "pong"
 	MsgError              MessageType = "error"
+	MsgStreamOpen         MessageType = "stream_open"
 )
 
 // Envelope wraps every control message with its type and an optional correlation ID.
@@ -86,4 +87,13 @@ type Pong struct {
 // Error is a generic protocol error message.
 type Error struct {
 	Message string `json:"message"`
+}
+
+// StreamHeader is the first frame the client writes on a new data stream,
+// pairing it (by StreamID) to a pending visitor connection on the server.
+type StreamHeader struct {
+	// StreamID is the server-generated id from the new_connection notify.
+	StreamID string `json:"stream_id"`
+	// TunnelID is the tunnel this data stream serves.
+	TunnelID string `json:"tunnel_id"`
 }

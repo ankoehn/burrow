@@ -19,6 +19,7 @@ func TestEveryMessageTypeRoundTrips(t *testing.T) {
 		{MsgPing, Ping{Nonce: "n"}},
 		{MsgPong, Pong{Nonce: "n"}},
 		{MsgError, Error{Message: "boom"}},
+		{MsgStreamOpen, StreamHeader{StreamID: "st-1", TunnelID: "tn-1"}},
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer
