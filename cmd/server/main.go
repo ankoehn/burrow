@@ -1,7 +1,8 @@
 // Command burrowd is the Burrow relay server.
 //
-// Phase 1: scaffolding stub. It only reports version information; `serve`
-// is implemented in MVP Phases 2-5 (control protocol, data plane, API, UI).
+// `serve` runs the Phase 2 control server (TLS + yamux auth and tunnel
+// registration); the TCP data plane, HTTP API, and dashboard arrive in
+// MVP Phases 3-5.
 package main
 
 import (

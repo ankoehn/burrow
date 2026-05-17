@@ -1,7 +1,7 @@
 // Command burrow is the Burrow local client CLI.
 //
-// Phase 1: scaffolding stub. It only reports version information; `connect`
-// is implemented in MVP Phase 2 (control protocol) and Phase 3 (data plane).
+// `connect` runs the Phase 2 control client (TLS auth, tunnel registration,
+// heartbeat, auto-reconnect); the TCP data plane arrives in MVP Phase 3.
 package main
 
 import (
