@@ -55,3 +55,42 @@ func TestHandlerServesHashedAsset(t *testing.T) {
 		t.Fatalf("asset %s unexpected content-type %q", asset, ct)
 	}
 }
+
+func TestHandlerDirectoryRequestServesSPANotListing(t *testing.T) {
+	h, err := Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/assets", "/assets/"} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("GET", p, nil))
+		body, _ := io.ReadAll(rr.Body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s want 200 (SPA fallback), got %d", p, rr.Code)
+		}
+		if !strings.Contains(string(body), `id="root"`) {
+			t.Fatalf("%s must serve the SPA index.html, not a directory listing: %.120s", p, body)
+		}
+		if strings.Contains(string(body), "assets/") && !strings.Contains(string(body), `id="root"`) {
+			t.Fatalf("%s leaked a directory listing", p)
+		}
+	}
+}
+
+func TestHandlerIndexHtmlBehaviorPinned(t *testing.T) {
+	h, err := Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/index.html", nil))
+	// http.FileServer canonicalises /index.html -> "./" (301). This is benign:
+	// the SPA entrypoint is "/" and nothing in the app requests /index.html.
+	// Pinned so a handler change that flips this is a conscious decision.
+	if rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("/index.html: expected pinned 301 canonicalisation, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "./" {
+		t.Fatalf("/index.html: expected Location \"./\", got %q", loc)
+	}
+}
