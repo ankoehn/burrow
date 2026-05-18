@@ -1,11 +1,14 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { Moon, Sun } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/components/theme-provider";
 
 export function Layout() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const { theme, toggleTheme } = useTheme();
   async function logout() {
     try { await apiFetch("/auth/logout", { method: "POST" }); } catch { /* ignore */ }
     qc.clear();
@@ -22,8 +25,16 @@ export function Layout() {
           <NavLink to="/tokens" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Tokens</NavLink>
           <NavLink to="/account" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Account</NavLink>
         </nav>
-        <div className="mt-6 px-3">
+        <div className="mt-6 px-3 flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={logout}>Log out</Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+          >
+            {theme === "dark" ? <Sun /> : <Moon />}
+          </Button>
         </div>
       </aside>
       <main className="flex-1 p-8"><Outlet /></main>
