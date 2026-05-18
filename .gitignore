@@ -22,3 +22,6 @@ Thumbs.db
 *.swp
 
 /certs/
+
+# Claude Code harness state (worktrees, local settings) - never commit
+.claude/
