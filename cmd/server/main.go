@@ -3,8 +3,8 @@
 // `serve` runs the control server: it opens/migrates the SQLite database,
 // seeds the first admin from config, authenticates clients against
 // DB-issued tokens, and persists registered tunnels. It ALSO serves the
-// HTTP JSON API + SSE on BURROW_HTTP_LISTEN (default :8080) alongside the
-// control listener; the dashboard (web UI) arrives in MVP Phase 4c.
+// embedded dashboard SPA at / (the web UI) alongside the HTTP JSON API +
+// SSE on BURROW_HTTP_LISTEN (default :8080), beside the control listener.
 //
 // `token` is an operator/dev helper that mints a client token for an
 // existing user directly against the database (no HTTP API needed yet).
@@ -32,6 +32,7 @@ import (
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/version"
+	"github.com/ankoehn/burrow/web"
 )
 
 func versionLine() string {
@@ -136,11 +137,16 @@ func main() {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
+			spaHandler, err := web.Handler()
+			if err != nil {
+				return err
+			}
+
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
 				Handler: api.NewRouter(api.Deps{
 					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
-					Log: log, SecureCookies: cfg.HTTPSecureCookies,
+					Log: log, SecureCookies: cfg.HTTPSecureCookies, SPA: spaHandler,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
