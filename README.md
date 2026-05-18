@@ -105,7 +105,7 @@ The client opens a single outbound TLS connection to the server and authenticate
 
 ## Roadmap
 
-v0.1 (this release) is the MVP: TLS control plane, TCP data plane, token auth, HTTP/JSON API, embedded dashboard, single admin, and Docker/K8s `*_FILE` secret support. Likely directions beyond v0.1 (ideas, not commitments): HTTP-aware tunnels with hostname routing and automatic TLS, multi-user accounts, login rate limiting, and dashboard polish. Tracked deferrals live in [`BACKLOG.md`](BACKLOG.md). Issues and discussion are welcome.
+v0.1 (this release) is the MVP: TLS control plane, TCP data plane, token auth, HTTP/JSON API, embedded dashboard, admin-managed multi-user accounts (with self-service password change), login rate limiting, CSRF protection, native HTTPS/HSTS support, and Docker/K8s `*_FILE` secret support. Likely directions beyond v0.1 (ideas, not commitments): HTTP-aware tunnels with hostname routing and automatic TLS, and further dashboard polish. Tracked deferrals live in [`BACKLOG.md`](BACKLOG.md). Issues and discussion are welcome.
 
 ## Contributing & security
 

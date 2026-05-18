@@ -4,7 +4,10 @@ Out-of-scope-but-noted improvements deferred per phase discipline.
 
 ## Database / persistence
 
-- **Offset-proof datetime comparison in `internal/db`.** `DeleteExpiredSessions`
+- **~~Offset-proof datetime comparison in `internal/db`.~~** DONE (A1 / `3b5944c`). SQL
+  `strftime`/`datetime` comparison replaces Go `time.Time.String()` lexical comparison in
+  `DeleteExpiredSessions`. Sub-second boundary test added; the Go-`String()`-vs-`CURRENT_TIMESTAMP`
+  fragility class is fully eliminated. ~~`DeleteExpiredSessions`
   currently relies on lexical string comparison of Go `time.Time.String()`
   values, which is correct only because `internal/store` consistently writes
   `time.Now().UTC()` (Phase 4a, commit `90699d2`). Two latent fragilities
@@ -18,47 +21,67 @@ Out-of-scope-but-noted improvements deferred per phase discipline.
   **Recommended fix:** compare in SQL via `expires_at <= datetime('now')` /
   `strftime`, or store expiry as a unix-epoch `INTEGER`. Removes the entire
   Go-`String()`-vs-`CURRENT_TIMESTAMP`-vs-offset fragility class.
-  _Source: Phase 4a Task 5 independent code review._
+  _Source: Phase 4a Task 5 independent code review._~~
 
 ## Testing
 
-- **Restore TLS cert/key required-validation coverage.** Phase 4a Task 7 replaced
+- **~~Restore TLS cert/key required-validation coverage.~~** DONE (A2 / `9053e86`).
+  `TestServerTLSRequired` added: `LoadServer(map[string]any{"tls_cert":"","tls_key":""})` asserts
+  an error, directly exercising the `validate:"required"` tags on `ServerConfig.TLSCert`/`TLSKey`.
+  ~~Phase 4a Task 7 replaced
   `TestServerValidationRequiresToken` (which implicitly exercised the validator
   firing) with `TestServerNoTokenRequired`. The `validate:"required"` tags on
   `ServerConfig.TLSCert`/`TLSKey` are unchanged, but no test now explicitly
   asserts `LoadServer` errors when they are empty. Add a `TestServerTLSRequired`
   (e.g. `LoadServer(map[string]any{"tls_cert":"","tls_key":""})` → error).
-  _Source: Phase 4a Task 7 independent code review._
+  _Source: Phase 4a Task 7 independent code review._~~
 
 ## HTTP API security (Phase 4b)
 
-- **Session row IP hardening.** `api.Login` stores `r.Request.RemoteAddr` (host:port,
+- **~~Session row IP hardening.~~** DONE (C2 / `d29551e`). Trusted-proxy gate added;
+  `net.SplitHostPort` strips the port before storing in `sessions.ip`; forwarded headers only
+  trusted behind a configured trusted proxy. ~~`api.Login` stores `r.Request.RemoteAddr` (host:port,
   and post-`middleware.RealIP` it is the X-Forwarded-For value, spoofable on a
   direct-internet deployment) into `sessions.ip`. For MVP single-admin this is
   informational only. Hardening: strip the port via `net.SplitHostPort`, and only
   trust forwarded headers behind a configured trusted proxy. Document the proxy-trust
-  assumption. _Source: Phase 4b Task 4 independent code review._
+  assumption. _Source: Phase 4b Task 4 independent code review._~~
 
-- **Login rate-limiting.** `POST /api/v1/auth/login` is unauthenticated and has no rate limit; brute-force/credential-stuffing is unthrottled. MVP single-admin lowers impact but add per-IP/global throttling (e.g. `httprate`) before multi-user. _Source: Phase 4b spec §6/F10._
+- **~~Login rate-limiting.~~** DONE (C1 / `f7ce088`). `httprate` per-IP and global throttling
+  applied to `POST /api/v1/auth/login`. ~~`POST /api/v1/auth/login` is unauthenticated and has no rate limit; brute-force/credential-stuffing is unthrottled. MVP single-admin lowers impact but add per-IP/global throttling (e.g. `httprate`) before multi-user. _Source: Phase 4b spec §6/F10._~~
 
-- **CSRF tokens for state-changing endpoints.** Session is a `SameSite=Lax` cookie; Lax + the same-origin embedded SPA (4c) blocks basic cross-site POST CSRF for the MVP, but add explicit CSRF tokens (or double-submit) before exposing the API cross-origin. _Source: Phase 4b spec §6/F10._
+- **~~CSRF tokens for state-changing endpoints.~~** DONE (C3 / `952bbf1`). Double-submit cookie
+  CSRF protection added to all state-changing endpoints. ~~Session is a `SameSite=Lax` cookie; Lax + the same-origin embedded SPA (4c) blocks basic cross-site POST CSRF for the MVP, but add explicit CSRF tokens (or double-submit) before exposing the API cross-origin. _Source: Phase 4b spec §6/F10._~~
 
-- **First-class HTTPS / `Secure` cookie / HSTS for the API.** MVP serves plain HTTP on `:8080` behind an operator TLS-terminating proxy (`http_secure_cookies` default false). Add native TLS for the HTTP server, set `Secure` cookies + HSTS when terminating TLS itself. _Source: Phase 4b spec §6/F10._
+- **~~First-class HTTPS / `Secure` cookie / HSTS for the API.~~** DONE (C5 / `bb11f69`). Native TLS
+  added to the HTTP server; `Secure` cookies and HSTS enforced when TLS is terminated by the
+  server itself. ~~MVP serves plain HTTP on `:8080` behind an operator TLS-terminating proxy (`http_secure_cookies` default false). Add native TLS for the HTTP server, set `Secure` cookies + HSTS when terminating TLS itself. _Source: Phase 4b spec §6/F10._~~
 
-- **Change-password / account endpoint + page.** The Phase-4 spec §7 4b handler list and the Phase-4 done-criteria omit password change; MVP `/me` is read-only. Defer to v0.2. _Source: Phase 4b spec §6._
+- **~~Change-password / account endpoint + page.~~** DONE (D3/D4 / `f47ca86`, `96226ef`).
+  Change-password endpoint and account page shipped; admin user-management UI also included.
+  ~~The Phase-4 spec §7 4b handler list and the Phase-4 done-criteria omit password change; MVP `/me` is read-only. Defer to v0.2. _Source: Phase 4b spec §6._~~
 
 ## HTTP API lifecycle (Phase 4b)
 
-- **API graceful-shutdown should fully drain JSON handlers before DB close.**
-  `burrowd serve` calls `apiSrv.Shutdown(5s)` then `srv.Wait()` then (deferred)
+- **~~API graceful-shutdown should fully drain JSON handlers before DB close.~~** DONE (A3 / `29586f7`).
+  `apiShutdownGrace` set to 35 s (≥ JSONHandlerTimeout 30 s); LIFO reaper closes DB only after the
+  API drain goroutine confirms. ~~`burrowd serve` calls `apiSrv.Shutdown(5s)` then `srv.Wait()` then (deferred)
   `database.Close()`. The JSON route group has a 30s chi `middleware.Timeout`, so a
   handler force-unblocked by chi at up to 30s can outlive the 5s `Shutdown` window
   and (very rarely, under SQLite stall) be mid-`GetSession` when `database.Close()`
   runs — handled (returns `sql: database is closed` → 500), not memory-unsafe, but
   untidy. Hardening: align the `Shutdown` deadline with the handler timeout, or
-  close the DB only after the API drain goroutine confirms. _Source: Phase 4b Task 9 independent code review._
+  close the DB only after the API drain goroutine confirms. _Source: Phase 4b Task 9 independent code review._~~
 
 ## Build tooling
+
+- **~~Support the `*_FILE` secret convention.~~** DONE (C4 / B05). Generic
+  `applyFileSecrets` helper in `internal/config` reads any `BURROW_<KEY>_FILE`
+  env var, trims the trailing newline, and sets the koanf key with the same
+  normalization as the env providers. `_FILE` wins over the literal var;
+  missing/unreadable file is a hard error. `docker-compose.yml` demonstrates
+  the pattern with a proper `secrets:` block and `BURROW_ADMIN_PASSWORD_FILE`.
+  _Source: Phase 5 P5 / review finding B05._
 
 - **`go ./...` traversed `web/node_modules` when present — RESOLVED 2026-05-18.**
   The `flatted` npm package ships a Go reference file; once `npm ci` populated
@@ -77,20 +100,18 @@ Out-of-scope-but-noted improvements deferred per phase discipline.
 
 ## Dashboard (Phase 4c)
 
-- **Real browser-automation e2e.** The dashboard is verified by Vitest unit tests + Go embed/router unit tests + assembled HTTP smokes (login→token→connect→/tunnels, SPA fallback, /api/v1-no-leak); a real headless-browser click-through (Playwright) is post-MVP. _Source: Phase 4c spec §6/§8._
-- **Dashboard visual polish + dark/light toggle.** MVP shell is intentionally minimal (Phase-5 polish); add an explicit theme toggle, refined layout/empty-states. _Source: Phase 4c spec §6/G11._
-- **Change-password / account endpoint + page.** Account is read-only this MVP (parent Phase-4 spec §7 + done-criteria omit password change); cross-refs the existing 4b backlog bullet — implement together in v0.2. _Source: Phase 4c spec §6._
-- **Static-asset requests are logged at info via the API request logger.** SPA assets flow through the chi `requestLogger` (shared router); a handful of info lines per page load — acceptable for MVP, consider downgrading `/*`/`/assets/` to debug or skipping if log noise matters at scale. _Source: Phase 4c Task 7 independent code review._
+- **~~Real browser-automation e2e.~~** DONE (D5 / `43e4c00`). Playwright happy-path smoke test
+  added with a CI job. ~~The dashboard is verified by Vitest unit tests + Go embed/router unit tests + assembled HTTP smokes (login→token→connect→/tunnels, SPA fallback, /api/v1-no-leak); a real headless-browser click-through (Playwright) is post-MVP. _Source: Phase 4c spec §6/§8._~~
+- **~~Dashboard visual polish + dark/light toggle.~~** DONE (D1/D2 / `07bc372`, `1dd788a`,
+  `29614ce`). Theme tokens added (`07bc372`/`1dd788a`) and an explicit dark/light toggle shipped
+  (`29614ce`). ~~MVP shell is intentionally minimal (Phase-5 polish); add an explicit theme toggle, refined layout/empty-states. _Source: Phase 4c spec §6/G11._~~
+- **~~Change-password / account endpoint + page.~~** DONE (D3/D4 / `f47ca86`, `96226ef`). See
+  matching 4b bullet above — both shipped together. ~~Account is read-only this MVP (parent Phase-4 spec §7 + done-criteria omit password change); cross-refs the existing 4b backlog bullet — implement together in v0.2. _Source: Phase 4c spec §6._~~
+- **~~Static-asset requests logged at info.~~** DONE (A10 / `c13ee44`). Downgraded to debug level.
+  ~~SPA assets flow through the chi `requestLogger` (shared router); a handful of info lines per page load — acceptable for MVP, consider downgrading `/*`/`/assets/` to debug or skipping if log noise matters at scale. _Source: Phase 4c Task 7 independent code review._~~
 
 ## Deployment / packaging (Phase 5)
 
-- **~~Support the `*_FILE` secret convention.~~** DONE (C4 / B05). Generic
-  `applyFileSecrets` helper in `internal/config` reads any `BURROW_<KEY>_FILE`
-  env var, trims the trailing newline, and sets the koanf key with the same
-  normalization as the env providers. `_FILE` wins over the literal var;
-  missing/unreadable file is a hard error. `docker-compose.yml` demonstrates
-  the pattern with a proper `secrets:` block and `BURROW_ADMIN_PASSWORD_FILE`.
-  _Source: Phase 5 P5 / review finding B05._
 - **Smoother first-run container UX.** `burrowd serve` requires TLS certs; the
   compose example passes `--dev-certs` and sets `working_dir: /data` so
   self-signed certs land on the writable volume, and `./data` must be
@@ -103,32 +124,38 @@ Out-of-scope-but-noted improvements deferred per phase discipline.
 Non-blocking items surfaced by the Phase 5 per-task code reviews. None block
 the v0.1.0 tag; track for v0.2.
 
-- **Narrow the release tag glob.** `release.yml` triggers on `tags: ["v*"]`,
+- **~~Narrow the release tag glob.~~** DONE (B-rel2 / `80bf243`). Trigger tightened to
+  `["v[0-9]*"]`. ~~`release.yml` triggers on `tags: ["v*"]`,
   which also matches non-semver tags (`vfoo`, `v-test`). Tighten to
   `["v[0-9]*"]` to eliminate accidental full release+GHCR+sign runs.
-  _Source: Phase 5 Task 3 review._
-- **Add a `concurrency:` group** (`group: release-${{ github.ref }}`,
+  _Source: Phase 5 Task 3 review._~~
+- **~~Add a `concurrency:` group~~** DONE (B-rel2 / `80bf243`). `concurrency:` group with
+  `cancel-in-progress: true` added to `release.yml` and `release-dryrun.yml`. ~~(`group: release-${{ github.ref }}`,
   `cancel-in-progress: true`) to `release.yml` and `release-dryrun.yml` so a
-  rapid re-tag does not race two publishing runs. _Source: Phase 5 Task 3/4 review._
-- **Add `timeout-minutes`** (~30) to the release and dry-run jobs to cap a
+  rapid re-tag does not race two publishing runs. _Source: Phase 5 Task 3/4 review._~~
+- **~~Add `timeout-minutes`~~** DONE (B-rel2 / `80bf243`). `timeout-minutes: 30` added to release
+  and dry-run jobs. ~~(~30) to the release and dry-run jobs to cap a
   hung QEMU multi-arch build (default GH timeout is 6h).
-  _Source: Phase 5 Task 4 review._
-- **SHA-pin GitHub Actions.** Actions are major-tag pinned (`@v4` …); pin to
-  immutable commit SHAs for supply-chain hardening. _Source: Phase 5 Task 3 review._
+  _Source: Phase 5 Task 4 review._~~
+- **~~SHA-pin GitHub Actions.~~** DONE (B-rel2 / `80bf243`). Actions pinned to immutable commit SHAs.
+  ~~Actions are major-tag pinned (`@v4` …); pin to
+  immutable commit SHAs for supply-chain hardening. _Source: Phase 5 Task 3 review._~~
 - **Tag protection / required CI on the tagged commit.** A tag on a broken
   commit would still trigger a publish. Add a GitHub tag-protection rule or a
   required-status gate before release. _Source: Phase 5 Task 3 review._
-- **Migrate `.goreleaser.yml` `dockers:`/`docker_manifests:` to the new
-  `dockers_v2:` schema** before a goreleaser release that removes the
+- **~~Migrate `.goreleaser.yml` `dockers:`/`docker_manifests:` to the new `dockers_v2:` schema~~**
+  DONE (B-rel1 / `a62091b`). Migrated to `dockers_v2:` schema.
+  ~~before a goreleaser release that removes the
   deprecated keys. Non-blocking for v0.1.0: the `~> v2` pin keeps goreleaser
   on v2.x (which still supports `dockers:` with only a deprecation warning);
   removal would land in goreleaser v3, which `~> v2` never selects. Do the
   migration when bumping to goreleaser v3 / `goreleaser-action` v7+.
-  _Source: Phase 5 Task 2 review._
-- **`linux/arm` archive naming.** Archives use `{{ .Arch }}` → `arm` for the
+  _Source: Phase 5 Task 2 review._~~
+- **~~`linux/arm` archive naming.~~** DONE (B-rel1 / `a62091b`, `a7f2ae4`). Archives now emit
+  `armv7` in the name template. ~~Archives use `{{ .Arch }}` → `arm` for the
   armv7 build (`burrow_linux_arm_<ver>.tar.gz`); unambiguous (only v7 is
   built) but a downloader can't tell v6/v7 from the name. Consider emitting
-  `armv7` in `archives.name_template`. _Source: Phase 5 Task 2 review._
+  `armv7` in `archives.name_template`. _Source: Phase 5 Task 2 review._~~
 
 ## Post-v0.1 hardening (resolved / awareness)
 
