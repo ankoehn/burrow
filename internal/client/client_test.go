@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -13,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/yamux"
+
 	"github.com/ankoehn/burrow/internal/devcert"
+	"github.com/ankoehn/burrow/internal/proto"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/testutil"
 )
@@ -236,6 +240,114 @@ func TestConcurrentVisitors(t *testing.T) {
 	for e := range errc {
 		t.Fatalf("concurrent visitor failed: %v", e)
 	}
+}
+
+// TestBackoffNotResetOnRegistrationFailure asserts B14: when auth succeeds but
+// tunnel registration is rejected by the server, bo.Reset() must NOT be called,
+// so the next retry delay reflects accumulated backoff rather than the minimum.
+func TestBackoffNotResetOnRegistrationFailure(t *testing.T) {
+	// Build dev certs for the fake server.
+	dir := t.TempDir()
+	if err := devcert.Generate(dir, true); err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.LoadX509KeyPair(
+		filepath.Join(dir, "dev-server.pem"),
+		filepath.Join(dir, "dev-server-key.pem"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+
+	// Start a fake TLS server that accepts auth but rejects tunnel registration.
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", tlsCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	// Serve exactly one connection: auth OK (on raw conn), then accept yamux session
+	// and reject tunnel registration (on control stream).
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, e := ln.Accept()
+		if e != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Phase 1: auth exchange on the raw TLS connection (before yamux).
+		var env proto.Envelope
+		if e := proto.ReadFrame(conn, &env); e != nil {
+			return
+		}
+		if e := proto.WriteMessage(conn, proto.MsgAuthResponse, proto.AuthResponse{
+			OK: true, SessionID: "test-sess",
+		}); e != nil {
+			return
+		}
+
+		// Phase 2: client wraps conn in yamux.Client; we must wrap it in yamux.Server.
+		ysess, e := yamux.Server(conn, yamux.DefaultConfig())
+		if e != nil {
+			return
+		}
+		defer ysess.Close()
+
+		// Phase 3: client opens a stream and sends TunnelRegister on it.
+		stream, e := ysess.Accept()
+		if e != nil {
+			return
+		}
+		defer stream.Close()
+		if e := proto.ReadFrame(stream, &env); e != nil {
+			return
+		}
+		// Reply: registration FAILED.
+		_ = proto.WriteMessage(stream, proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{
+			OK: false, Error: "port range exhausted",
+		})
+	}()
+
+	caPEM, _ := os.ReadFile(filepath.Join(dir, "dev-ca.pem"))
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(caPEM)
+
+	c := New(Options{
+		Server: ln.Addr().String(), Token: "secret", RootCAs: pool, ServerName: "localhost",
+		Tunnels: []TunnelSpec{{Name: "web", Type: "tcp", RemotePort: 9000, LocalAddr: "127.0.0.1:3000"}},
+	})
+
+	// Prime the backoff with several calls so attempt > 0 and the next delay
+	// would be larger than min if backoff was NOT reset.
+	for i := 0; i < 4; i++ {
+		c.bo.NextBackOff()
+	}
+	// Capture attempt count after priming (must be > 0).
+	attemptAfterPrime := c.bo.AttemptForTest()
+	if attemptAfterPrime == 0 {
+		t.Fatal("priming did not advance attempt counter")
+	}
+
+	// Run one connectOnce — auth succeeds, registration fails.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = c.connectOnce(ctx)
+
+	// Backoff attempt must still reflect the primed value (bo.Reset was NOT called).
+	// AttemptForTest reads the counter without advancing it.
+	attemptAfterFail := c.bo.AttemptForTest()
+	if attemptAfterFail != attemptAfterPrime {
+		t.Fatalf("backoff was reset on registration failure: attempt went from %d to %d (want %d)",
+			attemptAfterPrime, attemptAfterFail, attemptAfterPrime)
+	}
+	// Client must not be marked registered.
+	if c.Registered() {
+		t.Fatal("client marked registered despite registration failure")
+	}
+	<-serverDone
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }

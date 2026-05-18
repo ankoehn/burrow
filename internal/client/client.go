@@ -123,7 +123,6 @@ func (c *Client) connectOnce(ctx context.Context) error {
 	if env.Type != proto.MsgAuthResponse || proto.DecodePayload(env, &ar) != nil || !ar.OK {
 		return fmt.Errorf("auth failed: %s", ar.Error)
 	}
-	c.bo.Reset()
 	c.log.Info("connected", "session_id", ar.SessionID)
 
 	// yamux.DefaultConfig has EnableKeepAlive=true, KeepAliveInterval=30s.
@@ -158,6 +157,10 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		c.mu.Unlock()
 	}
 	c.registered.Store(true)
+	// Reset backoff only after auth AND all tunnels are registered so that a
+	// partial failure (auth ok but registration rejected) keeps the accumulated
+	// delay and does not cause a tight-retry storm (B14).
+	c.bo.Reset()
 
 	go c.pingLoop(ctx, ctrl)
 	readErr := make(chan error, 1)
