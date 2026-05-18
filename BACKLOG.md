@@ -41,6 +41,14 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   trust forwarded headers behind a configured trusted proxy. Document the proxy-trust
   assumption. _Source: Phase 4b Task 4 independent code review._
 
+- **Login rate-limiting.** `POST /api/v1/auth/login` is unauthenticated and has no rate limit; brute-force/credential-stuffing is unthrottled. MVP single-admin lowers impact but add per-IP/global throttling (e.g. `httprate`) before multi-user. _Source: Phase 4b spec §6/F10._
+
+- **CSRF tokens for state-changing endpoints.** Session is a `SameSite=Lax` cookie; Lax + the same-origin embedded SPA (4c) blocks basic cross-site POST CSRF for the MVP, but add explicit CSRF tokens (or double-submit) before exposing the API cross-origin. _Source: Phase 4b spec §6/F10._
+
+- **First-class HTTPS / `Secure` cookie / HSTS for the API.** MVP serves plain HTTP on `:8080` behind an operator TLS-terminating proxy (`http_secure_cookies` default false). Add native TLS for the HTTP server, set `Secure` cookies + HSTS when terminating TLS itself. _Source: Phase 4b spec §6/F10._
+
+- **Change-password / account endpoint + page.** `docs/MVP_PHASES.md` lists an Account page, but the parent Phase-4 spec §7 4b handler list and the Phase-4 done-criteria omit password change; MVP `/me` is read-only. Defer to v0.2. _Source: Phase 4b spec §6._
+
 ## HTTP API lifecycle (Phase 4b)
 
 - **API graceful-shutdown should fully drain JSON handlers before DB close.**
