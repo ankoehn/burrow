@@ -113,6 +113,9 @@ func (s *Server) startPublicListener(tun *Tunnel) error {
 	}
 	tun.Listener = l
 	go func() {
+		// B11: capped exponential backoff on transient accept errors (EMFILE etc.)
+		// mirrors the net/http tempDelay pattern. Exits immediately on net.ErrClosed.
+		var delay time.Duration
 		for {
 			visitor, err := l.Accept()
 			if err != nil {
@@ -120,8 +123,18 @@ func (s *Server) startPublicListener(tun *Tunnel) error {
 					return
 				}
 				s.log.Warn("public accept", "tunnel_id", tun.ID, "err", err)
+				if delay == 0 {
+					delay = 5 * time.Millisecond
+				} else {
+					delay *= 2
+				}
+				if delay > time.Second {
+					delay = time.Second
+				}
+				time.Sleep(delay)
 				continue
 			}
+			delay = 0 // reset on success
 			go s.bridgeVisitor(tun, visitor)
 		}
 	}()

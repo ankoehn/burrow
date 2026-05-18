@@ -5,11 +5,26 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/hashicorp/yamux"
 
 	"github.com/ankoehn/burrow/internal/proto"
 )
+
+// controlWriteTimeout is the per-write deadline applied to control-stream
+// writes (B01). Keeps a stalled-but-not-disconnected client from pinning the
+// visitor goroutine and its socket indefinitely.
+// Declared as a var so tests can inject a shorter value without touching the
+// production constant.
+var controlWriteTimeout = 10 * time.Second
+
+// writeDeadliner is the subset of net.Conn / *yamux.Stream we need to set
+// per-write deadlines. Injecting it separately lets tests use a plain
+// io.Writer (e.g. bytes.Buffer) without panic.
+type writeDeadliner interface {
+	SetWriteDeadline(t time.Time) error
+}
 
 // Tunnel is a registered tunnel.
 type Tunnel struct {
@@ -37,9 +52,10 @@ type ClientSession struct {
 	mu         sync.Mutex
 	Tunnels    map[string]*Tunnel
 
-	pending *pendingStreams
-	ctrlMu  sync.Mutex
-	ctrl    io.Writer
+	pending       *pendingStreams
+	ctrlMu        sync.Mutex
+	ctrl          io.Writer
+	ctrlDeadliner writeDeadliner // non-nil when ctrl also supports SetWriteDeadline
 }
 
 // Registry tracks live sessions and their tunnels (in-memory, mutex-guarded).
@@ -128,19 +144,33 @@ func (cs *ClientSession) snapshotTunnelsForTest() []*Tunnel {
 }
 
 // SetControl records the control stream used for serialized server→client writes.
+// If w also implements writeDeadliner (e.g. *yamux.Stream, net.Conn), per-write
+// deadlines will be applied automatically by SendControl.
 func (cs *ClientSession) SetControl(w io.Writer) {
 	cs.ctrlMu.Lock()
+	if d, ok := w.(writeDeadliner); ok {
+		cs.ctrlDeadliner = d
+	} else {
+		cs.ctrlDeadliner = nil
+	}
 	cs.ctrl = w
 	cs.ctrlMu.Unlock()
 }
 
 // SendControl writes one control message to the client, serialized against all
 // other senders (control-loop replies and visitor notifies).
+// B01: each write is bounded by controlWriteTimeout so a stalled client cannot
+// pin the caller's goroutine/socket indefinitely. The deadline is cleared after
+// each write so it is per-write, not cumulative.
 func (cs *ClientSession) SendControl(typ proto.MessageType, payload any) error {
 	cs.ctrlMu.Lock()
 	defer cs.ctrlMu.Unlock()
 	if cs.ctrl == nil {
 		return io.ErrClosedPipe
+	}
+	if cs.ctrlDeadliner != nil {
+		_ = cs.ctrlDeadliner.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+		defer func() { _ = cs.ctrlDeadliner.SetWriteDeadline(time.Time{}) }()
 	}
 	return proto.WriteMessage(cs.ctrl, typ, payload)
 }

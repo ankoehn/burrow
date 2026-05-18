@@ -154,6 +154,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.wg.Add(1)
 	go s.byteTicker(ctx)
 
+	// B11: capped exponential backoff on transient accept errors (EMFILE etc.)
+	// mirrors the net/http tempDelay pattern. Exits promptly on ctx cancel.
+	var delay time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -162,10 +165,20 @@ func (s *Server) Serve(ctx context.Context) error {
 				s.wg.Wait()
 				return nil
 			default:
-				s.log.Warn("accept", "err", err)
-				continue
 			}
+			s.log.Warn("accept", "err", err)
+			if delay == 0 {
+				delay = 5 * time.Millisecond
+			} else {
+				delay *= 2
+			}
+			if delay > time.Second {
+				delay = time.Second
+			}
+			time.Sleep(delay)
+			continue
 		}
+		delay = 0 // reset on success
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
