@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ankoehn/burrow/internal/store"
@@ -43,7 +44,20 @@ func (d Deps) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
+// isStaticAssetPath reports whether the request path is a static/SPA-asset
+// path that should be logged at Debug rather than Info. These are the paths
+// served directly by the embedded SPA handler (web/embed.go): the root,
+// hashed JS/CSS bundles under /assets/, the favicon, and index.html itself.
+func isStaticAssetPath(p string) bool {
+	return p == "/" ||
+		p == "/index.html" ||
+		p == "/favicon.svg" ||
+		strings.HasPrefix(p, "/assets/")
+}
+
 // requestLogger logs method, path, status and duration via slog.
+// Requests for static/SPA-asset paths are logged at Debug to avoid INFO noise
+// on every page load; /api/v1/* and other routes remain at Info (or Error on 5xx).
 func (d Deps) requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
@@ -52,6 +66,8 @@ func (d Deps) requestLogger(next http.Handler) http.Handler {
 		lvl := slog.LevelInfo
 		if sw.status >= 500 {
 			lvl = slog.LevelError
+		} else if isStaticAssetPath(r.URL.Path) {
+			lvl = slog.LevelDebug
 		}
 		d.Log.Log(r.Context(), lvl, "http", "method", r.Method, "path", r.URL.Path,
 			"status", sw.status, "dur", time.Since(start).String())
