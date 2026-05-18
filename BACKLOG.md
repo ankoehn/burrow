@@ -70,3 +70,10 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   committed/CI tree is unaffected). Latent risk: a future npm dep shipping
   non-compiling Go would break local `go test ./...`. Revisit with a Go workspace
   (`go.work`) or build-tag scheme if it ever bites. _Source: Phase 4c Task 1 independent review._
+
+## Dashboard (Phase 4c)
+
+- **Real browser-automation e2e.** The dashboard is verified by Vitest unit tests + Go embed/router unit tests + assembled HTTP smokes (login→token→connect→/tunnels, SPA fallback, /api/v1-no-leak); a real headless-browser click-through (Playwright) is post-MVP. _Source: Phase 4c spec §6/§8._
+- **Dashboard visual polish + dark/light toggle.** MVP shell is intentionally minimal (Phase-5 polish); add an explicit theme toggle, refined layout/empty-states. _Source: Phase 4c spec §6/G11._
+- **Change-password / account endpoint + page.** Account is read-only this MVP (parent Phase-4 spec §7 + done-criteria omit password change); cross-refs the existing 4b backlog bullet — implement together in v0.2. _Source: Phase 4c spec §6._
+- **Static-asset requests are logged at info via the API request logger.** SPA assets flow through the chi `requestLogger` (shared router); a handful of info lines per page load — acceptable for MVP, consider downgrading `/*`/`/assets/` to debug or skipping if log noise matters at scale. _Source: Phase 4c Task 7 independent code review._
