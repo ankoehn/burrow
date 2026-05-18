@@ -8,5 +8,5 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   server: { proxy: { "/api": "http://localhost:8080" } },
   build: { outDir: "dist" },
-  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts" },
+  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts", exclude: ["e2e/**", "node_modules/**"] },
 });
