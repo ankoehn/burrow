@@ -67,9 +67,14 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
 
-		// JSON routes: session-protected + JSONHandlerTimeout.
+		// JSON routes: session-protected + CSRF-protected + JSONHandlerTimeout.
+		// RequireCSRF is placed after RequireSession so unauthenticated requests
+		// get 401 before CSRF validation runs. Safe methods (GET/HEAD/OPTIONS)
+		// pass through CSRF unconditionally — future state-changing routes added
+		// to this group are automatically protected.
 		r.Group(func(r chi.Router) {
 			r.Use(d.RequireSession)
+			r.Use(RequireCSRF)
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)
 			r.Get("/me", d.Me)
@@ -80,6 +85,8 @@ func NewRouter(d Deps) http.Handler {
 		})
 
 		// SSE: session-protected, NO timeout (long-lived stream).
+		// CSRF is not applied here: GET is a safe method and SSE clients cannot
+		// send custom headers after the connection is upgraded.
 		r.Group(func(r chi.Router) {
 			r.Use(d.RequireSession)
 			r.Get("/events", d.EventsStream)

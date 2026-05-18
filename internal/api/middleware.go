@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -41,6 +42,47 @@ func (d Deps) RequireSession(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, uid)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// csrfSafeMethods is the set of HTTP methods that are exempt from CSRF checks
+// (they are defined as safe/idempotent in RFC 7231 and do not change state).
+var csrfSafeMethods = map[string]bool{
+	http.MethodGet:     true,
+	http.MethodHead:    true,
+	http.MethodOptions: true,
+}
+
+// RequireCSRF is a middleware that enforces the double-submit cookie pattern
+// for all non-safe HTTP methods (POST, PUT, PATCH, DELETE).
+//
+// For state-changing requests it requires:
+//   - The burrow_csrf cookie to be present and non-empty.
+//   - The X-CSRF-Token request header to equal the cookie value
+//     (compared with crypto/subtle.ConstantTimeCompare to prevent timing attacks).
+//
+// On mismatch or missing values → 403. Safe methods (GET/HEAD/OPTIONS) pass
+// through unconditionally so SSE and read-only endpoints are never blocked.
+//
+// This middleware MUST be applied after RequireSession so an unauthenticated
+// request returns 401 before it reaches CSRF validation.
+func RequireCSRF(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if csrfSafeMethods[r.Method] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := r.Cookie(csrfCookieName)
+		if err != nil || cookie.Value == "" {
+			writeErr(w, http.StatusForbidden, "csrf token invalid")
+			return
+		}
+		header := r.Header.Get("X-CSRF-Token")
+		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) != 1 {
+			writeErr(w, http.StatusForbidden, "csrf token invalid")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

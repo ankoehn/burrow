@@ -52,16 +52,23 @@ func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	csrfToken, err := generateCSRFToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "login failed")
+		return
+	}
 	setSessionCookie(w, sid, d.SecureCookies)
+	setCSRFCookie(w, csrfToken, d.SecureCookies)
 	writeJSON(w, http.StatusOK, userResp{ID: u.ID, Email: u.Email, Role: u.Role})
 }
 
-// Logout deletes the session and clears the cookie.
+// Logout deletes the session and clears both the session and CSRF cookies.
 func (d Deps) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		_ = d.Users.DeleteSession(r.Context(), c.Value)
 	}
 	clearSessionCookie(w, d.SecureCookies)
+	clearCSRFCookie(w, d.SecureCookies)
 	w.WriteHeader(http.StatusNoContent)
 }
 

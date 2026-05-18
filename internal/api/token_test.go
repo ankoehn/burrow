@@ -39,14 +39,43 @@ func (u *tokUsers) RevokeClientToken(_ context.Context, id, uid string) error {
 	return nil
 }
 
-func loggedInClient(t *testing.T, ts *httptestServer) *http.Client {
+// loggedInClient logs in and returns the http.Client (with cookie jar) and
+// the CSRF token extracted from the Set-Cookie header returned by login.
+// The CSRF token must be sent as X-CSRF-Token on every state-changing request.
+func loggedInClientWithCSRF(t *testing.T, ts *httptestServer) (*http.Client, string) {
 	t.Helper()
 	jar, _ := cookiejarNew()
 	cl := &http.Client{Jar: jar}
 	r, _ := cl.Post(ts.URL+"/api/v1/auth/login", "application/json",
 		strings.NewReader(`{"email":"a@x","password":"pw"}`))
 	r.Body.Close()
+	// Extract the CSRF token from the Set-Cookie response headers.
+	var csrfToken string
+	for _, c := range r.Cookies() {
+		if c.Name == csrfCookieName {
+			csrfToken = c.Value
+		}
+	}
+	return cl, csrfToken
+}
+
+// loggedInClient is a convenience wrapper kept for tests that only need GET
+// (no CSRF token required for safe methods).
+func loggedInClient(t *testing.T, ts *httptestServer) *http.Client {
+	t.Helper()
+	cl, _ := loggedInClientWithCSRF(t, ts)
 	return cl
+}
+
+// doWithCSRF sets the X-CSRF-Token header on req and executes it via cl.
+func doWithCSRF(t *testing.T, cl *http.Client, req *http.Request, csrfToken string) *http.Response {
+	t.Helper()
+	req.Header.Set("X-CSRF-Token", csrfToken)
+	resp, err := cl.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	return resp
 }
 
 func TestCreateAndListTokens(t *testing.T) {
@@ -55,11 +84,13 @@ func TestCreateAndListTokens(t *testing.T) {
 	u.verify = func(_, _ string) (bool, error) { return true, nil }
 	ts := newTestServer(Deps{Users: u, Log: discardLog()})
 	defer ts.Close()
-	cl := loggedInClient(t, &httptestServer{ts})
+	cl, csrf := loggedInClientWithCSRF(t, &httptestServer{ts})
 
-	cr, err := cl.Post(ts.URL+"/api/v1/tokens", "application/json", strings.NewReader(`{"name":"laptop"}`))
-	if err != nil || cr.StatusCode != http.StatusCreated {
-		t.Fatalf("create: %v status=%v", err, cr.StatusCode)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/tokens", strings.NewReader(`{"name":"laptop"}`))
+	req.Header.Set("Content-Type", "application/json")
+	cr := doWithCSRF(t, cl, req, csrf)
+	if cr.StatusCode != http.StatusCreated {
+		t.Fatalf("create: status=%v", cr.StatusCode)
 	}
 	body := readBody(t, cr)
 	if !strings.Contains(body, `"token":"bur_PLAINTEXT"`) || !strings.Contains(body, `"name":"laptop"`) {
@@ -90,10 +121,10 @@ func TestRevokeToken(t *testing.T) {
 	u.verify = func(_, _ string) (bool, error) { return true, nil }
 	ts := newTestServer(Deps{Users: u, Log: discardLog()})
 	defer ts.Close()
-	cl := loggedInClient(t, &httptestServer{ts})
+	cl, csrf := loggedInClientWithCSRF(t, &httptestServer{ts})
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/tokens/t1", nil)
-	dr, _ := cl.Do(req)
+	dr := doWithCSRF(t, cl, req, csrf)
 	dr.Body.Close()
 	if dr.StatusCode != http.StatusNoContent || u.revoked != "t1" {
 		t.Fatalf("revoke status=%d revoked=%q", dr.StatusCode, u.revoked)
@@ -104,6 +135,7 @@ func TestRevokeToken(t *testing.T) {
 
 	u.revErr = db.ErrNotFound
 	req2, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/tokens/missing", nil)
+	req2.Header.Set("X-CSRF-Token", csrf)
 	dr2, _ := cl.Do(req2)
 	dr2.Body.Close()
 	if dr2.StatusCode != http.StatusNotFound {
@@ -116,11 +148,10 @@ func TestCreateTokenEmptyName(t *testing.T) {
 	u.verify = func(_, _ string) (bool, error) { return true, nil }
 	ts := newTestServer(Deps{Users: u, Log: discardLog()})
 	defer ts.Close()
-	cl := loggedInClient(t, &httptestServer{ts})
-	r, err := cl.Post(ts.URL+"/api/v1/tokens", "application/json", strings.NewReader(`{"name":""}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cl, csrf := loggedInClientWithCSRF(t, &httptestServer{ts})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/tokens", strings.NewReader(`{"name":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	r := doWithCSRF(t, cl, req, csrf)
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusBadRequest {
 		t.Fatalf("empty name want 400, got %d", r.StatusCode)
@@ -135,6 +166,7 @@ func TestListTokensEmptyIsJSONArray(t *testing.T) {
 	u.verify = func(_, _ string) (bool, error) { return true, nil }
 	ts := newTestServer(Deps{Users: u, Log: discardLog()})
 	defer ts.Close()
+	// GET is a safe method; no CSRF header required.
 	cl := loggedInClient(t, &httptestServer{ts})
 	r, _ := cl.Get(ts.URL + "/api/v1/tokens")
 	b := strings.TrimSpace(readBody(t, r))
