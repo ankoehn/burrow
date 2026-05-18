@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 )
 
 // CreateSession inserts a new session row.
@@ -44,26 +43,26 @@ func (x *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
-// sqliteNow returns the current UTC time formatted in SQLite's datetime format
-// ("YYYY-MM-DD HH:MM:SS"), which is directly comparable to datetime('now') and
-// to the RFC3339-encoded values modernc/sqlite stores when binding time.Time
-// parameters (both use ISO-8601 date ordering so text comparison is correct).
-func sqliteNow() string {
-	return time.Now().UTC().Format("2006-01-02 15:04:05")
-}
-
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past
 // and returns the number of rows deleted.
 //
-// The comparison uses a pre-formatted SQLite datetime string rather than a raw
-// time.Time binding. modernc/sqlite v1.50.1 serialises time.Time as RFC3339Nano
-// (e.g. "2026-05-25T12:34:56.123Z"); SQLite's text ordering treats 'T' and ' '
-// as interchangeable in ISO-8601 comparisons, so "YYYY-MM-DD HH:MM:SS" sorts
-// correctly against those stored values. This removes any dependency on
-// time.Time.String() format drift or driver version changes.
+// modernc/sqlite v1.50.1 binds a Go time.Time via time.Time.String(), which
+// produces text of the form "YYYY-MM-DD HH:MM:SS.fffffffff +0000 UTC" (space-
+// separated, up to 9 fractional digits, " +0000 UTC" suffix). SQLite's
+// datetime() / strftime() cannot parse this format directly — bare
+// datetime(expires_at) would return ” — because of the " +0000 UTC" suffix.
+//
+// substr(expires_at, 1, 23) strips the unparseable suffix and keeps
+// "YYYY-MM-DD HH:MM:SS.fff" (millisecond precision), which strftime can parse.
+// Applying strftime('%Y-%m-%d %H:%M:%f', …) to BOTH sides of the comparison
+// produces a true datetime (not lexical) comparison that is offset- and
+// format-independent. No bound parameter is needed: strftime('now') returns
+// the current UTC time directly inside SQLite.
 func (x *DB) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	res, err := x.sqlDB.ExecContext(ctx,
-		`DELETE FROM sessions WHERE expires_at <= ?`, sqliteNow(),
+		`DELETE FROM sessions
+		 WHERE strftime('%Y-%m-%d %H:%M:%f', substr(expires_at, 1, 23))
+		    <= strftime('%Y-%m-%d %H:%M:%f', 'now')`,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired sessions: %w", err)

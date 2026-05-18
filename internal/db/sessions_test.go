@@ -64,6 +64,53 @@ func TestDeleteExpiredSessions_OffsetRobust(t *testing.T) {
 	}
 }
 
+// TestDeleteExpiredSessions_SubSecondBoundary is the regression test for the
+// cfce87f bug: the old implementation truncated "now" to whole-second precision
+// ("YYYY-MM-DD HH:MM:SS") and compared it lexically against the stored
+// time.Time.String() text ("YYYY-MM-DD HH:MM:SS.fffffffff +0000 UTC"). A row
+// expiring at e.g. "2026-05-18 14:09:46.0025473 +0000 UTC" was NOT deleted when
+// sqliteNow() produced "2026-05-18 14:09:46", because the stored value is
+// lexically greater ("...46.002..." > "...46"). This test creates a session
+// expiring 50 ms in the past and a session expiring 500 ms in the future, then
+// asserts the past row is deleted and the future row is retained.
+func TestDeleteExpiredSessions_SubSecondBoundary(t *testing.T) {
+	ctx := context.Background()
+	x := testDB(t)
+
+	_ = x.CreateUser(ctx, User{ID: "u4", Email: "subsec@test", PasswordHash: "h", Role: "admin"})
+
+	// Expired 50 ms ago — within the current integer second.
+	// The old truncated comparison left this row undeleted (the bug).
+	_ = x.CreateSession(ctx, Session{
+		ID:        "sub-past-50ms",
+		UserID:    "u4",
+		ExpiresAt: time.Now().UTC().Add(-50 * time.Millisecond),
+	})
+	// Expires 500 ms from now — must survive.
+	_ = x.CreateSession(ctx, Session{
+		ID:        "sub-future-500ms",
+		UserID:    "u4",
+		ExpiresAt: time.Now().UTC().Add(500 * time.Millisecond),
+	})
+
+	n, err := x.DeleteExpiredSessions(ctx)
+	if err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 row deleted (sub-second past), got %d", n)
+	}
+
+	// The 50ms-past row must be gone.
+	if _, err := x.GetSession(ctx, "sub-past-50ms"); err != ErrNotFound {
+		t.Fatalf("50ms-past session should be deleted, got %v", err)
+	}
+	// The 500ms-future row must still exist.
+	if s, err := x.GetSession(ctx, "sub-future-500ms"); err != nil || s.UserID != "u4" {
+		t.Fatalf("500ms-future session should survive: %+v %v", s, err)
+	}
+}
+
 // TestDeleteExpiredSessions_Empty ensures the function is a no-op (returns 0, nil)
 // when there are no expired sessions.
 func TestDeleteExpiredSessions_Empty(t *testing.T) {
