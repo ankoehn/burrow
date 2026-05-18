@@ -187,6 +187,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
+// yamuxConfig returns the yamux session configuration used by the server.
+// Dead-peer detection relies on yamux's built-in keepalive; callers MUST NOT
+// disable EnableKeepAlive (a CI test in keepalive_test.go enforces this).
+func yamuxConfig() *yamux.Config {
+	return yamux.DefaultConfig()
+}
+
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	sid := uuid.NewString()
@@ -195,7 +202,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		s.log.Warn("handshake failed", "remote_addr", conn.RemoteAddr().String(), "err", err)
 		return
 	}
-	ysess, err := yamux.Server(conn, yamux.DefaultConfig())
+	ysess, err := yamux.Server(conn, yamuxConfig())
 	if err != nil {
 		s.log.Warn("yamux server", "err", err)
 		return
@@ -238,7 +245,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	s.log.Info("client disconnected", "session_id", cs.SessionID)
 }
 
-// heartbeat closes the session if ctx is cancelled or the yamux keepalive dies.
+// heartbeat closes the yamux session when ctx is cancelled; the session's own
+// keepalive (EnableKeepAlive=true, KeepAliveInterval=30s — see yamuxConfig) will
+// close it autonomously if the peer goes silent, so no additional ping/pong
+// deadline logic is needed here.
 func (s *Server) heartbeat(ctx context.Context, y *yamux.Session, _ *ClientSession) {
 	select {
 	case <-ctx.Done():

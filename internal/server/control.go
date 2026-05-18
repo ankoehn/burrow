@@ -96,7 +96,11 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 			_ = proto.DecodePayload(env, &p)
 			_ = cs.SendControl(proto.MsgPong, proto.Pong{Nonce: p.Nonce})
 		case proto.MsgPong:
-			// handled by heartbeat monitor (Task 9); ignore here
+			// Pong is informational only. Dead-peer detection for the MVP is
+			// provided entirely by yamux's built-in keepalive (EnableKeepAlive=true,
+			// KeepAliveInterval=30s in yamuxConfig). The Ping/Pong messages are a
+			// lightweight application-level liveness signal retained for future use;
+			// yamux keepalive is the authoritative liveness mechanism.
 		default:
 			_ = cs.SendControl(proto.MsgError, proto.Error{Message: "unexpected: " + string(env.Type)})
 		}

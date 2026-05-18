@@ -126,6 +126,8 @@ func (c *Client) connectOnce(ctx context.Context) error {
 	c.bo.Reset()
 	c.log.Info("connected", "session_id", ar.SessionID)
 
+	// yamux.DefaultConfig has EnableKeepAlive=true, KeepAliveInterval=30s.
+	// Dead-peer detection relies on this keepalive; do not override it.
 	ysess, err := yamux.Client(conn, yamux.DefaultConfig())
 	if err != nil {
 		return err
@@ -205,7 +207,11 @@ func (c *Client) controlReadLoop(sess *yamux.Session, ctrl io.Reader) error {
 			}
 			go c.handleNewConnection(sess, nc, local)
 		case proto.MsgPong, proto.MsgError:
-			// pong: heartbeat ack (deferred handling); error: log
+			// Pong is informational only. Dead-peer detection is provided by
+			// yamux's built-in keepalive (EnableKeepAlive=true, KeepAliveInterval=30s
+			// in yamux.DefaultConfig). The Ping/Pong messages are retained as a
+			// lightweight application-level liveness signal; yamux keepalive is the
+			// authoritative liveness mechanism.
 			if env.Type == proto.MsgError {
 				c.log.Warn("server error message")
 			}
