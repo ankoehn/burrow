@@ -46,9 +46,8 @@ type EventStream interface {
 }
 
 // LoginRateLimitPerIP is the default maximum login attempts per IP per minute.
-// Per-IP accuracy depends on the trusted-proxy gating wired in C2 (RealIP
-// currently trusts XFF unconditionally; C2 will gate it behind a
-// trusted-proxy config so spoofed IPs cannot bypass per-IP limits).
+// Per-IP accuracy is guaranteed by TrustedProxyMiddleware (C2), which runs
+// before the limiter and gates XFF trust behind a trusted-CIDR allowlist.
 const LoginRateLimitPerIP = 10
 
 // LoginRateLimitGlobal is the default maximum login attempts across all IPs
@@ -65,6 +64,11 @@ type Deps struct {
 	// SPA, if non-nil, serves the embedded dashboard for any non-/api/v1 path
 	// (client-side routing). Nil keeps pure-API behavior (Phase 4b).
 	SPA http.Handler
+	// TrustedProxies is the list of CIDRs/IPs whose X-Forwarded-For /
+	// X-Real-IP headers the server will honor. Empty means no forwarded
+	// headers are trusted (safe default). Populated from config.ServerConfig
+	// by cmd/server. See TrustedProxyMiddleware.
+	TrustedProxies []string
 	// LoginRateLimitPerIP overrides LoginRateLimitPerIP for tests; zero uses the const.
 	LoginRateLimitPerIPOverride int
 	// LoginRateLimitGlobalOverride overrides LoginRateLimitGlobal for tests; zero uses the const.

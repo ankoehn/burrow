@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -35,6 +36,19 @@ type ServerConfig struct {
 	AdminPassword     string `koanf:"admin_password"`
 	HTTPListen        string `koanf:"http_listen"`
 	HTTPSecureCookies bool   `koanf:"http_secure_cookies"`
+	// TrustedProxies is the list of CIDRs or IP addresses of reverse proxies
+	// whose X-Forwarded-For / X-Real-IP headers the server will honor.
+	//
+	// Empty (default) means NO forwarded headers are trusted: the raw TCP peer
+	// address is always used as the client IP. This is the safe default for a
+	// direct-internet deployment and prevents XFF spoofing from bypassing the
+	// per-IP login rate-limiter or poisoning session IP records.
+	//
+	// Non-empty: the server honors forwarded headers ONLY when the immediate
+	// TCP peer IP is within one of the listed CIDRs. Set to your load-balancer
+	// or proxy IP/CIDR (e.g. "10.0.0.0/8") when deploying behind a proxy.
+	// Env: BURROW_TRUSTED_PROXIES (comma-separated CIDRs/IPs).
+	TrustedProxies []string `koanf:"trusted_proxies"`
 }
 
 // ClientConfig configures burrow.
@@ -57,6 +71,47 @@ func envProvider(prefix string) *env.Env {
 	})
 }
 
+// burrowEnvProvider is like envProvider but additionally splits
+// BURROW_TRUSTED_PROXIES (a comma-separated list) into a []string so that
+// koanf can unmarshal it into ServerConfig.TrustedProxies correctly.
+func burrowEnvProvider() *env.Env {
+	return env.ProviderWithValue("BURROW_", ".", func(rawKey, rawVal string) (string, interface{}) {
+		key := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(rawKey, "BURROW_")), "__", ".")
+		if key == "trusted_proxies" {
+			if rawVal == "" {
+				return key, []string{}
+			}
+			parts := strings.Split(rawVal, ",")
+			out := make([]string, 0, len(parts))
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					out = append(out, p)
+				}
+			}
+			return key, out
+		}
+		return key, rawVal
+	})
+}
+
+// parseTrustedProxies validates that each entry in the list is a valid CIDR or
+// IP address. Returns an error naming the first invalid entry.
+func parseTrustedProxies(entries []string) error {
+	for _, e := range entries {
+		if e == "" {
+			continue
+		}
+		// Accept both bare IPs and CIDR notation.
+		if _, _, err := net.ParseCIDR(e); err != nil {
+			if net.ParseIP(e) == nil {
+				return fmt.Errorf("trusted_proxies: %q is not a valid CIDR or IP address", e)
+			}
+		}
+	}
+	return nil
+}
+
 // LoadServer loads the server config, merging defaults < BURROW_ env < overrides.
 func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	k := base()
@@ -67,8 +122,10 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		// database_path is resolved relative to the process working directory;
 		// supply an absolute path via BURROW_DATABASE_PATH in production.
 		"database_path": "./burrow.db", "http_listen": ":8080", "http_secure_cookies": false,
+		// trusted_proxies defaults to empty: no forwarded headers trusted.
+		"trusted_proxies": []string{},
 	}, "."), nil)
-	_ = k.Load(envProvider("BURROW_"), nil)
+	_ = k.Load(burrowEnvProvider(), nil)
 	if overrides != nil {
 		_ = k.Load(confmap.Provider(overrides, "."), nil)
 	}
@@ -77,6 +134,9 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		return nil, fmt.Errorf("unmarshal server config: %w", err)
 	}
 	if err := validate.Struct(&c); err != nil {
+		return nil, fmt.Errorf("invalid server config: %w", err)
+	}
+	if err := parseTrustedProxies(c.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("invalid server config: %w", err)
 	}
 	return &c, nil

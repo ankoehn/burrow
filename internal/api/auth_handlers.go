@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 )
 
@@ -39,7 +40,14 @@ func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "login failed")
 		return
 	}
-	sid, err := d.Users.CreateSession(r.Context(), u.ID, r.UserAgent(), r.RemoteAddr)
+	// Store the host without the port so session.ip is a clean IP address
+	// regardless of whether TrustedProxyMiddleware rewrote RemoteAddr to
+	// "<clientIP>:0" (trusted proxy path) or the TCP peer is host:ephemeralport.
+	clientHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientHost = r.RemoteAddr // fallback: RemoteAddr is already a bare IP
+	}
+	sid, err := d.Users.CreateSession(r.Context(), u.ID, r.UserAgent(), clientHost)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "login failed")
 		return

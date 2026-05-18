@@ -21,9 +21,9 @@ const JSONHandlerTimeout = 30 * time.Second
 // Both values are resolved from Deps overrides (for test injection) with
 // fallback to the package-level constants.
 //
-// Per-IP accuracy depends on the trusted-proxy gating wired in C2 (RealIP
-// currently trusts XFF unconditionally; C2 will gate it behind a
-// trusted-proxy config so spoofed IPs cannot bypass per-IP limits).
+// Per-IP accuracy is guaranteed by TrustedProxyMiddleware (C2), which runs
+// before this limiter and only honors X-Forwarded-For when the TCP peer is
+// within a trusted CIDR — preventing spoofed headers from bypassing the limit.
 func (d Deps) loginRateLimiters() (perIP, global func(http.Handler) http.Handler) {
 	limitPerIP := d.LoginRateLimitPerIPOverride
 	if limitPerIP <= 0 {
@@ -50,7 +50,14 @@ func (d Deps) loginRateLimiters() (perIP, global func(http.Handler) http.Handler
 // NewRouter builds the /api/v1 HTTP handler.
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
+	// TrustedProxyMiddleware replaces the unconditional middleware.RealIP.
+	// It only honors X-Forwarded-For / X-Real-IP when the immediate TCP peer
+	// is within a trusted CIDR (Deps.TrustedProxies). When TrustedProxies is
+	// empty (the safe default), forwarded headers are ignored entirely and the
+	// raw TCP peer is used — preventing XFF spoofing from bypassing the per-IP
+	// login rate-limiter or poisoning session.ip records.
+	// MUST run before the per-IP rate-limiter and Login.
+	r.Use(TrustedProxyMiddleware(d.TrustedProxies))
 	r.Use(middleware.RequestID)
 	r.Use(d.requestLogger)
 	r.Use(middleware.Recoverer)

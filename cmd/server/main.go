@@ -208,6 +208,7 @@ func main() {
 				Handler: api.NewRouter(api.Deps{
 					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
 					Log: log, SecureCookies: cfg.HTTPSecureCookies, SPA: spaHandler,
+					TrustedProxies: cfg.TrustedProxies,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}

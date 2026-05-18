@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestServerDefaultListen(t *testing.T) {
 	// No env set: assert the compiled-in default is :7000.
@@ -99,5 +102,59 @@ func TestServerHTTPSecureCookiesDefaultAndOverride(t *testing.T) {
 	}
 	if !c2.HTTPSecureCookies {
 		t.Fatalf("env override BURROW_HTTP_SECURE_COOKIES=true not applied")
+	}
+}
+
+// TestTrustedProxiesDefaultEmpty asserts that the default TrustedProxies is an
+// empty slice (safe: no forwarded headers trusted).
+func TestTrustedProxiesDefaultEmpty(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if len(c.TrustedProxies) != 0 {
+		t.Fatalf("default trusted_proxies must be empty, got %v", c.TrustedProxies)
+	}
+}
+
+// TestTrustedProxiesEnvParseCIDRList asserts that BURROW_TRUSTED_PROXIES
+// (comma-separated) is correctly split and stored as a []string.
+func TestTrustedProxiesEnvParseCIDRList(t *testing.T) {
+	t.Setenv("BURROW_TRUSTED_PROXIES", "10.0.0.0/8, 192.168.1.1")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if len(c.TrustedProxies) != 2 {
+		t.Fatalf("expected 2 entries, got %v", c.TrustedProxies)
+	}
+	if c.TrustedProxies[0] != "10.0.0.0/8" {
+		t.Fatalf("first entry = %q, want 10.0.0.0/8", c.TrustedProxies[0])
+	}
+	if c.TrustedProxies[1] != "192.168.1.1" {
+		t.Fatalf("second entry = %q, want 192.168.1.1", c.TrustedProxies[1])
+	}
+}
+
+// TestTrustedProxiesOverrideParseCIDR asserts that an override map entry works.
+func TestTrustedProxiesOverrideParseCIDR(t *testing.T) {
+	c, err := LoadServer(map[string]any{"trusted_proxies": []string{"172.16.0.0/12"}})
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if len(c.TrustedProxies) != 1 || c.TrustedProxies[0] != "172.16.0.0/12" {
+		t.Fatalf("expected [172.16.0.0/12], got %v", c.TrustedProxies)
+	}
+}
+
+// TestTrustedProxiesInvalidCIDRError asserts that an unparseable entry causes
+// LoadServer to return an error (fail-fast validation).
+func TestTrustedProxiesInvalidCIDRError(t *testing.T) {
+	_, err := LoadServer(map[string]any{"trusted_proxies": []string{"not-a-cidr"}})
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR in trusted_proxies, got nil")
+	}
+	if !strings.Contains(err.Error(), "trusted_proxies") {
+		t.Fatalf("error should mention trusted_proxies, got: %v", err)
 	}
 }
