@@ -17,8 +17,12 @@ export default function Tunnels() {
   });
   useEffect(() => {
     const es = new EventSource("/api/v1/events");
-    es.onmessage = () => qc.invalidateQueries({ queryKey: ["tunnels"] });
-    return () => es.close();
+    const onTunnels = () => qc.invalidateQueries({ queryKey: ["tunnels"] });
+    es.addEventListener("tunnels", onTunnels);
+    return () => {
+      es.removeEventListener("tunnels", onTunnels);
+      es.close();
+    };
   }, [qc]);
   return (
     <div>

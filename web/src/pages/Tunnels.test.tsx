@@ -3,7 +3,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import Tunnels from "./Tunnels";
 
-class FakeES { onmessage: ((e: any) => void) | null = null; constructor() { (FakeES as any).last = this; } close() {} }
+class FakeES {
+  listeners: Record<string, ((e: any) => void)[]> = {};
+  constructor() { (FakeES as any).last = this; }
+  addEventListener(t: string, fn: (e: any) => void) { (this.listeners[t] ||= []).push(fn); }
+  removeEventListener(t: string, fn: (e: any) => void) {
+    this.listeners[t] = (this.listeners[t] || []).filter((f) => f !== fn);
+  }
+  close() {}
+  emit(t: string) { (this.listeners[t] || []).forEach((fn) => fn({})); }
+}
 (globalThis as any).EventSource = FakeES as any;
 
 function setup() {
@@ -25,7 +34,7 @@ describe("Tunnels", () => {
     expect(screen.getByText("11")).toBeInTheDocument();
     expect(screen.getByText("22")).toBeInTheDocument();
     const before = calls;
-    (FakeES as any).last.onmessage?.({});
+    (FakeES as any).last.emit("tunnels");
     await waitFor(() => expect(calls).toBeGreaterThan(before));
   });
 });

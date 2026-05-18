@@ -4,7 +4,9 @@ import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 
 interface Token { id: string; name: string; last_used: string | null; created_at: string; }
 
@@ -16,10 +18,12 @@ export default function Tokens() {
   const create = useMutation({
     mutationFn: () => apiFetch<{ name: string; token: string }>("/tokens", { method: "POST", body: JSON.stringify({ name }) }),
     onSuccess: (r) => { setPlaintext(r.token); setName(""); qc.invalidateQueries({ queryKey: ["tokens"] }); },
+    onError: () => toast.error("Failed to create token"),
   });
   const revoke = useMutation({
     mutationFn: (id: string) => apiFetch(`/tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }),
+    onError: () => toast.error("Failed to revoke token"),
   });
   return (
     <div>
@@ -43,12 +47,15 @@ export default function Tokens() {
       </Table>
       <Dialog open={plaintext !== null} onOpenChange={(o) => !o && setPlaintext(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Copy your token now</DialogTitle></DialogHeader>
-          <p className="text-sm text-zinc-500">This is shown once. Use it with <code>burrow connect --token …</code></p>
+          <DialogHeader>
+            <DialogTitle>Copy your token now</DialogTitle>
+            <DialogDescription>This is shown once. Use it with <code>burrow connect --token …</code></DialogDescription>
+          </DialogHeader>
           <pre className="overflow-x-auto rounded bg-zinc-100 p-3 text-sm dark:bg-zinc-900">{plaintext}</pre>
           <Button onClick={() => setPlaintext(null)}>Done</Button>
         </DialogContent>
       </Dialog>
+      <Toaster />
     </div>
   );
 }

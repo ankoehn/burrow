@@ -28,8 +28,8 @@ export default function Login() {
       <Card className="w-full max-w-sm p-6">
         <h1 className="mb-4 text-xl font-semibold">Sign in to Burrow</h1>
         <form onSubmit={submit} className="space-y-3">
-          <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <Input type="email" aria-label="Email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input type="password" aria-label="Password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
           <Button type="submit" className="w-full">Sign in</Button>
         </form>
