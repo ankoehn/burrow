@@ -130,6 +130,12 @@ the v0.1.0 tag; track for v0.2.
   built) but a downloader can't tell v6/v7 from the name. Consider emitting
   `armv7` in `archives.name_template`. _Source: Phase 5 Task 2 review._
 
+## Post-v0.1 hardening (resolved / awareness)
+
+- **`apiFetch` header-merge footgun — RESOLVED.** `web/src/lib/api.ts` previously spread `...opts` after the `headers:` key, so any future caller passing `opts.headers` would silently replace the entire merged headers object (clobbering `Content-Type` and the C3 `X-CSRF-Token`). Fixed by destructuring `headers` out of `opts` and merging `callerHeaders` inside the final headers object. No current caller is affected; the fix is latent-safe. Covered by new Vitest asserting CSRF+Content-Type remain present when a caller supplies `opts.headers`. _Source: Phase 5 final hardening review._
+
+- **`RequireAdmin` status on vanished session user — RESOLVED.** `internal/api/middleware.go` `RequireAdmin` previously returned HTTP 500 when `GetUserByID` returned `db.ErrNotFound` (user concurrently deleted between session validation and admin check). Fixed to return 401 (`errors.Is(db.ErrNotFound)`) since the session no longer maps to a valid user; genuine infra errors still return 500. Covered by new `TestRequireAdminDeletedUserIs401`. _Source: Phase 5 final hardening review._
+
 ## Pre-launch checklist
 
 - Enable GitHub Private Vulnerability Reporting (Settings → Code security) before the repo is public.

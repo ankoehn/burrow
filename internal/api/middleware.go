@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/store"
 )
 
@@ -94,6 +95,10 @@ func (d Deps) RequireAdmin(next http.Handler) http.Handler {
 		uid := userID(r.Context())
 		u, err := d.Users.GetUserByID(r.Context(), uid)
 		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeErr(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
 			writeErr(w, http.StatusInternalServerError, "lookup failed")
 			return
 		}

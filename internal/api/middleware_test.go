@@ -190,6 +190,36 @@ func TestRequestLoggerAssetPathsAreDebug(t *testing.T) {
 	}
 }
 
+// deletedUserFake embeds fakeUsers but overrides GetUserByID to return
+// db.ErrNotFound, simulating a session whose backing user row was deleted.
+type deletedUserFake struct {
+	fakeUsers
+}
+
+func (d deletedUserFake) GetUserByID(_ context.Context, _ string) (db.User, error) {
+	return db.User{}, db.ErrNotFound
+}
+
+// TestRequireAdminDeletedUserIs401 asserts that when RequireAdmin calls
+// GetUserByID and the user row no longer exists (db.ErrNotFound), the response
+// is 401 — not 500 (wrong status) and not 403 (wrong semantics).
+func TestRequireAdminDeletedUserIs401(t *testing.T) {
+	fake := deletedUserFake{fakeUsers: fakeUsers{validate: func(string) (string, error) { return "u1", nil }}}
+	d := Deps{Users: fake, Log: slog.Default()}
+	// Wrap: RequireSession injects uid into ctx, then RequireAdmin checks it.
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := d.RequireSession(d.RequireAdmin(inner))
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "any"})
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted session user: want 401, got %d", rr.Code)
+	}
+}
+
 // infraErrUsers is a UserStore whose ValidateSession always returns a
 // non-ErrUnauthorized infrastructure error, while login still succeeds.
 // It embeds authUsers so that VerifyUserPassword / GetUserByEmail / CreateSession

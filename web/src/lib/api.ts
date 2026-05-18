@@ -25,10 +25,11 @@ export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}
       csrfHeaders["X-CSRF-Token"] = token;
     }
   }
+  const { headers: callerHeaders, ...rest } = opts;
   const res = await fetch("/api/v1" + path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...csrfHeaders, ...(opts.headers || {}) },
-    ...opts,
+    ...rest,
+    headers: { "Content-Type": "application/json", ...csrfHeaders, ...(callerHeaders || {}) },
   });
   if (res.status === 401) {
     throw new ApiError(401, "unauthorized");

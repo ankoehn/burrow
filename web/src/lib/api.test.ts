@@ -101,5 +101,30 @@ describe("apiFetch", () => {
       // a truthy value — the server exempts login anyway.
       expect(headers["X-CSRF-Token"] || "").toBe("");
     });
+
+    it("caller-supplied headers are merged and X-CSRF-Token is always present on POST", async () => {
+      // This test proves Fix-1: before the fix, ...opts spread after the headers
+      // object would replace the entire headers key (including X-CSRF-Token) with
+      // opts.headers. After the fix, opts.headers is destructured and merged INTO
+      // the final headers object, so X-CSRF-Token is always present on POST.
+      if (typeof document !== "undefined") {
+        document.cookie = "burrow_csrf=secure-token; path=/";
+      }
+      const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }) as any);
+      await apiFetch("/tokens", {
+        method: "POST",
+        // Caller passes an extra header. Previously, supplying opts.headers
+        // caused ...opts to overwrite the headers key, clobbering X-CSRF-Token.
+        headers: { "X-Custom": "my-value" },
+      });
+      const [, callOpts] = f.mock.calls[0] as [string, RequestInit];
+      const headers = callOpts.headers as Record<string, string>;
+      // CSRF token must still be present — not clobbered by caller opts.headers.
+      expect(headers["X-CSRF-Token"]).toBe("secure-token");
+      // Default Content-Type must still be present.
+      expect(headers["Content-Type"]).toBe("application/json");
+      // Caller's extra header is merged in alongside the defaults.
+      expect(headers["X-Custom"]).toBe("my-value");
+    });
   });
 });
