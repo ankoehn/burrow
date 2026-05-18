@@ -50,9 +50,22 @@ builds:
       - -X github.com/ankoehn/burrow/internal/version.Date={{.Date}}
 
 archives:
-  - formats: [tar.gz]
+  - id: server
+    ids: [server]
+    formats: [tar.gz]
     name_template: >-
-      {{ .ProjectName }}_{{ .Os }}_
+      burrowd_{{ .Os }}_
+      {{- if eq .Arch "arm" }}armv7
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+  - id: client
+    ids: [client]
+    formats: [tar.gz]
+    name_template: >-
+      burrow_{{ .Os }}_
       {{- if eq .Arch "arm" }}armv7
       {{- else }}{{ .Arch }}{{ end }}_
       {{- .Version }}
