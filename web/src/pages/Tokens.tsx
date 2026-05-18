@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { formatTimestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Toaster } from "@/components/ui/sonner";
@@ -28,8 +30,11 @@ export default function Tokens() {
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold">Client tokens</h1>
-      <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (name) create.mutate(); }}>
-        <Input placeholder="Token name (e.g. laptop)" value={name} onChange={(e) => setName(e.target.value)} />
+      <form className="mb-4 flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (name) create.mutate(); }}>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="token-name">Token name</Label>
+          <Input id="token-name" placeholder="e.g. laptop" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
         <Button type="submit" disabled={!name || create.isPending}>Create</Button>
       </form>
       <Table>
@@ -38,9 +43,9 @@ export default function Tokens() {
           {(data ?? []).map((t) => (
             <TableRow key={t.id}>
               <TableCell>{t.name}</TableCell>
-              <TableCell>{t.created_at}</TableCell>
-              <TableCell>{t.last_used ?? "never"}</TableCell>
-              <TableCell><Button variant="outline" size="sm" onClick={() => revoke.mutate(t.id)}>Revoke</Button></TableCell>
+              <TableCell>{formatTimestamp(t.created_at)}</TableCell>
+              <TableCell>{t.last_used ? formatTimestamp(t.last_used) : "never"}</TableCell>
+              <TableCell><Button variant="outline" size="sm" aria-label={`Revoke token ${t.name}`} onClick={() => revoke.mutate(t.id)}>Revoke</Button></TableCell>
             </TableRow>
           ))}
         </TableBody>

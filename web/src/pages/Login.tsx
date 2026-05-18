@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 
 export default function Login() {
@@ -28,8 +29,14 @@ export default function Login() {
       <Card className="w-full max-w-sm p-6">
         <h1 className="mb-4 text-xl font-semibold">Sign in to Burrow</h1>
         <form onSubmit={submit} className="space-y-3">
-          <Input type="email" aria-label="Email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <Input type="password" aria-label="Password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="login-email">Email</Label>
+            <Input id="login-email" type="email" placeholder="you@example.com" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="login-password">Password</Label>
+            <Input id="login-password" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </div>
           {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
           <Button type="submit" className="w-full">Sign in</Button>
         </form>

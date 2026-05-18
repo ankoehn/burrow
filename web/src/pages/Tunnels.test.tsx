@@ -38,8 +38,9 @@ describe("Tunnels", () => {
     });
     setup();
     expect(await screen.findByText("web")).toBeInTheDocument();
-    expect(screen.getByText("11")).toBeInTheDocument();
-    expect(screen.getByText("22")).toBeInTheDocument();
+    // bytes_in: 11 B, bytes_out: 22 B — rendered with formatBytes
+    expect(screen.getByText("11 B")).toBeInTheDocument();
+    expect(screen.getByText("22 B")).toBeInTheDocument();
     const before = calls;
     act(() => { (FakeES as any).last.emit("tunnels"); });
     await waitFor(() => expect(calls).toBeGreaterThan(before));

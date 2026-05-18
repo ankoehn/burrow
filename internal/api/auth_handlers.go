@@ -10,6 +10,13 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
+// userResp is returned by Login and Me — id/email/role.
+type userResp struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 // Login verifies credentials, creates a session, and sets the cookie.
 func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
@@ -38,7 +45,7 @@ func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSessionCookie(w, sid, d.SecureCookies)
-	writeJSON(w, http.StatusOK, map[string]string{"id": u.ID, "email": u.Email, "role": u.Role})
+	writeJSON(w, http.StatusOK, userResp{ID: u.ID, Email: u.Email, Role: u.Role})
 }
 
 // Logout deletes the session and clears the cookie.
@@ -57,5 +64,5 @@ func (d Deps) Me(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"id": u.ID, "email": u.Email, "role": u.Role})
+	writeJSON(w, http.StatusOK, userResp{ID: u.ID, Email: u.Email, Role: u.Role})
 }

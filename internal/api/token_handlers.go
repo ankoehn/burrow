@@ -36,6 +36,12 @@ type createTokenReq struct {
 	Name string `json:"name"`
 }
 
+// newTokenResp is returned by CreateToken — name and the one-time plaintext.
+type newTokenResp struct {
+	Name  string `json:"name"`
+	Token string `json:"token"`
+}
+
 // CreateToken mints a new client token and returns the plaintext exactly once.
 func (d Deps) CreateToken(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
@@ -49,7 +55,7 @@ func (d Deps) CreateToken(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "issue failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": in.Name, "token": pt})
+	writeJSON(w, http.StatusCreated, newTokenResp{Name: in.Name, Token: pt})
 }
 
 // RevokeToken deletes one of the caller's tokens.

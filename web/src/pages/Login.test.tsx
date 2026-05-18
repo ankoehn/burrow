@@ -31,8 +31,8 @@ describe("Login", () => {
   it("shows an error on bad credentials", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401 }) as any);
     setup();
-    await userEvent.type(screen.getByPlaceholderText("Email"), "a@x");
-    await userEvent.type(screen.getByPlaceholderText("Password"), "bad");
+    await userEvent.type(screen.getByLabelText("Email"), "a@x");
+    await userEvent.type(screen.getByLabelText("Password"), "bad");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid/i);
   });
@@ -40,8 +40,8 @@ describe("Login", () => {
   it("calls the login endpoint on submit", async () => {
     const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }) as any);
     setup();
-    await userEvent.type(screen.getByPlaceholderText("Email"), "a@x");
-    await userEvent.type(screen.getByPlaceholderText("Password"), "pw");
+    await userEvent.type(screen.getByLabelText("Email"), "a@x");
+    await userEvent.type(screen.getByLabelText("Password"), "pw");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     expect(f).toHaveBeenCalledWith("/api/v1/auth/login", expect.objectContaining({ method: "POST" }));
   });
@@ -51,8 +51,8 @@ describe("Login", () => {
       new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401 }) as any
     );
     setupWithRoutes();
-    await userEvent.type(screen.getByPlaceholderText("Email"), "a@x");
-    await userEvent.type(screen.getByPlaceholderText("Password"), "bad");
+    await userEvent.type(screen.getByLabelText("Email"), "a@x");
+    await userEvent.type(screen.getByLabelText("Password"), "bad");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     // Error banner must appear — Login stays mounted, no redirect to HOME PAGE
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid/i);

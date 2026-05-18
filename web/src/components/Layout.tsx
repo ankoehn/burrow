@@ -17,7 +17,7 @@ export function Layout() {
     <div className="flex min-h-screen">
       <aside className="w-56 border-r border-zinc-200 p-4 dark:border-zinc-800">
         <div className="mb-6 px-3 text-lg font-semibold">Burrow</div>
-        <nav className="space-y-1">
+        <nav aria-label="Main" className="space-y-1">
           <NavLink to="/tunnels" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Tunnels</NavLink>
           <NavLink to="/tokens" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Tokens</NavLink>
           <NavLink to="/account" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Account</NavLink>

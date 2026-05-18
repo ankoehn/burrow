@@ -13,11 +13,15 @@ export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}
     throw new ApiError(401, "unauthorized");
   }
   const text = await res.text();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let body: any = null;
+  let body: unknown = null;
   if (text) {
     try { body = JSON.parse(text); } catch { body = null; }
   }
-  if (!res.ok) throw new ApiError(res.status, (body && body.error) || res.statusText);
+  if (!res.ok) {
+    const errMsg = (typeof body === "object" && body !== null && "error" in body && typeof (body as Record<string, unknown>).error === "string")
+      ? (body as Record<string, unknown>).error as string
+      : res.statusText;
+    throw new ApiError(res.status, errMsg);
+  }
   return body as T;
 }

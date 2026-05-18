@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface Tunnel {
@@ -58,8 +59,8 @@ export default function Tunnels() {
                 <TableCell>{t.type}</TableCell>
                 <TableCell>:{t.remote_port}</TableCell>
                 <TableCell>{t.local_addr}</TableCell>
-                <TableCell>{t.bytes_in}</TableCell>
-                <TableCell>{t.bytes_out}</TableCell>
+                <TableCell>{formatBytes(t.bytes_in)}</TableCell>
+                <TableCell>{formatBytes(t.bytes_out)}</TableCell>
                 <TableCell>{t.connected ? "connected" : "—"}</TableCell>
               </TableRow>
             ))}
