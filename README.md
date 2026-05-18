@@ -26,25 +26,24 @@ BURROW_ADMIN_EMAIL=you@example.com BURROW_ADMIN_PASSWORD=pick-a-strong-password 
   burrowd serve --dev-certs
 ```
 
-**2. Create a tunnel token.** Open `http://<your-vps>:8080`, log in with the admin credentials from step 1, and create a token — copy the `bur_…` value. *(No browser handy? On the VPS run `burrowd token --email you@example.com` and copy the printed token.)*
+**2. Create a tunnel token.** Open `http://<your-vps>:8080`, log in with the admin credentials from step 1, and create a token — copy the `bur_…` value. *(No browser handy? On the VPS, after the relay has started once, run `burrowd token --email you@example.com` and copy the printed token.)*
 
 **3. Expose your local service** from your machine. This publishes `127.0.0.1:3000` on the relay's port `9000`:
 
 ```bash
 burrow connect --server <your-vps>:7000 --token bur_xxx \
-  --local 127.0.0.1:3000 --remote 9000 \
-  --cacert dev-ca.pem --server-name <your-vps>
+  --local 127.0.0.1:3000 --remote 9000 --insecure
 ```
 
-`--cacert` is the relay's `certs/dev-ca.pem` — copy it from the VPS to your machine first (or, for a throwaway local test only, drop `--cacert`/`--server-name` and pass `--insecure`; never in production). Omit `--remote` to let the server pick a free port (9000–9100 by default). Visitors now reach your service at `<your-vps>:9000`.
+`--dev-certs` issues a self-signed certificate valid only for `localhost`/`127.0.0.1`, so reaching a VPS by its hostname requires `--insecure` (skip TLS verification — fine for trying Burrow, **never in production**). Omit `--remote` to let the server pick a free port (9000–9100 by default). Visitors now reach your service at `<your-vps>:9000`.
 
-For production, terminate TLS with real certificates — set `BURROW_TLS_CERT` / `BURROW_TLS_KEY` (or `--tls-cert` / `--tls-key`) instead of `--dev-certs`, and put the dashboard behind HTTPS.
+**For production, use real TLS certificates.** Set `BURROW_TLS_CERT` / `BURROW_TLS_KEY` (a certificate whose SAN includes your server's hostname) instead of `--dev-certs`; then drop `--insecure` and instead pass `--cacert <your-ca.pem>` (omit if the cert chains to a public CA) and `--server-name <hostname-in-the-cert>`. Put the dashboard behind HTTPS too.
 
 ### Install
 
-Prebuilt binaries for Linux (amd64 / arm64 / armv7), macOS (amd64 / arm64), and Windows (amd64), plus a multi-arch container image, are published on the [Releases](https://github.com/ankoehn/burrow/releases) page for each tagged version.
+Prebuilt binaries for Linux (amd64 / arm64 / armv7), macOS (amd64 / arm64), and Windows (amd64), plus a multi-arch container image, are published on the [Releases](https://github.com/ankoehn/burrow/releases) page for each tagged version. If you cloned `main` before the first release tag, build from source (below).
 
-Docker:
+Docker (`./data` must be writable by the container's non-root user, uid 65532 — e.g. `mkdir -p data && sudo chown 65532:65532 data`):
 
 ```bash
 docker run -d --name burrow \
@@ -75,10 +74,10 @@ make build            # or: task build   (Windows / no make)
 | License | Apache-2.0 | Apache-2.0 | Proprietary | AGPL-3.0 |
 | Held-back / paid-only features | None | None | Many | Some |
 | Deploys as | 2 static binaries | 2 static binaries | client binary + SaaS | container stack |
-| Built-in web dashboard | ✅ | ✅ | ✅ (hosted) | ✅ |
-| Scope (Burrow v0.1) | TCP | TCP / HTTP / UDP | TCP / HTTP / TLS | HTTP / TCP + access control |
+| Built-in web dashboard | ✅ | ✅ (status page) | ✅ (hosted) | ✅ |
+| Protocols | TCP (v0.1) | TCP / HTTP / UDP | TCP / HTTP / TLS | HTTP / TCP + access control |
 
-Burrow is the youngest and narrowest of these — it does one thing (self-hosted TCP tunnels with a clean dashboard) under a permissive license with no held-back features. frp is the closest mature analogue; choose Burrow if you want a smaller surface and the Apache-2.0 "nothing held back" guarantee.
+Burrow is the youngest and narrowest of these — it does one thing (self-hosted TCP tunnels with a clean dashboard) under a permissive license with no held-back features. frp is the closest mature analogue (also Apache-2.0); choose Burrow if you want a smaller surface and a built-in management dashboard, frp if you need HTTP/UDP today.
 
 ## Architecture
 
@@ -97,8 +96,7 @@ flowchart LR
     P --> S
     S <-->|"TLS + yamux\ncontrol channel :7000"| C
     C --> L
-    A["Admin"] -->|HTTP| D
-    D -. issues token .-> C
+    A["Admin"] -->|"HTTP — create token\n(one-time setup)"| D
 ```
 
 The client opens a single outbound TLS connection to the server and authenticates with a token. Control messages are multiplexed over a yamux session; each visitor connection becomes a new stream that the server bridges to the client, which dials your local service. The dashboard and JSON API run inside the same `burrowd` process and mint the token the client uses.
