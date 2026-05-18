@@ -4,11 +4,13 @@ import { Moon, Sun } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
+import { useAuth } from "@/auth/useAuth";
 
 export function Layout() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
   async function logout() {
     try { await apiFetch("/auth/logout", { method: "POST" }); } catch { /* ignore */ }
     qc.clear();
@@ -24,6 +26,9 @@ export function Layout() {
           <NavLink to="/tunnels" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Tunnels</NavLink>
           <NavLink to="/tokens" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Tokens</NavLink>
           <NavLink to="/account" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Account</NavLink>
+          {user?.role === "admin" && (
+            <NavLink to="/users" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>Users</NavLink>
+          )}
         </nav>
         <div className="mt-6 px-3 flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={logout}>Log out</Button>

@@ -5,6 +5,7 @@ import Login from "@/pages/Login";
 import Tunnels from "@/pages/Tunnels";
 import Tokens from "@/pages/Tokens";
 import Account from "@/pages/Account";
+import Users from "@/pages/Users";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/tunnels" element={<Tunnels />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/account" element={<Account />} />
+        <Route path="/users" element={<Users />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
