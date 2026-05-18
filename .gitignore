@@ -25,3 +25,6 @@ Thumbs.db
 
 # Claude Code harness state (worktrees, local settings) - never commit
 .claude/
+
+# Internal project + AI-workflow docs - kept local, never published
+docs/

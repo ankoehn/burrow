@@ -30,10 +30,6 @@ flowchart LR
 
 Phase 1 (repo & scaffolding): builds two do-nothing binaries with CI, lint, and release config.
 
-- [Roadmap](docs/ROADMAP.md)
-- [MVP phases](docs/MVP_PHASES.md)
-- [Implementation drafts](docs/IMPLEMENTATION.md)
-
 ## Build
 
 Requires Go 1.22+.
