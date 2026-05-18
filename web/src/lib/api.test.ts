@@ -19,4 +19,13 @@ describe("apiFetch", () => {
     await apiFetch("/tunnels");
     expect(f).toHaveBeenCalledWith("/api/v1/tunnels", expect.objectContaining({ credentials: "include" }));
   });
+  it("returns null for an empty 204 body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }) as any);
+    expect(await apiFetch("/auth/logout", { method: "POST" })).toBeNull();
+  });
+  it("redirects to /login and throws ApiError(401) on 401", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 401 }) as any);
+    await expect(apiFetch("/me")).rejects.toMatchObject({ status: 401 });
+    expect((globalThis as any).location.href).toBe("/login");
+  });
 });

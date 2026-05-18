@@ -16,7 +16,10 @@ export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}
     throw new ApiError(401, "unauthorized");
   }
   const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
+  let body: any = null;
+  if (text) {
+    try { body = JSON.parse(text); } catch { body = null; }
+  }
   if (!res.ok) throw new ApiError(res.status, (body && body.error) || res.statusText);
   return body as T;
 }
