@@ -160,6 +160,10 @@ func main() {
 					return err
 				}
 			}
+			if isDev, reason := server.DevCertWarning(cfg.TLSCert); isDev {
+				log.Warn("serving with a DEVELOPMENT self-signed TLS certificate — NOT for production; set BURROW_TLS_CERT/BURROW_TLS_KEY (or --tls-cert/--tls-key) to real certificates",
+					"reason", reason, "cert", cfg.TLSCert)
+			}
 			database, err := db.Open(cfg.DatabasePath)
 			if err != nil {
 				return err

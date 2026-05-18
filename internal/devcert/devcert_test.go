@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGenerateWritesVerifiableChain(t *testing.T) {
@@ -69,4 +70,32 @@ func containsIP(ips []net.IP, want net.IP) bool {
 		}
 	}
 	return false
+}
+
+// TestGenerateCertLifetime asserts that both the CA and server certificates
+// have a lifetime of approximately 90 days (within ±2 days of slack).
+func TestGenerateCertLifetime(t *testing.T) {
+	dir := t.TempDir()
+	if err := Generate(dir, true); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	const want = 90 * 24 * time.Hour
+	const slack = 2 * 24 * time.Hour
+
+	for _, f := range []string{"dev-ca.pem", "dev-server.pem"} {
+		pemBytes, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		cert := parseCert(t, pemBytes)
+		// NotBefore is backdated by 1h, so use NotAfter - NotBefore for the full lifetime.
+		lifetime := cert.NotAfter.Sub(cert.NotBefore)
+		diff := lifetime - want
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > slack {
+			t.Errorf("%s: lifetime %v, want ~%v (slack ±%v)", f, lifetime, want, slack)
+		}
+	}
 }
