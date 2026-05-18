@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -171,43 +172,61 @@ func TestLoginStoresHostOnly_TrustedProxy(t *testing.T) {
 }
 
 // TestSpoofedXFFCannotBypassPerIPLimiter is the key security regression test.
-// It proves that with empty TrustedProxies, an attacker who rotates X-Forwarded-For
-// on every request from the SAME TCP peer still hits the per-IP rate limit —
-// because the limiter keys on RemoteAddr (the real peer), not the spoofed header.
+// It proves that with empty TrustedProxies, an attacker who uses a UNIQUE
+// X-Forwarded-For on every request from the SAME TCP peer still hits the
+// per-IP rate limit — because the limiter keys on RemoteAddr (the real peer),
+// not the spoofed header.
+//
+// Discrimination: a middleware that (wrongly) honours untrusted XFF would key
+// each request on a distinct IP and would never reach the per-IP limit, so no
+// 429 would be returned and the final assertion would FAIL.  The correct
+// middleware ignores XFF from an untrusted peer, keys all requests on the single
+// real TCP peer, and DOES trip the limit — so the test PASSES.
 func TestSpoofedXFFCannotBypassPerIPLimiter(t *testing.T) {
+	const perIPLimit = 3
+	const sendCount = 8 // comfortably exceeds perIPLimit
+
 	au := &authUsers{verify: func(_, _ string) (bool, error) { return false, nil }}
-	// Use a very low per-IP limit (2) so we hit it quickly without needing many requests.
 	ts := newTestServer(Deps{
 		Users:                        au,
 		Log:                          discardLog(),
 		TrustedProxies:               nil, // safe default: no forwarded headers trusted
-		LoginRateLimitPerIPOverride:  2,
-		LoginRateLimitGlobalOverride: 200,
+		LoginRateLimitPerIPOverride:  perIPLimit,
+		LoginRateLimitGlobalOverride: 1000,
 	})
 	defer ts.Close()
 
-	spoofedIPs := []string{
-		"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4",
-	}
 	got429 := false
-	for i := 0; i < 10; i++ {
+	first429At := -1
+	for i := 0; i < sendCount; i++ {
 		req, _ := http.NewRequest("POST", ts.URL+"/api/v1/auth/login",
 			strings.NewReader(`{"email":"a@x","password":"pw"}`))
 		req.Header.Set("Content-Type", "application/json")
-		// Rotate spoofed XFF on every request — if XFF were trusted this would
-		// present a new "IP" each time, bypassing the per-IP limit.
-		req.Header.Set("X-Forwarded-For", spoofedIPs[i%len(spoofedIPs)])
+		// Every request carries a UNIQUE spoofed XFF value. A middleware that
+		// honours this header would see sendCount distinct "client IPs" and
+		// would never accumulate enough hits on any single key to reach perIPLimit.
+		// The correct middleware ignores these and keys on the one real TCP peer.
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", i))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode == http.StatusTooManyRequests {
+		if resp.StatusCode == http.StatusTooManyRequests && !got429 {
 			got429 = true
-			break
+			first429At = i
 		}
 	}
 	if !got429 {
-		t.Error("expected 429 from per-IP rate-limiter even with rotating spoofed XFF headers; spoofed XFF must not bypass the limiter")
+		t.Errorf("expected at least one 429 from per-IP rate-limiter (limit=%d, sent=%d requests); "+
+			"spoofed unique XFF values must not bypass the limiter keyed on the real TCP peer",
+			perIPLimit, sendCount)
+	}
+	// The 429 must not arrive before the limit is exhausted (sanity: first
+	// perIPLimit-1 requests should all succeed).
+	if got429 && first429At < perIPLimit {
+		t.Errorf("429 arrived at request index %d, but limit is %d; "+
+			"rate-limiter should allow at least %d requests before throttling",
+			first429At, perIPLimit, perIPLimit)
 	}
 }
