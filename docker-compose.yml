@@ -1,20 +1,24 @@
 services:
   burrow:
     image: ghcr.io/ankoehn/burrow:latest
+    # `serve` requires TLS certs. `--dev-certs` generates self-signed certs
+    # into ./data/certs on first start (idempotent). For production, mount
+    # real certificates and set BURROW_TLS_CERT / BURROW_TLS_KEY instead of
+    # passing --dev-certs.
+    command: ["serve", "--dev-certs"]
+    working_dir: /data
     ports:
-      - "8080:8080"   # dashboard
-      - "7000:7000"   # control channel
-      - "9000-9100:9000-9100"  # tunneled ports
+      - "8080:8080"            # dashboard + JSON API
+      - "7000:7000"            # control channel (TLS)
+      - "9000-9100:9000-9100"  # tunneled public ports
     environment:
       BURROW_ADMIN_EMAIL: admin@example.com
-      BURROW_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      # Seeded ONCE, only when the database has no users. Set a strong value
+      # BEFORE the first start; rotate it from the dashboard after you log in.
+      BURROW_ADMIN_PASSWORD: change-me-before-first-start
       BURROW_DATABASE_PATH: /data/burrow.db
     volumes:
+      # ./data must be writable by the container's non-root user (uid 65532):
+      #   mkdir -p data && sudo chown 65532:65532 data
       - ./data:/data
-    secrets:
-      - admin_password
     restart: unless-stopped
-
-secrets:
-  admin_password:
-    file: ./admin_password.txt

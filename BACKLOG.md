@@ -83,3 +83,52 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
 - **Dashboard visual polish + dark/light toggle.** MVP shell is intentionally minimal (Phase-5 polish); add an explicit theme toggle, refined layout/empty-states. _Source: Phase 4c spec §6/G11._
 - **Change-password / account endpoint + page.** Account is read-only this MVP (parent Phase-4 spec §7 + done-criteria omit password change); cross-refs the existing 4b backlog bullet — implement together in v0.2. _Source: Phase 4c spec §6._
 - **Static-asset requests are logged at info via the API request logger.** SPA assets flow through the chi `requestLogger` (shared router); a handful of info lines per page load — acceptable for MVP, consider downgrading `/*`/`/assets/` to debug or skipping if log noise matters at scale. _Source: Phase 4c Task 7 independent code review._
+
+## Deployment / packaging (Phase 5)
+
+- **Support the `*_FILE` secret convention.** The MVP binary reads
+  `BURROW_ADMIN_PASSWORD` (and tokens) only from the literal env var. The
+  original `docker-compose.yml` used `BURROW_ADMIN_PASSWORD_FILE` + Docker
+  `secrets:`, which the binary never implemented (admin silently not seeded).
+  Fixed by switching the example to `BURROW_ADMIN_PASSWORD`. Add a generic
+  `<VAR>_FILE` indirection (if `<VAR>_FILE` is set, read that file into
+  `<VAR>`) so Docker/Swarm/K8s file secrets work without exposing values in
+  the environment — v0.2. _Source: Phase 5 P5._
+- **Smoother first-run container UX.** `burrowd serve` requires TLS certs; the
+  compose example passes `--dev-certs` and sets `working_dir: /data` so
+  self-signed certs land on the writable volume, and `./data` must be
+  pre-chowned to the non-root uid (65532). A first-run entrypoint that
+  bootstraps the cert/data directories (plus a documented production path for
+  real certs) would remove these caveats — v0.2. _Source: Phase 5 P5._
+
+## Release pipeline hardening (Phase 5, v0.2)
+
+Non-blocking items surfaced by the Phase 5 per-task code reviews. None block
+the v0.1.0 tag; track for v0.2.
+
+- **Narrow the release tag glob.** `release.yml` triggers on `tags: ["v*"]`,
+  which also matches non-semver tags (`vfoo`, `v-test`). Tighten to
+  `["v[0-9]*"]` to eliminate accidental full release+GHCR+sign runs.
+  _Source: Phase 5 Task 3 review._
+- **Add a `concurrency:` group** (`group: release-${{ github.ref }}`,
+  `cancel-in-progress: true`) to `release.yml` and `release-dryrun.yml` so a
+  rapid re-tag does not race two publishing runs. _Source: Phase 5 Task 3/4 review._
+- **Add `timeout-minutes`** (~30) to the release and dry-run jobs to cap a
+  hung QEMU multi-arch build (default GH timeout is 6h).
+  _Source: Phase 5 Task 4 review._
+- **SHA-pin GitHub Actions.** Actions are major-tag pinned (`@v4` …); pin to
+  immutable commit SHAs for supply-chain hardening. _Source: Phase 5 Task 3 review._
+- **Tag protection / required CI on the tagged commit.** A tag on a broken
+  commit would still trigger a publish. Add a GitHub tag-protection rule or a
+  required-status gate before release. _Source: Phase 5 Task 3 review._
+- **Migrate `.goreleaser.yml` `dockers:`/`docker_manifests:` to the new
+  `dockers_v2:` schema** before a goreleaser release that removes the
+  deprecated keys. Non-blocking for v0.1.0: the `~> v2` pin keeps goreleaser
+  on v2.x (which still supports `dockers:` with only a deprecation warning);
+  removal would land in goreleaser v3, which `~> v2` never selects. Do the
+  migration when bumping to goreleaser v3 / `goreleaser-action` v7+.
+  _Source: Phase 5 Task 2 review._
+- **`linux/arm` archive naming.** Archives use `{{ .Arch }}` → `arm` for the
+  armv7 build (`burrow_linux_arm_<ver>.tar.gz`); unambiguous (only v7 is
+  built) but a downloader can't tell v6/v7 from the name. Consider emitting
+  `armv7` in `archives.name_template`. _Source: Phase 5 Task 2 review._
