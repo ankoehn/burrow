@@ -5,10 +5,24 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 )
+
+// TestAPIShutdownGraceExceedsHandlerTimeout asserts the compile-visible
+// invariant that apiShutdownGrace (the timeout passed to http.Server.Shutdown)
+// is strictly greater than api.JSONHandlerTimeout (the chi middleware.Timeout
+// on JSON routes). If a future edit shrinks apiShutdownGrace below or equal to
+// the chi handler timeout, in-flight handlers can outlive Shutdown and then
+// touch a closed *sql.DB, producing spurious 500s on graceful stop.
+func TestAPIShutdownGraceExceedsHandlerTimeout(t *testing.T) {
+	if apiShutdownGrace <= api.JSONHandlerTimeout {
+		t.Fatalf("apiShutdownGrace (%s) must be strictly greater than api.JSONHandlerTimeout (%s)",
+			apiShutdownGrace, api.JSONHandlerTimeout)
+	}
+}
 
 // TestTunnelStoreAdapterPersistsAllFields verifies that tunnelStoreAdapter
 // maps every field of *server.Tunnel to the db layer without silently dropping

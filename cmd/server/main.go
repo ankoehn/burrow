@@ -37,6 +37,13 @@ import (
 	"github.com/ankoehn/burrow/web"
 )
 
+// apiShutdownGrace is the timeout given to (*http.Server).Shutdown when the
+// serve command receives a stop signal. It must be strictly greater than
+// api.JSONHandlerTimeout (the chi middleware.Timeout applied to JSON routes)
+// so that every in-flight handler has time to complete (or be chi-cancelled)
+// before Shutdown returns and the deferred database.Close() runs.
+const apiShutdownGrace = api.JSONHandlerTimeout + 5*time.Second
+
 func versionLine() string {
 	return fmt.Sprintf("burrowd %s (commit %s, built %s, %s/%s)",
 		version.Version, version.Commit, version.Date, runtime.GOOS, runtime.GOARCH)
@@ -221,11 +228,11 @@ func main() {
 			case firstErr = <-errc:
 				stop() // cancel ctx so the other (healthy) server unwinds too
 			}
-			// 5s is intentionally shorter than the JSON group's 30s chi
-			// middleware.Timeout; database.Close() (deferred earliest) runs
-			// only AFTER srv.Wait() below, so do not widen this asymmetry
-			// without revisiting the BACKLOG "API drain before DB close" item.
-			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// apiShutdownGrace (35s) > api.JSONHandlerTimeout (30s): every
+			// in-flight handler completes (or is chi-cancelled at 30s and
+			// returns) before Shutdown returns. The deferred reaperWg.Wait()
+			// and database.Close() then run in LIFO order after this point.
+			shutCtx, cancel := context.WithTimeout(context.Background(), apiShutdownGrace)
 			defer cancel()
 			_ = apiSrv.Shutdown(shutCtx)
 			srv.Wait()

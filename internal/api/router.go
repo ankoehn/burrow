@@ -8,6 +8,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+// JSONHandlerTimeout is the maximum duration the chi middleware.Timeout allows
+// a JSON API handler to run. cmd/server uses this constant to set the HTTP
+// server shutdown grace period to strictly exceed this value, ensuring every
+// in-flight handler completes (or is chi-cancelled) before database.Close()
+// runs.
+const JSONHandlerTimeout = 30 * time.Second
+
 // NewRouter builds the /api/v1 HTTP handler.
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
@@ -19,10 +26,10 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", d.Login)
 
-		// JSON routes: session-protected + 30s timeout.
+		// JSON routes: session-protected + JSONHandlerTimeout.
 		r.Group(func(r chi.Router) {
 			r.Use(d.RequireSession)
-			r.Use(middleware.Timeout(30 * time.Second))
+			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)
 			r.Get("/me", d.Me)
 			r.Get("/tokens", d.ListTokens)
