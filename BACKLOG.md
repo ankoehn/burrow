@@ -59,3 +59,14 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   runs — handled (returns `sql: database is closed` → 500), not memory-unsafe, but
   untidy. Hardening: align the `Shutdown` deadline with the handler timeout, or
   close the DB only after the API drain goroutine confirms. _Source: Phase 4b Task 9 independent code review._
+
+## Build tooling
+
+- **`go ./...` traverses `web/node_modules` when present.** The `flatted` npm
+  package ships a Go reference file; once `npm ci` has populated
+  `web/node_modules` (e.g. the GoReleaser web build hook, or local dev),
+  `go test ./...` discovers `github.com/ankoehn/burrow/web/node_modules/flatted/...`
+  as `[no test files]` — benign today (compiles; node_modules is gitignored so the
+  committed/CI tree is unaffected). Latent risk: a future npm dep shipping
+  non-compiling Go would break local `go test ./...`. Revisit with a Go workspace
+  (`go.work`) or build-tag scheme if it ever bites. _Source: Phase 4c Task 1 independent review._
