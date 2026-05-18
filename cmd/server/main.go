@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -203,23 +204,47 @@ func main() {
 				return err
 			}
 
+			// httpsEnabled is true when both HTTP TLS cert+key are configured.
+			// effectiveSecureCookies forces Secure on cookies whenever TLS is
+			// active (a TLS-served cookie MUST be Secure); the operator-facing
+			// http_secure_cookies flag also covers proxy-terminated TLS.
+			httpsEnabled := cfg.HTTPTLSCert != "" && cfg.HTTPTLSKey != ""
+			effectiveSecureCookies := httpsEnabled || cfg.HTTPSecureCookies
+
+			if !httpsEnabled && !cfg.HTTPSecureCookies {
+				log.Warn("dashboard/session cookie is transmitted in plaintext; " +
+					"set BURROW_HTTP_TLS_CERT/BURROW_HTTP_TLS_KEY for native HTTPS " +
+					"or terminate TLS at a proxy and set BURROW_HTTP_SECURE_COOKIES=true")
+			}
+
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
 				Handler: api.NewRouter(api.Deps{
 					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
-					Log: log, SecureCookies: cfg.HTTPSecureCookies, SPA: spaHandler,
-					TrustedProxies: cfg.TrustedProxies,
+					Log: log, SecureCookies: effectiveSecureCookies, HTTPSEnabled: httpsEnabled,
+					SPA: spaHandler, TrustedProxies: cfg.TrustedProxies,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
+			}
+			if httpsEnabled {
+				apiSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 			}
 
 			errc := make(chan error, 2)
 			go func() { errc <- srv.Serve(ctx) }()
 			go func() {
-				log.Info("http api listening", "addr", cfg.HTTPListen)
-				if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					errc <- err
-					return
+				if httpsEnabled {
+					log.Info("http api listening (TLS)", "addr", cfg.HTTPListen)
+					if err := apiSrv.ListenAndServeTLS(cfg.HTTPTLSCert, cfg.HTTPTLSKey); err != nil && err != http.ErrServerClosed {
+						errc <- err
+						return
+					}
+				} else {
+					log.Info("http api listening", "addr", cfg.HTTPListen)
+					if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						errc <- err
+						return
+					}
 				}
 				errc <- nil
 			}()

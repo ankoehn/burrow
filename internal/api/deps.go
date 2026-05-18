@@ -61,6 +61,13 @@ type Deps struct {
 	Events        EventStream
 	Log           *slog.Logger
 	SecureCookies bool
+	// HTTPSEnabled signals that the server itself is serving TLS natively
+	// (BURROW_HTTP_TLS_CERT/KEY both set). When true:
+	//   - The HSTSMiddleware adds Strict-Transport-Security to every response.
+	//   - SecureCookies is forced on, regardless of the http_secure_cookies setting.
+	// This flag is set by cmd/server and MUST NOT be derived from spoofable
+	// headers such as X-Forwarded-Proto.
+	HTTPSEnabled bool
 	// SPA, if non-nil, serves the embedded dashboard for any non-/api/v1 path
 	// (client-side routing). Nil keeps pure-API behavior (Phase 4b).
 	SPA http.Handler

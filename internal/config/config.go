@@ -37,6 +37,15 @@ type ServerConfig struct {
 	AdminPassword     string `koanf:"admin_password"`
 	HTTPListen        string `koanf:"http_listen"`
 	HTTPSecureCookies bool   `koanf:"http_secure_cookies"`
+	// HTTPTLSCert and HTTPTLSKey control native TLS for the HTTP API/dashboard.
+	// Both must be set together (both-or-neither); if exactly one is set,
+	// LoadServer returns an error. When both are set the HTTP server is served
+	// over HTTPS using these certificates (distinct from the control-plane
+	// TLSCert/TLSKey); when both are empty (the default) the server serves
+	// plain HTTP and the operator is expected to terminate TLS at a proxy.
+	// Env: BURROW_HTTP_TLS_CERT / BURROW_HTTP_TLS_KEY (also _FILE variants).
+	HTTPTLSCert string `koanf:"http_tls_cert"`
+	HTTPTLSKey  string `koanf:"http_tls_key"`
 	// TrustedProxies is the list of CIDRs or IP addresses of reverse proxies
 	// whose X-Forwarded-For / X-Real-IP headers the server will honor.
 	//
@@ -206,6 +215,10 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	}
 	if err := parseTrustedProxies(c.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("invalid server config: %w", err)
+	}
+	// Both-or-neither validation for HTTP TLS cert/key pair (xor is invalid).
+	if (c.HTTPTLSCert == "") != (c.HTTPTLSKey == "") {
+		return nil, fmt.Errorf("invalid server config: http_tls_cert and http_tls_key must both be set or both be empty")
 	}
 	return &c, nil
 }

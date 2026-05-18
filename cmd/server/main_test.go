@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ankoehn/burrow/internal/api"
+	"github.com/ankoehn/burrow/internal/config"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
@@ -73,5 +74,69 @@ func TestTunnelStoreAdapterPersistsAllFields(t *testing.T) {
 
 	if err := a.MarkTunnelSeen(context.Background(), "tn-1"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// deriveHTTPSFlags replicates the derivation in the serve command so it can be
+// unit-tested without starting a real HTTP server.
+func deriveHTTPSFlags(cfg *config.ServerConfig) (httpsEnabled, effectiveSecureCookies bool) {
+	httpsEnabled = cfg.HTTPTLSCert != "" && cfg.HTTPTLSKey != ""
+	effectiveSecureCookies = httpsEnabled || cfg.HTTPSecureCookies
+	return
+}
+
+// TestHTTPSFlagDerivation_BothCertsSet asserts that httpsEnabled=true when
+// both HTTPTLSCert and HTTPTLSKey are non-empty.
+func TestHTTPSFlagDerivation_BothCertsSet(t *testing.T) {
+	cfg := &config.ServerConfig{HTTPTLSCert: "/tmp/cert.pem", HTTPTLSKey: "/tmp/key.pem"}
+	httpsEnabled, effectiveSecure := deriveHTTPSFlags(cfg)
+	if !httpsEnabled {
+		t.Error("httpsEnabled must be true when both TLS cert+key set")
+	}
+	if !effectiveSecure {
+		t.Error("effectiveSecureCookies must be true when httpsEnabled=true")
+	}
+}
+
+// TestHTTPSFlagDerivation_NoCerts asserts that httpsEnabled=false when both
+// HTTPTLSCert and HTTPTLSKey are empty (default/plain HTTP).
+func TestHTTPSFlagDerivation_NoCerts(t *testing.T) {
+	cfg := &config.ServerConfig{}
+	httpsEnabled, effectiveSecure := deriveHTTPSFlags(cfg)
+	if httpsEnabled {
+		t.Error("httpsEnabled must be false when no TLS certs configured")
+	}
+	if effectiveSecure {
+		t.Error("effectiveSecureCookies must be false when httpsEnabled=false and HTTPSecureCookies=false")
+	}
+}
+
+// TestHTTPSFlagDerivation_SecureCookiesOverride asserts that effectiveSecure is
+// true when HTTPSecureCookies=true even if httpsEnabled=false (proxy-terminated TLS).
+func TestHTTPSFlagDerivation_SecureCookiesOverride(t *testing.T) {
+	cfg := &config.ServerConfig{HTTPSecureCookies: true}
+	httpsEnabled, effectiveSecure := deriveHTTPSFlags(cfg)
+	if httpsEnabled {
+		t.Error("httpsEnabled must be false without TLS cert+key")
+	}
+	if !effectiveSecure {
+		t.Error("effectiveSecureCookies must be true when HTTPSecureCookies=true")
+	}
+}
+
+// TestHTTPSFlagDerivation_NativeTLSForcesSecure asserts that effectiveSecure is
+// forced true when httpsEnabled=true, even if HTTPSecureCookies is false.
+func TestHTTPSFlagDerivation_NativeTLSForcesSecure(t *testing.T) {
+	cfg := &config.ServerConfig{
+		HTTPTLSCert:       "/tmp/cert.pem",
+		HTTPTLSKey:        "/tmp/key.pem",
+		HTTPSecureCookies: false, // explicitly false — TLS must override
+	}
+	httpsEnabled, effectiveSecure := deriveHTTPSFlags(cfg)
+	if !httpsEnabled {
+		t.Error("httpsEnabled must be true when both TLS cert+key set")
+	}
+	if !effectiveSecure {
+		t.Error("effectiveSecureCookies must be forced true by httpsEnabled even when HTTPSecureCookies=false")
 	}
 }

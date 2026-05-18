@@ -287,6 +287,77 @@ func TestClientTokenFile(t *testing.T) {
 	}
 }
 
+// TestHTTPTLSBothSetIsValid asserts that providing both http_tls_cert and
+// http_tls_key via overrides is accepted by LoadServer.
+func TestHTTPTLSBothSetIsValid(t *testing.T) {
+	c, err := LoadServer(map[string]any{
+		"http_tls_cert": "/tmp/cert.pem",
+		"http_tls_key":  "/tmp/key.pem",
+	})
+	if err != nil {
+		t.Fatalf("both http_tls_cert+key set: expected no error, got %v", err)
+	}
+	if c.HTTPTLSCert != "/tmp/cert.pem" {
+		t.Fatalf("http_tls_cert = %q, want /tmp/cert.pem", c.HTTPTLSCert)
+	}
+	if c.HTTPTLSKey != "/tmp/key.pem" {
+		t.Fatalf("http_tls_key = %q, want /tmp/key.pem", c.HTTPTLSKey)
+	}
+}
+
+// TestHTTPTLSBothEmptyIsValid asserts that the default (both empty) is accepted.
+func TestHTTPTLSBothEmptyIsValid(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("both empty: expected no error, got %v", err)
+	}
+	if c.HTTPTLSCert != "" || c.HTTPTLSKey != "" {
+		t.Fatalf("default http_tls_cert/key must be empty, got %q / %q", c.HTTPTLSCert, c.HTTPTLSKey)
+	}
+}
+
+// TestHTTPTLSOnlyCertSetIsError asserts that setting only http_tls_cert (xor) fails.
+func TestHTTPTLSOnlyCertSetIsError(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"http_tls_cert": "/tmp/cert.pem",
+	})
+	if err == nil {
+		t.Fatal("only http_tls_cert set: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "http_tls_cert") {
+		t.Fatalf("error should mention http_tls_cert, got: %v", err)
+	}
+}
+
+// TestHTTPTLSOnlyKeySetIsError asserts that setting only http_tls_key (xor) fails.
+func TestHTTPTLSOnlyKeySetIsError(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"http_tls_key": "/tmp/key.pem",
+	})
+	if err == nil {
+		t.Fatal("only http_tls_key set: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "http_tls_cert") {
+		t.Fatalf("error should mention http_tls_cert, got: %v", err)
+	}
+}
+
+// TestHTTPTLSEnvVars asserts that BURROW_HTTP_TLS_CERT/KEY env vars are loaded.
+func TestHTTPTLSEnvVars(t *testing.T) {
+	t.Setenv("BURROW_HTTP_TLS_CERT", "/env/cert.pem")
+	t.Setenv("BURROW_HTTP_TLS_KEY", "/env/key.pem")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("env vars: expected no error, got %v", err)
+	}
+	if c.HTTPTLSCert != "/env/cert.pem" {
+		t.Fatalf("http_tls_cert = %q, want /env/cert.pem", c.HTTPTLSCert)
+	}
+	if c.HTTPTLSKey != "/env/key.pem" {
+		t.Fatalf("http_tls_key = %q, want /env/key.pem", c.HTTPTLSKey)
+	}
+}
+
 // TestClientMissingFileReturnsError asserts fail-fast behavior in LoadClient.
 func TestClientMissingFileReturnsError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-secret.txt")

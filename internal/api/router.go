@@ -58,6 +58,11 @@ func NewRouter(d Deps) http.Handler {
 	// login rate-limiter or poisoning session.ip records.
 	// MUST run before the per-IP rate-limiter and Login.
 	r.Use(TrustedProxyMiddleware(d.TrustedProxies))
+	// HSTSMiddleware adds Strict-Transport-Security only when the server is
+	// serving native TLS (Deps.HTTPSEnabled). It intentionally does NOT read
+	// X-Forwarded-Proto or any other spoofable header — the flag is set by
+	// cmd/server from config, not from incoming request headers.
+	r.Use(HSTSMiddleware(d.HTTPSEnabled))
 	r.Use(middleware.RequestID)
 	r.Use(d.requestLogger)
 	r.Use(middleware.Recoverer)
