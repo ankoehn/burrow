@@ -75,6 +75,15 @@ func TestServerConfigPhase4(t *testing.T) {
 	}
 }
 
+func TestServerTLSRequired(t *testing.T) {
+	if _, err := LoadServer(map[string]any{"tls_cert": ""}); err == nil {
+		t.Fatal("empty tls_cert must fail validation")
+	}
+	if _, err := LoadServer(map[string]any{"tls_key": ""}); err == nil {
+		t.Fatal("empty tls_key must fail validation")
+	}
+}
+
 func TestServerHTTPSecureCookiesDefaultAndOverride(t *testing.T) {
 	c, err := LoadServer(nil)
 	if err != nil {
