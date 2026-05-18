@@ -13,12 +13,31 @@ services:
       - "9000-9100:9000-9100"  # tunneled public ports
     environment:
       BURROW_ADMIN_EMAIL: admin@example.com
-      # Seeded ONCE, only when the database has no users. Set a strong value
-      # BEFORE the first start; rotate it from the dashboard after you log in.
-      BURROW_ADMIN_PASSWORD: change-me-before-first-start
+      # ---------- choose ONE of the two password options below ----------
+      #
+      # Option A — Docker/Swarm/K8s file secret (recommended for production).
+      # Burrow reads the file at the given path and uses its content as the
+      # password (trailing newline stripped). The _FILE value wins over the
+      # literal BURROW_ADMIN_PASSWORD if both are set.
+      # Create the secret file first: echo -n 'StrongPassword' > secrets/admin_password.txt
+      BURROW_ADMIN_PASSWORD_FILE: /run/secrets/burrow_admin_password
+      #
+      # Option B — literal env var (quick-start / non-Swarm compose).
+      # Uncomment and comment out Option A above.
+      # BURROW_ADMIN_PASSWORD: change-me-before-first-start
+      # ------------------------------------------------------------------
       BURROW_DATABASE_PATH: /data/burrow.db
+    # Wire the secret into the service so Docker mounts it at /run/secrets/…
+    secrets:
+      - burrow_admin_password
     volumes:
       # ./data must be writable by the container's non-root user (uid 65532):
       #   mkdir -p data && sudo chown 65532:65532 data
       - ./data:/data
     restart: unless-stopped
+
+# Top-level secrets block. The file path is relative to this compose file.
+# Create it before the first start: mkdir -p secrets && echo -n 'StrongPassword' > secrets/admin_password.txt
+secrets:
+  burrow_admin_password:
+    file: ./secrets/admin_password.txt

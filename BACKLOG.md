@@ -84,14 +84,13 @@ Out-of-scope-but-noted improvements deferred per phase discipline.
 
 ## Deployment / packaging (Phase 5)
 
-- **Support the `*_FILE` secret convention.** The MVP binary reads
-  `BURROW_ADMIN_PASSWORD` (and tokens) only from the literal env var. The
-  original `docker-compose.yml` used `BURROW_ADMIN_PASSWORD_FILE` + Docker
-  `secrets:`, which the binary never implemented (admin silently not seeded).
-  Fixed by switching the example to `BURROW_ADMIN_PASSWORD`. Add a generic
-  `<VAR>_FILE` indirection (if `<VAR>_FILE` is set, read that file into
-  `<VAR>`) so Docker/Swarm/K8s file secrets work without exposing values in
-  the environment — v0.2. _Source: Phase 5 P5._
+- **~~Support the `*_FILE` secret convention.~~** DONE (C4 / B05). Generic
+  `applyFileSecrets` helper in `internal/config` reads any `BURROW_<KEY>_FILE`
+  env var, trims the trailing newline, and sets the koanf key with the same
+  normalization as the env providers. `_FILE` wins over the literal var;
+  missing/unreadable file is a hard error. `docker-compose.yml` demonstrates
+  the pattern with a proper `secrets:` block and `BURROW_ADMIN_PASSWORD_FILE`.
+  _Source: Phase 5 P5 / review finding B05._
 - **Smoother first-run container UX.** `burrowd serve` requires TLS certs; the
   compose example passes `--dev-certs` and sets `working_dir: /data` so
   self-signed certs land on the writable volume, and `./data` must be

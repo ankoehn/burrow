@@ -57,6 +57,8 @@ docker run -d --name burrow \
 
 Or use the provided [`docker-compose.yml`](docker-compose.yml).
 
+**Docker/K8s file secrets:** Burrow supports the `BURROW_<VAR>_FILE` convention for any config key. Set `BURROW_ADMIN_PASSWORD_FILE=/run/secrets/admin_pw` (instead of `BURROW_ADMIN_PASSWORD`) and Burrow reads the secret from that file (trailing newline stripped). The `_FILE` value wins if both forms are set; a missing file is a hard error. The provided `docker-compose.yml` includes a working `secrets:` block example.
+
 Build from source (Go 1.25+):
 
 ```bash
@@ -103,7 +105,7 @@ The client opens a single outbound TLS connection to the server and authenticate
 
 ## Roadmap
 
-v0.1 (this release) is the MVP: TLS control plane, TCP data plane, token auth, HTTP/JSON API, embedded dashboard, single admin. Likely directions beyond v0.1 (ideas, not commitments): HTTP-aware tunnels with hostname routing and automatic TLS, multi-user accounts, the `*_FILE` Docker-secret convention, login rate limiting, and dashboard polish. Tracked deferrals live in [`BACKLOG.md`](BACKLOG.md). Issues and discussion are welcome.
+v0.1 (this release) is the MVP: TLS control plane, TCP data plane, token auth, HTTP/JSON API, embedded dashboard, single admin, and Docker/K8s `*_FILE` secret support. Likely directions beyond v0.1 (ideas, not commitments): HTTP-aware tunnels with hostname routing and automatic TLS, multi-user accounts, login rate limiting, and dashboard polish. Tracked deferrals live in [`BACKLOG.md`](BACKLOG.md). Issues and discussion are welcome.
 
 ## Contributing & security
 

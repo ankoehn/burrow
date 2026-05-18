@@ -1,9 +1,10 @@
-// Package config loads server/client configuration: defaults < env < overrides.
+// Package config loads server/client configuration: defaults < env < _FILE env < overrides.
 package config
 
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -95,6 +96,65 @@ func burrowEnvProvider() *env.Env {
 	})
 }
 
+// normalizeEnvKey maps a raw env-var name (without the BURROW_ prefix) to the
+// koanf key the env providers use: lowercase + double-underscore to dot.
+// This MUST match the transform in both envProvider and burrowEnvProvider so
+// that _FILE keys resolve to exactly the same koanf keys as the literal vars.
+func normalizeEnvKey(rawSuffix string) string {
+	return strings.ReplaceAll(strings.ToLower(rawSuffix), "__", ".")
+}
+
+// applyFileSecrets scans the process environment for variables of the form
+// BURROW_<KEY>_FILE. For each one it reads the file at the referenced path,
+// trims a single trailing newline (Docker/Swarm secrets conventionally append
+// one), and sets the corresponding koanf key in k.
+//
+// Precedence: this layer sits AFTER the literal env provider, so a _FILE value
+// WINS over a literal BURROW_<KEY> set in the environment. A missing or
+// unreadable file returns a hard error (fail-fast; silent fallback would leave
+// the server unseeded).
+func applyFileSecrets(k *koanf.Koanf) error {
+	const prefix = "BURROW_"
+	const fileSuffix = "_FILE"
+
+	overrides := map[string]any{}
+	for _, kv := range os.Environ() {
+		eqIdx := strings.IndexByte(kv, '=')
+		if eqIdx < 0 {
+			continue
+		}
+		name, path := kv[:eqIdx], kv[eqIdx+1:]
+
+		// Must start with BURROW_ and end with _FILE.
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, fileSuffix) {
+			continue
+		}
+
+		// Strip the BURROW_ prefix and the _FILE suffix to get the raw key suffix.
+		rawSuffix := strings.TrimSuffix(strings.TrimPrefix(name, prefix), fileSuffix)
+		if rawSuffix == "" {
+			// Edge-case: "BURROW__FILE" — no meaningful key; skip.
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("config: %s=%q: cannot read secret file: %w", name, path, err)
+		}
+
+		// Trim only a single trailing \r\n or \n (Docker file-secrets convention).
+		// Internal content (spaces, special chars) is intentionally left intact.
+		value := strings.TrimRight(string(data), "\r\n")
+
+		koanfKey := normalizeEnvKey(rawSuffix)
+		overrides[koanfKey] = value
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+	return k.Load(confmap.Provider(overrides, "."), nil)
+}
+
 // parseTrustedProxies validates that each entry in the list is a valid CIDR or
 // IP address. Returns an error naming the first invalid entry.
 func parseTrustedProxies(entries []string) error {
@@ -112,7 +172,12 @@ func parseTrustedProxies(entries []string) error {
 	return nil
 }
 
-// LoadServer loads the server config, merging defaults < BURROW_ env < overrides.
+// LoadServer loads the server config, merging defaults < BURROW_ env < _FILE env < overrides.
+//
+// If both BURROW_<KEY> and BURROW_<KEY>_FILE are set the _FILE value wins
+// (Docker convention); the literal env is loaded first, then _FILE secrets
+// overwrite it. Explicit programmatic overrides still win over everything.
+// A non-existent or unreadable _FILE path is a hard error.
 func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	k := base()
 	_ = k.Load(confmap.Provider(map[string]any{
@@ -126,6 +191,9 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"trusted_proxies": []string{},
 	}, "."), nil)
 	_ = k.Load(burrowEnvProvider(), nil)
+	if err := applyFileSecrets(k); err != nil {
+		return nil, err
+	}
 	if overrides != nil {
 		_ = k.Load(confmap.Provider(overrides, "."), nil)
 	}
@@ -142,13 +210,19 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	return &c, nil
 }
 
-// LoadClient loads the client config, merging defaults < BURROW_ env < overrides.
+// LoadClient loads the client config, merging defaults < BURROW_ env < _FILE env < overrides.
+//
+// If both BURROW_<KEY> and BURROW_<KEY>_FILE are set the _FILE value wins.
+// A non-existent or unreadable _FILE path is a hard error.
 func LoadClient(overrides map[string]any) (*ClientConfig, error) {
 	k := base()
 	_ = k.Load(confmap.Provider(map[string]any{
 		"log_level": "info", "log_format": "text",
 	}, "."), nil)
 	_ = k.Load(envProvider("BURROW_"), nil)
+	if err := applyFileSecrets(k); err != nil {
+		return nil, err
+	}
 	if overrides != nil {
 		_ = k.Load(confmap.Provider(overrides, "."), nil)
 	}
