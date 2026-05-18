@@ -48,7 +48,9 @@ func TestDeleteExpiredSessions_OffsetRobust(t *testing.T) {
 	_ = x.CreateUser(ctx, User{ID: "u2", Email: "robust@test", PasswordHash: "h", Role: "admin"})
 
 	// Store via the same path as store.CreateSession: bind time.Time directly.
-	// modernc/sqlite v1.50.1 serialises this as RFC3339Nano (e.g. "2026-05-25T12:34:56.123Z").
+	// modernc/sqlite v1.50.1 serialises this via time.Time.String()
+	// ("YYYY-MM-DD HH:MM:SS.fffffffff +0000 UTC"); DeleteExpiredSessions handles
+	// that format (see the comment on DeleteExpiredSessions in sessions.go).
 	expiredAt := time.Now().UTC().Add(-2 * time.Minute)
 	_ = x.CreateSession(ctx, Session{ID: "robust-expired", UserID: "u2", ExpiresAt: expiredAt})
 
