@@ -142,6 +142,180 @@ func TestVerifyUserPasswordWrong(t *testing.T) {
 	}
 }
 
+// TestSeedAdminB17_DoubleSeedNoOp proves the B17 fix: calling SeedAdmin twice
+// with the same email is a safe no-op (ON CONFLICT DO NOTHING is idempotent),
+// no duplicate user is created, and authentication still works with the original
+// password (the second call's new hash is discarded by the DB).
+func TestSeedAdminB17_DoubleSeedNoOp(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	// Empty creds = no-op, no error.
+	if err := s.SeedAdmin(ctx, "", ""); err != nil {
+		t.Fatalf("empty creds must be no-op: %v", err)
+	}
+	if err := s.SeedAdmin(ctx, "admin@x", ""); err != nil {
+		t.Fatalf("empty password must be no-op: %v", err)
+	}
+	if err := s.SeedAdmin(ctx, "", "password1"); err != nil {
+		t.Fatalf("empty email must be no-op: %v", err)
+	}
+
+	// First real seed.
+	if err := s.SeedAdmin(ctx, "admin@x", "password1"); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	// Second call with same email must not error (ON CONFLICT DO NOTHING).
+	if err := s.SeedAdmin(ctx, "admin@x", "password2"); err != nil {
+		t.Fatalf("second seed (same email) must be no-op: %v", err)
+	}
+	// Exactly one user must exist.
+	n, err := s.q.CountUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("want exactly 1 user after double-seed, got %d", n)
+	}
+	// Original password still works (second seed's hash was discarded).
+	ok, err := s.VerifyUserPassword(ctx, "admin@x", "password1")
+	if !ok || err != nil {
+		t.Fatalf("original password must still verify: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestChangePassword covers the success path, wrong current password (ErrInvalidCredentials),
+// and minimum-length enforcement (ErrPasswordTooShort).
+func TestChangePassword(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if err := s.SeedAdmin(ctx, "a@x", "oldpassword"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.GetUserByEmail(ctx, "a@x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wrong current password → ErrInvalidCredentials.
+	if err := s.ChangePassword(ctx, u.ID, "wrongpassword", "newpassword1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong current → ErrInvalidCredentials, got %v", err)
+	}
+
+	// New password too short → ErrPasswordTooShort.
+	if err := s.ChangePassword(ctx, u.ID, "oldpassword", "short"); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("short new password → ErrPasswordTooShort, got %v", err)
+	}
+
+	// Success path: new password works, old does not.
+	if err := s.ChangePassword(ctx, u.ID, "oldpassword", "newpassword1"); err != nil {
+		t.Fatalf("change password success: %v", err)
+	}
+	ok, err := s.VerifyUserPassword(ctx, "a@x", "newpassword1")
+	if !ok || err != nil {
+		t.Fatalf("new password must verify: ok=%v err=%v", ok, err)
+	}
+	ok, err = s.VerifyUserPassword(ctx, "a@x", "oldpassword")
+	if ok || err != nil {
+		t.Fatalf("old password must not verify after change: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestCreateUserAndListUsers covers success, duplicate-email → ErrEmailConflict,
+// short password → ErrPasswordTooShort, bad role → ErrInvalidRole,
+// and ListUsers never leaking password_hash.
+func TestCreateUserAndListUsers(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	// Bad role.
+	if _, err := s.CreateUser(ctx, "x@x", "password1", "superuser"); !errors.Is(err, ErrInvalidRole) {
+		t.Fatalf("bad role → ErrInvalidRole, got %v", err)
+	}
+	// Short password.
+	if _, err := s.CreateUser(ctx, "x@x", "short", "user"); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("short password → ErrPasswordTooShort, got %v", err)
+	}
+	// Success.
+	created, err := s.CreateUser(ctx, "new@x", "password1", "user")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if created.ID == "" || created.Email != "new@x" || created.Role != "user" {
+		t.Fatalf("create user result unexpected: %+v", created)
+	}
+	// Duplicate email → ErrEmailConflict.
+	if _, err := s.CreateUser(ctx, "new@x", "password1", "admin"); !errors.Is(err, ErrEmailConflict) {
+		t.Fatalf("duplicate email → ErrEmailConflict, got %v", err)
+	}
+	// ListUsers must not leak password_hash (PasswordHash field is zero-value).
+	users, err := s.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("want 1 user, got %d", len(users))
+	}
+	if users[0].PasswordHash != "" {
+		t.Fatalf("ListUsers must not populate PasswordHash, got %q", users[0].PasswordHash)
+	}
+}
+
+// TestDeleteUserCascade proves that deleting a user removes associated
+// sessions, client_tokens, and tunnels via ON DELETE CASCADE.
+func TestDeleteUserCascade(t *testing.T) {
+	ctx := context.Background()
+	s, sqlDB := newStoreWithDB(t)
+	q := db.Wrap(sqlDB)
+
+	// Create user with sessions, token, tunnel.
+	u, err := s.CreateUser(ctx, "del@x", "password1", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := s.CreateSession(ctx, u.ID, "ua", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := s.IssueClientToken(ctx, u.ID, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveTunnel(ctx, u.ID, &SaveTunnelArg{ID: "tn-del", Name: "web", Type: "tcp", RemotePort: 9001, LocalAddr: "127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the token authenticates before the user is deleted.
+	if _, err := s.Authenticate(ctx, pt); err != nil {
+		t.Fatalf("token must authenticate before user delete: %v", err)
+	}
+
+	// Delete user.
+	if err := s.DeleteUser(ctx, u.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	// Session must be gone (cascade).
+	_, err = q.GetSession(ctx, sid)
+	if !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("session must cascade-delete: %v", err)
+	}
+	// Token must be gone (cascade): after user delete, Authenticate must fail.
+	if _, err := s.Authenticate(ctx, pt); err == nil {
+		t.Fatal("token must be invalid after user cascade-delete")
+	}
+	// Tunnel must be gone (cascade) — check via raw query.
+	var n int
+	if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM tunnels WHERE id=?`, "tn-del").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tunnel must cascade-delete: n=%d err=%v", n, err)
+	}
+
+	// Delete non-existent user → db.ErrNotFound.
+	if err := s.DeleteUser(ctx, "does-not-exist"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("delete non-existent → db.ErrNotFound, got %v", err)
+	}
+}
+
 func TestValidateSessionExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, sqlDB := newStoreWithDB(t)

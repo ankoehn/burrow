@@ -86,6 +86,25 @@ func RequireCSRF(next http.Handler) http.Handler {
 	})
 }
 
+// RequireAdmin is a middleware that must run AFTER RequireSession (so that
+// unauthenticated requests get 401 before this 403 check runs). It loads the
+// authed user and rejects with 403 if their role is not "admin".
+func (d Deps) RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid := userID(r.Context())
+		u, err := d.Users.GetUserByID(r.Context(), uid)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "lookup failed")
+			return
+		}
+		if u.Role != "admin" {
+			writeErr(w, http.StatusForbidden, "admin required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // isStaticAssetPath reports whether the request path is a static/SPA-asset
 // path that should be logged at Debug rather than Info. These are the paths
 // served directly by the embedded SPA handler (web/embed.go): the root,

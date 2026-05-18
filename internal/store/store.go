@@ -17,6 +17,21 @@ import (
 // ErrUnauthorized is returned when a client token does not match.
 var ErrUnauthorized = errors.New("store: unauthorized")
 
+// ErrInvalidCredentials is returned by ChangePassword when the current password is wrong.
+var ErrInvalidCredentials = errors.New("store: invalid credentials")
+
+// ErrPasswordTooShort is returned when a new password is shorter than minPasswordLen.
+var ErrPasswordTooShort = errors.New("store: password too short (minimum 8 characters)")
+
+// ErrEmailConflict is returned by CreateUser when the email already exists.
+var ErrEmailConflict = errors.New("store: email already in use")
+
+// ErrInvalidRole is returned by CreateUser when the role is not 'admin' or 'user'.
+var ErrInvalidRole = errors.New("store: role must be 'admin' or 'user'")
+
+// minPasswordLen is the minimum required password length.
+const minPasswordLen = 8
+
 // sessionTTL is the lifetime of a browser session.
 const sessionTTL = 7 * 24 * time.Hour
 
@@ -35,30 +50,28 @@ type Store struct{ q *db.DB }
 // New builds a Store over an open, migrated *sql.DB.
 func New(d *sql.DB) *Store { return &Store{q: db.Wrap(d)} }
 
-// SeedAdmin creates the first admin user when no users exist.
-// It is a no-op when email or password is empty, or when any user already exists.
+// SeedAdmin ensures the bootstrap admin user exists.
+// It is a no-op when email or password is empty (unset BURROW_ADMIN_* — safe).
+// Uses INSERT ... ON CONFLICT(email) DO NOTHING so the operation is
+// idempotent and race-proof: the UNIQUE(email) constraint in the schema
+// guarantees atomicity — two concurrent callers both succeed without
+// duplication (one inserts, the other gets 0 rows affected and returns nil).
+// B17: eliminates the prior check-then-insert pattern.
 func (s *Store) SeedAdmin(ctx context.Context, email, password string) error {
 	if email == "" || password == "" {
-		return nil
-	}
-	// CountUsers→CreateUser is safe: runs once at startup before serving and SetMaxOpenConns(1) serialises it.
-	n, err := s.q.CountUsers(ctx)
-	if err != nil {
-		return err
-	}
-	if n > 0 {
 		return nil
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return err
 	}
-	return s.q.CreateUser(ctx, db.User{
-		ID:           uuid.NewString(),
-		Email:        email,
-		PasswordHash: hash,
-		Role:         "admin",
-	})
+	_, err = s.q.DB().ExecContext(ctx,
+		`INSERT INTO users(id, email, password_hash, role)
+		 VALUES(?,?,?,'admin')
+		 ON CONFLICT(email) DO NOTHING`,
+		uuid.NewString(), email, hash,
+	)
+	return err
 }
 
 // VerifyUserPassword checks whether the given password matches the stored hash
@@ -184,4 +197,101 @@ func (s *Store) ValidateSession(ctx context.Context, id string) (userID string, 
 // DeleteSession removes the session with the given ID.
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	return s.q.DeleteSession(ctx, id)
+}
+
+// ChangePassword verifies currentPassword, enforces minimum length on newPassword,
+// re-hashes, and persists. Returns ErrInvalidCredentials on wrong current password,
+// ErrPasswordTooShort on a short new password. Sessions are NOT rotated (MVP decision).
+func (s *Store) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	u, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	ok, err := auth.VerifyPassword(currentPassword, u.PasswordHash)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrInvalidCredentials
+	}
+	if len(newPassword) < minPasswordLen {
+		return ErrPasswordTooShort
+	}
+	hash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	return s.q.UpdateUserPassword(ctx, userID, hash)
+}
+
+// UpdateUserPassword is a thin wrapper that updates the password hash directly.
+// Callers that need to enforce business rules (current password check, min-length)
+// should use ChangePassword instead.
+func (s *Store) UpdateUserPassword(ctx context.Context, userID, newHash string) error {
+	return s.q.UpdateUserPassword(ctx, userID, newHash)
+}
+
+// ListUsers returns all users (id, email, role, created_at — no password_hash).
+func (s *Store) ListUsers(ctx context.Context) ([]db.User, error) {
+	return s.q.ListUsers(ctx)
+}
+
+// CreateUser creates a new user account. Returns ErrEmailConflict on duplicate email,
+// ErrPasswordTooShort on a short password, ErrInvalidRole on an unknown role.
+func (s *Store) CreateUser(ctx context.Context, email, password, role string) (db.User, error) {
+	if role != "admin" && role != "user" {
+		return db.User{}, ErrInvalidRole
+	}
+	if len(password) < minPasswordLen {
+		return db.User{}, ErrPasswordTooShort
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return db.User{}, err
+	}
+	u := db.User{
+		ID:           uuid.NewString(),
+		Email:        email,
+		PasswordHash: hash,
+		Role:         role,
+	}
+	if err := s.q.CreateUser(ctx, u); err != nil {
+		// modernc sqlite wraps the underlying error; a UNIQUE constraint violation
+		// message contains "UNIQUE constraint failed".
+		if isUniqueViolation(err) {
+			return db.User{}, ErrEmailConflict
+		}
+		return db.User{}, err
+	}
+	return u, nil
+}
+
+// DeleteUser removes the user and all associated sessions/tokens/tunnels (ON DELETE CASCADE).
+// Returns db.ErrNotFound if no such user exists.
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	return s.q.DeleteUser(ctx, id)
+}
+
+// isUniqueViolation reports whether err is a SQLite UNIQUE constraint violation.
+// modernc/sqlite wraps driver errors as *sqlite.Error or plain fmt.Errorf strings;
+// the canonical way to detect them is to inspect the error message string.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return containsStr(err.Error(), "UNIQUE constraint failed")
+}
+
+// containsStr is a small helper so we don't import strings in the store package.
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && findStr(s, sub)
+}
+
+func findStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

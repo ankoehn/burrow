@@ -21,6 +21,11 @@ type UserStore interface {
 	CreateSession(ctx context.Context, userID, ua, ip string) (string, error)
 	ValidateSession(ctx context.Context, id string) (string, error)
 	DeleteSession(ctx context.Context, id string) error
+	// Multi-user methods (D3).
+	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
+	ListUsers(ctx context.Context) ([]db.User, error)
+	CreateUser(ctx context.Context, email, password, role string) (db.User, error)
+	DeleteUser(ctx context.Context, id string) error
 }
 
 // TunnelView is one live tunnel as exposed by the API.

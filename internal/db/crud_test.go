@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -87,6 +88,90 @@ func TestSessionExpiryAndTokens(t *testing.T) {
 	lst, _ = x.ListClientTokensByUser(ctx, "u1")
 	if len(lst) != 0 {
 		t.Fatal("token not deleted")
+	}
+}
+
+func TestUpdateUserPassword(t *testing.T) {
+	ctx := context.Background()
+	x := testDB(t)
+	_ = x.CreateUser(ctx, User{ID: "u1", Email: "a@b.c", PasswordHash: "oldhash", Role: "admin"})
+
+	// Update to new hash.
+	if err := x.UpdateUserPassword(ctx, "u1", "newhash"); err != nil {
+		t.Fatalf("UpdateUserPassword: %v", err)
+	}
+	u, err := x.GetUserByID(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.PasswordHash != "newhash" {
+		t.Fatalf("password_hash not updated, got %q", u.PasswordHash)
+	}
+	// updated_at must have been bumped (non-zero, different from created_at).
+	// We only assert non-zero since SQLite's CURRENT_TIMESTAMP granularity is 1s.
+	if u.UpdatedAt.IsZero() {
+		t.Fatal("updated_at must be non-zero after UpdateUserPassword")
+	}
+
+	// Non-existent user → ErrNotFound.
+	if err := x.UpdateUserPassword(ctx, "nouser", "h"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing user → ErrNotFound, got %v", err)
+	}
+}
+
+func TestListUsersNeverExposesPasswordHash(t *testing.T) {
+	ctx := context.Background()
+	x := testDB(t)
+	_ = x.CreateUser(ctx, User{ID: "u1", Email: "a@b.c", PasswordHash: "SECRETHASH", Role: "admin"})
+	_ = x.CreateUser(ctx, User{ID: "u2", Email: "b@b.c", PasswordHash: "ANOTHERSECRET", Role: "user"})
+
+	users, err := x.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("want 2 users, got %d", len(users))
+	}
+	for _, u := range users {
+		if u.PasswordHash != "" {
+			t.Errorf("ListUsers must not populate PasswordHash, got %q for %s", u.PasswordHash, u.Email)
+		}
+		if u.ID == "" || u.Email == "" || u.Role == "" {
+			t.Errorf("ListUsers must populate id/email/role, got %+v", u)
+		}
+	}
+}
+
+func TestDeleteUserErrNotFound(t *testing.T) {
+	ctx := context.Background()
+	x := testDB(t)
+	if err := x.DeleteUser(ctx, "nonexistent"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete non-existent → ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeleteUserCascadeDB(t *testing.T) {
+	ctx := context.Background()
+	x := testDB(t)
+	_ = x.CreateUser(ctx, User{ID: "u1", Email: "a@b.c", PasswordHash: "h", Role: "admin"})
+	_ = x.CreateClientToken(ctx, ClientToken{ID: "t1", UserID: "u1", Name: "n", TokenHash: "hh"})
+	_ = x.CreateSession(ctx, Session{ID: "s1", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
+	_ = x.UpsertTunnel(ctx, Tunnel{ID: "tn1", UserID: "u1", Name: "x", Type: "tcp", RemotePort: 9000, LocalAddr: "127.0.0.1:1"})
+
+	if err := x.DeleteUser(ctx, "u1"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+
+	// All child rows must be gone via ON DELETE CASCADE.
+	if _, err := x.GetClientTokenByHash(ctx, "hh"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("token must cascade-delete: %v", err)
+	}
+	if _, err := x.GetSession(ctx, "s1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("session must cascade-delete: %v", err)
+	}
+	tunnels, _ := x.ListTunnelsByUser(ctx, "u1")
+	if len(tunnels) != 0 {
+		t.Fatalf("tunnels must cascade-delete, got %d", len(tunnels))
 	}
 }
 

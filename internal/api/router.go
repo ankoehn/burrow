@@ -82,11 +82,21 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(RequireCSRF)
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)
+			r.Post("/auth/change-password", d.ChangePassword)
 			r.Get("/me", d.Me)
 			r.Get("/tokens", d.ListTokens)
 			r.Post("/tokens", d.CreateToken)
 			r.Delete("/tokens/{id}", d.RevokeToken)
 			r.Get("/tunnels", d.ListTunnels)
+			// Admin-only user management: RequireAdmin runs after RequireSession
+			// (already applied by the outer Group), so unauthenticated requests
+			// get 401 before RequireAdmin's 403 check runs.
+			r.Group(func(r chi.Router) {
+				r.Use(d.RequireAdmin)
+				r.Get("/users", d.AdminListUsers)
+				r.Post("/users", d.AdminCreateUser)
+				r.Delete("/users/{id}", d.AdminDeleteUser)
+			})
 		})
 
 		// SSE: session-protected, NO timeout (long-lived stream).
