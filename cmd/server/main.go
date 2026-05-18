@@ -53,10 +53,20 @@ func (a tunnelStoreAdapter) MarkTunnelSeen(ctx context.Context, tunnelID string)
 	return a.s.MarkTunnelSeen(ctx, tunnelID)
 }
 
+// userTunnelLister is the minimal slice of *server.Server that
+// tunnelListerAdapter needs. Depending on this interface (rather than the
+// concrete *server.Server, which it still satisfies) keeps the adapter's
+// server.TunnelView -> api.TunnelView field mapping unit-testable in
+// package main without driving a full TLS+yamux handshake to populate the
+// server's unexported registry.
+type userTunnelLister interface {
+	ListUserTunnels(userID string) []server.TunnelView
+}
+
 // tunnelListerAdapter exposes the live server registry to the HTTP API,
 // converting server.TunnelView to api.TunnelView (keeps internal/api
 // decoupled from internal/server, same pattern as tunnelStoreAdapter).
-type tunnelListerAdapter struct{ s *server.Server }
+type tunnelListerAdapter struct{ s userTunnelLister }
 
 func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
 	var out []api.TunnelView
@@ -146,15 +156,36 @@ func main() {
 				errc <- nil
 			}()
 
-			<-ctx.Done()
+			// Wait for a shutdown signal OR an early server error (e.g. a
+			// listener bind failure such as the HTTP port already in use):
+			// surface it immediately instead of running half-dead until SIGINT.
+			var firstErr error
+			select {
+			case <-ctx.Done():
+			case firstErr = <-errc:
+				stop() // cancel ctx so the other (healthy) server unwinds too
+			}
+			// 5s is intentionally shorter than the JSON group's 30s chi
+			// middleware.Timeout; database.Close() (deferred earliest) runs
+			// only AFTER srv.Wait() below, so do not widen this asymmetry
+			// without revisiting the BACKLOG "API drain before DB close" item.
 			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = apiSrv.Shutdown(shutCtx)
 			srv.Wait()
-			for i := 0; i < 2; i++ {
-				if e := <-errc; e != nil && e != http.ErrServerClosed {
-					return e
+			// One value already consumed iff the select took the errc branch;
+			// drain the remaining sender so neither goroutine leaks.
+			remaining := 2
+			if firstErr != nil {
+				remaining = 1
+			}
+			for i := 0; i < remaining; i++ {
+				if e := <-errc; e != nil && e != http.ErrServerClosed && firstErr == nil {
+					firstErr = e
 				}
+			}
+			if firstErr != nil && firstErr != http.ErrServerClosed {
+				return firstErr
 			}
 			return nil
 		},

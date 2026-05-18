@@ -40,3 +40,14 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
   informational only. Hardening: strip the port via `net.SplitHostPort`, and only
   trust forwarded headers behind a configured trusted proxy. Document the proxy-trust
   assumption. _Source: Phase 4b Task 4 independent code review._
+
+## HTTP API lifecycle (Phase 4b)
+
+- **API graceful-shutdown should fully drain JSON handlers before DB close.**
+  `burrowd serve` calls `apiSrv.Shutdown(5s)` then `srv.Wait()` then (deferred)
+  `database.Close()`. The JSON route group has a 30s chi `middleware.Timeout`, so a
+  handler force-unblocked by chi at up to 30s can outlive the 5s `Shutdown` window
+  and (very rarely, under SQLite stall) be mid-`GetSession` when `database.Close()`
+  runs — handled (returns `sql: database is closed` → 500), not memory-unsafe, but
+  untidy. Hardening: align the `Shutdown` deadline with the handler timeout, or
+  close the DB only after the API drain goroutine confirms. _Source: Phase 4b Task 9 independent code review._
