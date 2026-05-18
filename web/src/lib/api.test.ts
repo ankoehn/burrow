@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiFetch, ApiError } from "./api";
 
-beforeEach(() => { vi.restoreAllMocks(); (globalThis as any).location = { href: "/" }; });
+beforeEach(() => { vi.restoreAllMocks(); });
 
 describe("apiFetch", () => {
   it("returns parsed JSON on 200", async () => {
@@ -23,9 +23,13 @@ describe("apiFetch", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }) as any);
     expect(await apiFetch("/auth/logout", { method: "POST" })).toBeNull();
   });
-  it("redirects to /login and throws ApiError(401) on 401", async () => {
+  it("throws ApiError(401) on 401 without mutating window.location", async () => {
+    const initialHref = typeof globalThis.location !== "undefined" ? globalThis.location.href : undefined;
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 401 }) as any);
     await expect(apiFetch("/me")).rejects.toMatchObject({ status: 401 });
-    expect((globalThis as any).location.href).toBe("/login");
+    // apiFetch must NOT do a full-page redirect — location must be unchanged
+    if (typeof globalThis.location !== "undefined") {
+      expect(globalThis.location.href).toBe(initialHref);
+    }
   });
 });

@@ -12,7 +12,7 @@ interface Token { id: string; name: string; last_used: string | null; created_at
 
 export default function Tokens() {
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["tokens"], queryFn: () => apiFetch<Token[]>("/tokens") });
+  const { data } = useQuery({ queryKey: ["tokens"], queryFn: () => apiFetch<Token[]>("/tokens"), staleTime: 30_000 });
   const [name, setName] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
   const create = useMutation({

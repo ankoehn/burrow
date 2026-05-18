@@ -10,17 +10,29 @@ interface Tunnel {
 
 export default function Tunnels() {
   const qc = useQueryClient();
+  // SSE is primary; poll every 30 s as a fallback when SSE is unavailable.
   const { data, isLoading } = useQuery({
     queryKey: ["tunnels"],
     queryFn: () => apiFetch<Tunnel[]>("/tunnels"),
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   });
   useEffect(() => {
+    // NOTE: EventSource requires same-origin (the Go server must serve this SPA).
     const es = new EventSource("/api/v1/events");
     const onTunnels = () => qc.invalidateQueries({ queryKey: ["tunnels"] });
     es.addEventListener("tunnels", onTunnels);
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) {
+        // Stream closed — session may have expired. Invalidate /me so the
+        // centralized RequireAuth handler can redirect to /login if needed.
+        es.close();
+        qc.invalidateQueries({ queryKey: ["me"] });
+      }
+      // If readyState is CONNECTING the browser is auto-retrying; do nothing.
+    };
     return () => {
       es.removeEventListener("tunnels", onTunnels);
+      es.onerror = null;
       es.close();
     };
   }, [qc]);

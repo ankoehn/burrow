@@ -10,12 +10,10 @@ export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}
     ...opts,
   });
   if (res.status === 401) {
-    if (typeof window !== "undefined" && window.location && window.location.pathname !== "/login") {
-      window.location.href = "/login";
-    }
     throw new ApiError(401, "unauthorized");
   }
   const text = await res.text();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let body: any = null;
   if (text) {
     try { body = JSON.parse(text); } catch { body = null; }
