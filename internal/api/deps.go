@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net/http"
 
 	"github.com/ankoehn/burrow/internal/db"
 )
@@ -51,6 +52,9 @@ type Deps struct {
 	Events        EventStream
 	Log           *slog.Logger
 	SecureCookies bool
+	// SPA, if non-nil, serves the embedded dashboard for any non-/api/v1 path
+	// (client-side routing). Nil keeps pure-API behavior (Phase 4b).
+	SPA http.Handler
 }
 
 type ctxKey int

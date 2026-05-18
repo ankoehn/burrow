@@ -37,5 +37,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/events", d.EventsStream)
 		})
 	})
+
+	if d.SPA != nil {
+		// Only a root catch-all: "/api/v1" is a mounted subrouter so chi
+		// matches it first; unknown/unauth /api/v1/* stays in the API group's
+		// own JSON 404/401 and never falls through here. (r.NotFound is NOT
+		// used: chi propagates the root NotFound into the /api/v1 subrouter,
+		// which would wrongly serve the SPA for /api/v1/nope.)
+		r.Handle("/*", d.SPA)
+	}
+
 	return r
 }
