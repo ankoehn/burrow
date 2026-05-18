@@ -46,11 +46,16 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
+      - -X github.com/ankoehn/burrow/internal/version.Commit={{.Commit}}
+      - -X github.com/ankoehn/burrow/internal/version.Date={{.Date}}
 
 archives:
   - formats: [tar.gz]
     name_template: >-
-      {{ .ProjectName }}_{{ .Os }}_{{ .Arch }}_{{ .Version }}
+      {{ .ProjectName }}_{{ .Os }}_
+      {{- if eq .Arch "arm" }}armv7
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -58,31 +63,16 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
-dockers:
-  - image_templates:
-      - "ghcr.io/ankoehn/burrow:{{ .Version }}-amd64"
-      - "ghcr.io/ankoehn/burrow:latest-amd64"
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-    goarch: amd64
-  - image_templates:
-      - "ghcr.io/ankoehn/burrow:{{ .Version }}-arm64"
-      - "ghcr.io/ankoehn/burrow:latest-arm64"
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-    goarch: arm64
-
-docker_manifests:
-  - name_template: "ghcr.io/ankoehn/burrow:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/ankoehn/burrow:{{ .Version }}-amd64"
-      - "ghcr.io/ankoehn/burrow:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/ankoehn/burrow:latest"
-    image_templates:
-      - "ghcr.io/ankoehn/burrow:latest-amd64"
-      - "ghcr.io/ankoehn/burrow:latest-arm64"
+dockers_v2:
+  - id: burrow
+    images:
+      - ghcr.io/ankoehn/burrow
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      - linux/arm64
 
 signs:
   - cmd: cosign
@@ -92,3 +82,11 @@ signs:
       - "--yes"
       - "--output-signature=${signature}"
       - "${artifact}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^chore:'
+      - '^test:'
+      - '^docs:'
