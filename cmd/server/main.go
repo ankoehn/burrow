@@ -14,10 +14,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -80,6 +82,44 @@ func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
 	return out
 }
 
+// sessionReaper is the type used to purge expired sessions.
+// Using an interface makes the reaper testable without a real DB.
+type sessionReaper interface {
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
+}
+
+// runSessionReaper starts a goroutine that calls reaper.DeleteExpiredSessions
+// immediately and then every interval. It mirrors the byteTicker pattern in
+// internal/server: the goroutine is tracked on wg and exits when ctx is done.
+// Callers must wg.Wait() before closing the database.
+func runSessionReaper(ctx context.Context, wg *sync.WaitGroup, reaper sessionReaper, log *slog.Logger, interval time.Duration) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		purge := func() {
+			n, err := reaper.DeleteExpiredSessions(ctx)
+			if err != nil {
+				log.Warn("session reaper", "err", err)
+				return
+			}
+			if n > 0 {
+				log.Info("session reaper: purged expired sessions", "count", n)
+			}
+		}
+		purge() // run once at startup
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				purge()
+			}
+		}
+	}()
+}
+
 func main() {
 	root := &cobra.Command{
 		Use:           "burrowd",
@@ -118,6 +158,10 @@ func main() {
 				return err
 			}
 			defer database.Close()
+			// reaperWg tracks the session-reaper goroutine; it is waited (via
+			// defer below) before database.Close() runs (LIFO defer ordering).
+			var reaperWg sync.WaitGroup
+			defer reaperWg.Wait()
 			if err := db.Migrate(database); err != nil {
 				return err
 			}
@@ -136,6 +180,12 @@ func main() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+
+			// Start the session reaper: purges expired sessions once at startup
+			// and then every hour. Mirrors the byteTicker goroutine pattern in
+			// internal/server: WaitGroup-tracked, ctx-cancelled, stops before
+			// database.Close() (enforced by LIFO defers above).
+			runSessionReaper(ctx, &reaperWg, db.Wrap(database), log, time.Hour)
 
 			spaHandler, err := web.Handler()
 			if err != nil {

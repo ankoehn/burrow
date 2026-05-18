@@ -44,11 +44,26 @@ func (x *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
+// sqliteNow returns the current UTC time formatted in SQLite's datetime format
+// ("YYYY-MM-DD HH:MM:SS"), which is directly comparable to datetime('now') and
+// to the RFC3339-encoded values modernc/sqlite stores when binding time.Time
+// parameters (both use ISO-8601 date ordering so text comparison is correct).
+func sqliteNow() string {
+	return time.Now().UTC().Format("2006-01-02 15:04:05")
+}
+
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past
 // and returns the number of rows deleted.
+//
+// The comparison uses a pre-formatted SQLite datetime string rather than a raw
+// time.Time binding. modernc/sqlite v1.50.1 serialises time.Time as RFC3339Nano
+// (e.g. "2026-05-25T12:34:56.123Z"); SQLite's text ordering treats 'T' and ' '
+// as interchangeable in ISO-8601 comparisons, so "YYYY-MM-DD HH:MM:SS" sorts
+// correctly against those stored values. This removes any dependency on
+// time.Time.String() format drift or driver version changes.
 func (x *DB) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	res, err := x.sqlDB.ExecContext(ctx,
-		`DELETE FROM sessions WHERE expires_at <= ?`, time.Now().UTC(),
+		`DELETE FROM sessions WHERE expires_at <= ?`, sqliteNow(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired sessions: %w", err)
