@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
 )
 
 // JSONHandlerTimeout is the maximum duration the chi middleware.Timeout allows
@@ -15,6 +16,37 @@ import (
 // runs.
 const JSONHandlerTimeout = 30 * time.Second
 
+// loginRateLimiters builds the two httprate middlewares applied only to
+// POST /auth/login: one per-IP limiter and one global endpoint limiter.
+// Both values are resolved from Deps overrides (for test injection) with
+// fallback to the package-level constants.
+//
+// Per-IP accuracy depends on the trusted-proxy gating wired in C2 (RealIP
+// currently trusts XFF unconditionally; C2 will gate it behind a
+// trusted-proxy config so spoofed IPs cannot bypass per-IP limits).
+func (d Deps) loginRateLimiters() (perIP, global func(http.Handler) http.Handler) {
+	limitPerIP := d.LoginRateLimitPerIPOverride
+	if limitPerIP <= 0 {
+		limitPerIP = LoginRateLimitPerIP
+	}
+	limitGlobal := d.LoginRateLimitGlobalOverride
+	if limitGlobal <= 0 {
+		limitGlobal = LoginRateLimitGlobal
+	}
+	rateLimitedHandler := httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+		writeErr(w, http.StatusTooManyRequests, "too many login attempts")
+	})
+	perIP = httprate.Limit(limitPerIP, time.Minute,
+		httprate.WithKeyFuncs(httprate.KeyByIP),
+		rateLimitedHandler,
+	)
+	global = httprate.Limit(limitGlobal, time.Minute,
+		httprate.WithKeyFuncs(httprate.KeyByEndpoint),
+		rateLimitedHandler,
+	)
+	return perIP, global
+}
+
 // NewRouter builds the /api/v1 HTTP handler.
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
@@ -23,8 +55,10 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(d.requestLogger)
 	r.Use(middleware.Recoverer)
 
+	loginPerIP, loginGlobal := d.loginRateLimiters()
+
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/login", d.Login)
+		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
 
 		// JSON routes: session-protected + JSONHandlerTimeout.
 		r.Group(func(r chi.Router) {

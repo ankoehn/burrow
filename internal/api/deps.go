@@ -45,6 +45,16 @@ type EventStream interface {
 	Subscribe(userID string) (<-chan struct{}, func())
 }
 
+// LoginRateLimitPerIP is the default maximum login attempts per IP per minute.
+// Per-IP accuracy depends on the trusted-proxy gating wired in C2 (RealIP
+// currently trusts XFF unconditionally; C2 will gate it behind a
+// trusted-proxy config so spoofed IPs cannot bypass per-IP limits).
+const LoginRateLimitPerIP = 10
+
+// LoginRateLimitGlobal is the default maximum login attempts across all IPs
+// per minute. This global cap bounds concurrent argon2id CPU/RAM cost.
+const LoginRateLimitGlobal = 60
+
 // Deps are the API's injected dependencies.
 type Deps struct {
 	Users         UserStore
@@ -55,6 +65,10 @@ type Deps struct {
 	// SPA, if non-nil, serves the embedded dashboard for any non-/api/v1 path
 	// (client-side routing). Nil keeps pure-API behavior (Phase 4b).
 	SPA http.Handler
+	// LoginRateLimitPerIP overrides LoginRateLimitPerIP for tests; zero uses the const.
+	LoginRateLimitPerIPOverride int
+	// LoginRateLimitGlobalOverride overrides LoginRateLimitGlobal for tests; zero uses the const.
+	LoginRateLimitGlobalOverride int
 }
 
 type ctxKey int
