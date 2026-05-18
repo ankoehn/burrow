@@ -45,6 +45,26 @@ func TestSPAMountedServesNonAPIAndNotAPI(t *testing.T) {
 	if r4.StatusCode != http.StatusUnauthorized || *hit {
 		t.Fatalf("/api/v1/tunnels unauth want 401 JSON not SPA: status=%d hit=%v", r4.StatusCode, *hit)
 	}
+
+	// The /api/v1 namespace must NEVER fall through to the SPA — not the bare
+	// prefix, not a trailing slash, not a wrong method. (The plan's original
+	// r.NotFound + /* form leaked exactly these into the SPA.)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/v1"},
+		{"GET", "/api/v1/"},
+		{"PUT", "/api/v1/me"},
+	} {
+		*hit = false
+		req, _ := http.NewRequest(tc.method, ts.URL+tc.path, nil)
+		rx, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+		}
+		rx.Body.Close()
+		if *hit {
+			t.Fatalf("%s %s leaked into the SPA (API namespace must never serve the SPA)", tc.method, tc.path)
+		}
+	}
 }
 
 func TestNoSPAKeeps4bBehavior(t *testing.T) {
