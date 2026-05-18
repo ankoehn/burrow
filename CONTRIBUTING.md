@@ -36,6 +36,5 @@ CI runs the same on every pull request and on `main`. Keep it green.
 
 ## Roadmap & scope
 
-Read [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/MVP_PHASES.md](docs/MVP_PHASES.md)
-before proposing features. Phase discipline is intentional — out-of-scope ideas go to
-a backlog, not into the current phase.
+Read [`BACKLOG.md`](BACKLOG.md) before proposing features. Phase discipline is
+intentional — out-of-scope ideas go to a backlog, not into the current change.

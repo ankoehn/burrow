@@ -12,7 +12,7 @@ This is **early software**: single-admin, TCP only, expect rough edges and break
 
 - **Self-hosted, no SaaS.** The relay runs on your server. No third party sees your traffic, no account, no limits you didn't set.
 - **Apache-2.0, no open core.** Every feature is in this repository. Nothing is held back for a paid tier.
-- **Two static binaries.** `burrowd` (server) and `burrow` (client). No runtime, no `docker compose` of seven services. Pure Go, cross-compiled to six platforms with no CGO.
+- **Two static binaries.** `burrowd` (server) and `burrow` (client). No runtime, no `docker compose` of seven services. Pure Go, cross-compiled for Linux, macOS, and Windows with no CGO.
 - **Batteries included.** A real embedded web dashboard, token auth, a JSON API, and live per-tunnel byte counters — not just a port forwarder.
 
 ## Quickstart

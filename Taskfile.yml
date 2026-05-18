@@ -44,9 +44,9 @@ tasks:
       - goreleaser release --snapshot --clean
 
   certs:
-    desc: Generate local dev TLS certs (Phase 2 - script not present yet)
+    desc: Generate local dev TLS certs into ./certs (idempotent; DEV ONLY)
     cmds:
       - cmd: ./scripts/dev-certs.sh
         platforms: [linux, darwin]
-      - cmd: powershell -NoProfile -Command "Write-Error 'scripts/dev-certs.sh arrives in MVP Phase 2'"
+      - cmd: powershell -NoProfile -Command "go run ./cmd/gencerts"
         platforms: [windows]

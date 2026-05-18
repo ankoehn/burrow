@@ -1,8 +1,6 @@
 # Backlog
 
-Out-of-scope-but-noted improvements deferred per MVP phase discipline
-(see `docs/MVP_PHASES.md` — "If you find yourself reaching for one of these
-mid-MVP, write it down in `BACKLOG.md` and keep going.").
+Out-of-scope-but-noted improvements deferred per phase discipline.
 
 ## Database / persistence
 
@@ -47,7 +45,7 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
 
 - **First-class HTTPS / `Secure` cookie / HSTS for the API.** MVP serves plain HTTP on `:8080` behind an operator TLS-terminating proxy (`http_secure_cookies` default false). Add native TLS for the HTTP server, set `Secure` cookies + HSTS when terminating TLS itself. _Source: Phase 4b spec §6/F10._
 
-- **Change-password / account endpoint + page.** `docs/MVP_PHASES.md` lists an Account page, but the parent Phase-4 spec §7 4b handler list and the Phase-4 done-criteria omit password change; MVP `/me` is read-only. Defer to v0.2. _Source: Phase 4b spec §6._
+- **Change-password / account endpoint + page.** The Phase-4 spec §7 4b handler list and the Phase-4 done-criteria omit password change; MVP `/me` is read-only. Defer to v0.2. _Source: Phase 4b spec §6._
 
 ## HTTP API lifecycle (Phase 4b)
 
@@ -132,3 +130,8 @@ the v0.1.0 tag; track for v0.2.
   armv7 build (`burrow_linux_arm_<ver>.tar.gz`); unambiguous (only v7 is
   built) but a downloader can't tell v6/v7 from the name. Consider emitting
   `armv7` in `archives.name_template`. _Source: Phase 5 Task 2 review._
+
+## Pre-launch checklist
+
+- Enable GitHub Private Vulnerability Reporting (Settings → Code security) before the repo is public.
+- Add a tag-protection rule requiring CI green on `v[0-9]*` tags (Settings → Tags).
