@@ -93,7 +93,9 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 			}
 		case proto.MsgPing:
 			var p proto.Ping
-			_ = proto.DecodePayload(env, &p)
+			if err := proto.DecodePayload(env, &p); err != nil {
+				s.log.Debug("decode ping payload", "err", err)
+			}
 			_ = cs.SendControl(proto.MsgPong, proto.Pong{Nonce: p.Nonce})
 		case proto.MsgPong:
 			// Pong is informational only. Dead-peer detection for the MVP is

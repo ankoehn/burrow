@@ -257,31 +257,61 @@ func (s *Server) heartbeat(ctx context.Context, y *yamux.Session, _ *ClientSessi
 	}
 }
 
-// byteTicker publishes a per-user "tunnels changed" ping ~1/s while any of
-// that user's tunnels are live, so dashboards refresh byte counters. It is
-// WaitGroup-tracked and exits on ctx cancellation.
+// userByteSum returns the total in+out bytes summed across all tunnels of all
+// sessions owned by userID, and whether the user has any live tunnels at all.
+// It is a pure helper so the delta logic can be unit-tested independently.
+func userByteSum(sessions []*ClientSession, reg *Registry, userID string) (sum uint64, hasTunnels bool) {
+	for _, cs := range sessions {
+		if cs.UserID != userID {
+			continue
+		}
+		for _, tn := range reg.snapshotTunnels(cs) {
+			sum += tn.BytesIn.Load() + tn.BytesOut.Load()
+			hasTunnels = true
+		}
+	}
+	return sum, hasTunnels
+}
+
+// byteTicker publishes a per-user "tunnels changed" ping ~1/s, but only when
+// the total byte sum for that user has changed since the last publish. This
+// avoids spurious SSE wakeups and dashboard refetches for idle tunnels (B15).
+// It is WaitGroup-tracked and exits on ctx cancellation.
 func (s *Server) byteTicker(ctx context.Context) {
 	defer s.wg.Done()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	// lastSum tracks the last-published total byte sum (in+out) per userID.
+	// The map is cleaned up when a user's tunnels all disconnect, preventing leaks.
+	lastSum := map[string]uint64{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			seen := map[string]struct{}{}
-			for _, cs := range s.reg.Sessions() {
-				if cs.UserID == "" {
-					continue
+			sessions := s.reg.Sessions()
+			// Collect distinct userIDs with live tunnels.
+			activeUsers := map[string]struct{}{}
+			for _, cs := range sessions {
+				if cs.UserID != "" && len(s.reg.snapshotTunnels(cs)) > 0 {
+					activeUsers[cs.UserID] = struct{}{}
 				}
-				if _, dup := seen[cs.UserID]; dup {
-					continue
+			}
+			// Remove stale entries for users who no longer have live tunnels.
+			for uid := range lastSum {
+				if _, ok := activeUsers[uid]; !ok {
+					delete(lastSum, uid)
 				}
-				if len(s.reg.snapshotTunnels(cs)) > 0 {
-					seen[cs.UserID] = struct{}{}
+			}
+			// Publish only when byte sum changed (or on first observation).
+			for userID := range activeUsers {
+				cur, _ := userByteSum(sessions, s.reg, userID)
+				prev, known := lastSum[userID]
+				if !known || cur != prev {
+					lastSum[userID] = cur
 					// Best-effort invalidate ping; a publish for a mid-teardown
 					// session is harmless (client refetches and sees the update).
-					s.opts.Events.PublishTunnelsChanged(cs.UserID)
+					s.opts.Events.PublishTunnelsChanged(userID)
 				}
 			}
 		}
