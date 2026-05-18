@@ -8,7 +8,6 @@
 *.db
 
 # Frontend build output / deps (Phase 4)
-/web/dist/
 /web/node_modules/
 
 # Go
