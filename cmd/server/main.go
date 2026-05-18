@@ -2,8 +2,9 @@
 //
 // `serve` runs the control server: it opens/migrates the SQLite database,
 // seeds the first admin from config, authenticates clients against
-// DB-issued tokens, and persists registered tunnels. The HTTP API and
-// dashboard arrive in MVP Phases 4b/4c.
+// DB-issued tokens, and persists registered tunnels. It ALSO serves the
+// HTTP JSON API + SSE on BURROW_HTTP_LISTEN (default :8080) alongside the
+// control listener; the dashboard (web UI) arrives in MVP Phase 4c.
 //
 // `token` is an operator/dev helper that mints a client token for an
 // existing user directly against the database (no HTTP API needed yet).
@@ -13,16 +14,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/config"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
+	"github.com/ankoehn/burrow/internal/events"
 	"github.com/ankoehn/burrow/internal/logging"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
@@ -46,6 +51,22 @@ func (a tunnelStoreAdapter) SaveTunnel(ctx context.Context, userID string, t *se
 
 func (a tunnelStoreAdapter) MarkTunnelSeen(ctx context.Context, tunnelID string) error {
 	return a.s.MarkTunnelSeen(ctx, tunnelID)
+}
+
+// tunnelListerAdapter exposes the live server registry to the HTTP API,
+// converting server.TunnelView to api.TunnelView (keeps internal/api
+// decoupled from internal/server, same pattern as tunnelStoreAdapter).
+type tunnelListerAdapter struct{ s *server.Server }
+
+func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
+	var out []api.TunnelView
+	for _, t := range a.s.ListUserTunnels(userID) {
+		out = append(out, api.TunnelView{
+			ID: t.ID, Name: t.Name, Type: t.Type, RemotePort: t.RemotePort,
+			LocalAddr: t.LocalAddr, BytesIn: t.BytesIn, BytesOut: t.BytesOut, Connected: t.Connected,
+		})
+	}
+	return out
 }
 
 func main() {
@@ -93,20 +114,48 @@ func main() {
 			if err := st.SeedAdmin(context.Background(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
 				return err
 			}
+			bus := events.NewBus()
 			srv, err := server.New(server.Options{
 				Listen: cfg.Listen, TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey,
 				PublicBind: cfg.PublicBind, PortMin: cfg.PortMin, PortMax: cfg.PortMax,
-				Auth: st, Tunnels: tunnelStoreAdapter{st}, Logger: log,
+				Auth: st, Tunnels: tunnelStoreAdapter{st}, Events: bus, Logger: log,
 			})
 			if err != nil {
 				return err
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			if err := srv.Serve(ctx); err != nil {
-				return err
+
+			apiSrv := &http.Server{
+				Addr: cfg.HTTPListen,
+				Handler: api.NewRouter(api.Deps{
+					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
+					Log: log, SecureCookies: cfg.HTTPSecureCookies,
+				}),
+				ReadHeaderTimeout: 10 * time.Second,
 			}
+
+			errc := make(chan error, 2)
+			go func() { errc <- srv.Serve(ctx) }()
+			go func() {
+				log.Info("http api listening", "addr", cfg.HTTPListen)
+				if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					errc <- err
+					return
+				}
+				errc <- nil
+			}()
+
+			<-ctx.Done()
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = apiSrv.Shutdown(shutCtx)
 			srv.Wait()
+			for i := 0; i < 2; i++ {
+				if e := <-errc; e != nil && e != http.ErrServerClosed {
+					return e
+				}
+			}
 			return nil
 		},
 	}
