@@ -28,7 +28,7 @@ make build          # or: task build
 ## Before you push
 
 ```bash
-make test           # go test -race -cover ./...
+make test           # go test -race -cover ./cmd/... ./internal/... ./web
 make lint           # golangci-lint run
 ```
 

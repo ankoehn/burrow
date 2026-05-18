@@ -16,7 +16,9 @@ tasks:
   test:
     desc: Run tests with race detector and coverage
     cmds:
-      - go test -race -cover ./...
+      # ./web is non-recursive so go test skips the gitignored, npm-generated
+      # web/node_modules tree (flatted ships stray .go); cmd/internal recurse.
+      - go test -race -cover ./cmd/... ./internal/... ./web
 
   lint:
     desc: Run golangci-lint

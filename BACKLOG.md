@@ -62,14 +62,20 @@ mid-MVP, write it down in `BACKLOG.md` and keep going.").
 
 ## Build tooling
 
-- **`go ./...` traverses `web/node_modules` when present.** The `flatted` npm
-  package ships a Go reference file; once `npm ci` has populated
-  `web/node_modules` (e.g. the GoReleaser web build hook, or local dev),
-  `go test ./...` discovers `github.com/ankoehn/burrow/web/node_modules/flatted/...`
-  as `[no test files]` — benign today (compiles; node_modules is gitignored so the
-  committed/CI tree is unaffected). Latent risk: a future npm dep shipping
-  non-compiling Go would break local `go test ./...`. Revisit with a Go workspace
-  (`go.work`) or build-tag scheme if it ever bites. _Source: Phase 4c Task 1 independent review._
+- **`go ./...` traversed `web/node_modules` when present — RESOLVED 2026-05-18.**
+  The `flatted` npm package ships a Go reference file; once `npm ci` populated
+  `web/node_modules`, `go test ./...` / `go vet ./...` discovered
+  `github.com/ankoehn/burrow/web/node_modules/flatted/...`. Fix: the test/vet
+  entrypoints (`Makefile`, `Taskfile.yml`, CI) now enumerate the real module
+  roots `./cmd/... ./internal/... ./web` instead of `./...`. `./web` is
+  non-recursive, so the single `web` embed package stays covered while the npm
+  subtree is structurally unreachable — no external tools, identical on
+  Linux/macOS/Windows. Rejected alternatives: a nested `web/go.mod` (orphans
+  `web/embed.go`+tests from the main module that `cmd` imports); a `go.work`
+  workspace (does **not** prune a module's own subtree walk); a `//go:build
+  ignore` tag (un-committable — `web/node_modules` is gitignored and
+  npm-regenerated). Tradeoff: a future top-level Go dir must be added to these
+  targets. _Source: Phase 4c Task 1 independent review; resolved Phase 5._
 
 ## Dashboard (Phase 4c)
 

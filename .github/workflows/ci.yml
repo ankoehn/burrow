@@ -13,8 +13,10 @@ jobs:
         with:
           go-version: "1.25"
       - run: go mod download
-      - run: go vet ./...
-      - run: go test -race -cover ./...
+      # ./web is non-recursive: excludes the npm-generated web/node_modules
+      # tree (gitignored, ships stray .go) while covering the web embed pkg.
+      - run: go vet ./cmd/... ./internal/... ./web
+      - run: go test -race -cover ./cmd/... ./internal/... ./web
 
   lint:
     runs-on: ubuntu-latest

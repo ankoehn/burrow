@@ -9,8 +9,11 @@ build:
 	go build -ldflags="$(LDFLAGS)" -o $(BINDIR)/burrowd ./cmd/server
 	go build -ldflags="$(LDFLAGS)" -o $(BINDIR)/burrow ./cmd/client
 
+# Enumerate real module roots instead of ./...: ./web is non-recursive so
+# `go test` skips the gitignored, npm-generated web/node_modules tree (the
+# flatted dep ships stray .go) while still covering the web embed package.
 test:
-	go test -race -cover ./...
+	go test -race -cover ./cmd/... ./internal/... ./web
 
 lint:
 	golangci-lint run
