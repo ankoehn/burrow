@@ -1,0 +1,182 @@
+import { http, HttpResponse } from "msw";
+import { db, type MockDb } from "@/mocks/db";
+
+const json = (body: unknown, status = 200) => HttpResponse.json(body as object, { status });
+const err = (status: number, message: string) => HttpResponse.json({ error: message }, { status });
+const noContent = () => new HttpResponse(null, { status: 204 });
+
+const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
+const WHITELIST = ["smtp.host", "smtp.port", "smtp.username", "smtp.from", "smtp.tls"];
+
+// Gate: replicate 401 -> 403(csrf) -> 403(admin) ordering.
+function gate(req: Request, opts: { admin?: boolean } = {}): Response | null {
+  if (req.headers.get("x-mock-unauth") === "1") return err(401, "unauthorized");
+  const method = req.method.toUpperCase();
+  if (!SAFE.has(method)) {
+    if (req.headers.get("X-CSRF-Token") !== db.csrf) return err(403, "csrf token invalid");
+  }
+  if (opts.admin && db.me.role !== "admin") return err(403, "admin required");
+  return null;
+}
+
+async function body<T>(req: Request): Promise<T | null> {
+  try { return (await req.json()) as T; } catch { return null; }
+}
+
+export const handlers = [
+  // ---- auth / identity ----
+  http.get("/api/v1/me", ({ request }) => gate(request) ?? json(db.me)),
+  http.post("/api/v1/auth/logout", ({ request }) => gate(request) ?? noContent()),
+  http.post("/api/v1/auth/change-password", async ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const b = await body<{ current_password?: string; new_password?: string }>(request);
+    if (!b?.current_password || !b?.new_password) return err(400, "current_password and new_password are required");
+    if (b.current_password !== "password123") return err(401, "current password is incorrect");
+    if (b.new_password.length < 8) return err(400, "new password must be at least 8 characters");
+    return noContent();
+  }),
+
+  // ---- users ----
+  http.get("/api/v1/users", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const limit = Number(url.searchParams.get("limit")) || 50;
+    const offset = Number(url.searchParams.get("offset")) || 0;
+    const filtered = db.users.filter((u) => u.email.toLowerCase().includes(q));
+    return json({ users: filtered.slice(offset, offset + limit), total: filtered.length });
+  }),
+  http.post("/api/v1/users", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ email?: string; password?: string; role?: string }>(request);
+    if (!b?.email || !b?.password || !b?.role) return err(400, "email, password, and role are required");
+    if (db.users.some((u) => u.email === b.email)) return err(409, "email already in use");
+    if (b.password.length < 8) return err(400, "password must be at least 8 characters");
+    if (b.role !== "admin" && b.role !== "user") return err(400, "role must be 'admin' or 'user'");
+    const u: MockDb["users"][number] = {
+      id: `bur_usr_${Math.random().toString(36).slice(2, 9)}`,
+      email: b.email, role: b.role, status: "active", last_login: null,
+      created_at: new Date().toISOString(),
+    };
+    db.users.push(u);
+    return json(u, 201);
+  }),
+  http.patch("/api/v1/users/:id", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ role?: string; status?: string }>(request);
+    if (!b || (b.role == null && b.status == null)) return err(400, "role and/or status required");
+    const u = db.users.find((x) => x.id === params.id);
+    if (!u) return err(404, "user not found");
+    if (b.status != null) {
+      if (b.status !== "active" && b.status !== "suspended") return err(400, "status must be 'active' or 'suspended'");
+      if (u.id === db.me.id) return err(400, "cannot change your own status");
+      u.status = b.status;
+    }
+    if (b.role != null) {
+      if (b.role !== "admin" && b.role !== "user") return err(400, "role must be 'admin' or 'user'");
+      u.role = b.role;
+    }
+    return noContent();
+  }),
+  http.delete("/api/v1/users/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    if (params.id === db.me.id) return err(400, "cannot delete yourself");
+    const i = db.users.findIndex((x) => x.id === params.id);
+    if (i < 0) return err(404, "user not found");
+    db.users.splice(i, 1);
+    return noContent();
+  }),
+
+  // ---- roles ----
+  http.get("/api/v1/roles", ({ request }) => gate(request, { admin: true }) ?? json(db.roles)),
+  http.get("/api/v1/roles/:name", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const r = db.roles.find((x) => x.name === params.name);
+    if (!r) return err(404, "role not found");
+    return json({ ...r, permissions: db.rolePerms[r.name] ?? [] });
+  }),
+
+  // ---- sessions ----
+  http.get("/api/v1/sessions", ({ request }) => gate(request) ?? json(db.sessions)),
+  http.delete("/api/v1/sessions/:id", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const i = db.sessions.findIndex((s) => s.id === params.id);
+    if (i < 0) return err(404, "session not found");
+    db.sessions.splice(i, 1);
+    return noContent();
+  }),
+  http.post("/api/v1/sessions/revoke-all", ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter((s) => s.current);
+    return json({ revoked: before - db.sessions.length });
+  }),
+
+  // ---- settings ----
+  http.get("/api/v1/settings", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const out: Record<string, string> = {};
+    for (const k of WHITELIST) if (db.settings[k] != null) out[k] = db.settings[k];
+    return json(out);
+  }),
+  http.put("/api/v1/settings", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<Record<string, string>>(request);
+    if (!b) return err(400, "invalid request body");
+    if (b["smtp.tls"] != null && !["none", "starttls", "implicit"].includes(b["smtp.tls"]))
+      return err(400, "smtp.tls must be none, starttls, or implicit");
+    for (const k of WHITELIST) if (b[k] != null) db.settings[k] = b[k];
+    return noContent();
+  }),
+  http.post("/api/v1/settings/test-email", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ to?: string }>(request);
+    if (!b?.to) return err(400, "to is required");
+    if (!db.settings["smtp.host"] || !db.smtpPasswordSet)
+      return err(409, "smtp is not configured — set host/port and BURROW_SMTP_PASSWORD");
+    return noContent();
+  }),
+
+  // ---- clients ----
+  http.get("/api/v1/clients", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return json(db.clients.map(({ services: _services, ...v }) => v));
+  }),
+  http.get("/api/v1/clients/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const c = db.clients.find((x) => x.session_id === params.id);
+    if (!c) return err(404, "client not found");
+    return json(c);
+  }),
+
+  // ---- per-service access mode ----
+  http.put("/api/v1/tunnels/:id/access-mode", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const b = await body<{ access_mode?: string }>(request);
+    if (!b?.access_mode) return err(400, "access_mode is required");
+    let svc: MockDb["clients"][number]["services"][number] | undefined;
+    for (const c of db.clients) { const s = c.services.find((x) => x.id === params.id); if (s) { svc = s; break; } }
+    if (!svc) return err(404, "tunnel not found");
+    if (!["open", "api_key", "burrow_login"].includes(b.access_mode))
+      return err(400, "access_mode must be 'open', 'api_key', or 'burrow_login'");
+    svc.access_mode = b.access_mode as typeof svc.access_mode;
+    return noContent();
+  }),
+
+  // ---- tokens (Connect-a-client) ----
+  http.get("/api/v1/tokens", ({ request }) => gate(request) ?? json(db.tokens)),
+  http.post("/api/v1/tokens", async ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const b = await body<{ name?: string }>(request);
+    if (!b?.name) return err(400, "name is required");
+    db.tokens.push({ id: `tok_${Math.random().toString(36).slice(2, 7)}`, name: b.name, last_used: null, created_at: new Date().toISOString() });
+    return json({ name: b.name, token: `bur_${Math.random().toString(36).slice(2, 18)}` }, 201);
+  }),
+
+  // ---- events (inert SSE so Clients/Connect don't error) ----
+  http.get("/api/v1/events", ({ request }) =>
+    gate(request) ?? new HttpResponse("retry: 10000\n\n", { status: 200, headers: { "Content-Type": "text/event-stream" } })),
+
+  // ---- tunnels (reference) ----
+  http.get("/api/v1/tunnels", ({ request }) => gate(request) ?? json([])),
+];

@@ -11,12 +11,20 @@ import { ThemeProvider } from "@/components/theme-provider";
 import App from "./App";
 import "./index.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter><App /></BrowserRouter>
-      </QueryClientProvider>
-    </ThemeProvider>
-  </React.StrictMode>
-);
+async function enableMocking() {
+  if (!import.meta.env.DEV) return;
+  const { worker } = await import("@/mocks/browser");
+  await worker.start({ onUnhandledRequest: "bypass" });
+}
+
+enableMocking().then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter><App /></BrowserRouter>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </React.StrictMode>
+  );
+});
