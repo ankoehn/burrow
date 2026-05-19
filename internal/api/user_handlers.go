@@ -58,7 +58,7 @@ func toUserAdminResp(u db.User) userAdminResp {
 // AdminListUsers returns all users (admin only).
 // GET /api/v1/users
 func (d Deps) AdminListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := d.Users.ListUsers(r.Context())
+	users, _, err := d.Users.ListUsersPage(r.Context(), "", 0, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list users failed")
 		return

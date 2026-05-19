@@ -67,6 +67,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(d.requestLogger)
 	r.Use(middleware.Recoverer)
 
+	// Liveness/readiness probes: unauthenticated, no CSRF, no /api/v1 prefix
+	// (k8s-style). Registered before the SPA catch-all so they are not
+	// shadowed by client-side routing.
+	r.Get("/healthz", d.Healthz)
+	r.Get("/readyz", d.Readyz)
+
 	loginPerIP, loginGlobal := d.loginRateLimiters()
 
 	r.Route("/api/v1", func(r chi.Router) {

@@ -42,11 +42,16 @@ func (f fakeUsers) ValidateSession(_ context.Context, id string) (string, error)
 }
 func (f fakeUsers) DeleteSession(_ context.Context, _ string) error        { return nil }
 func (f fakeUsers) ChangePassword(_ context.Context, _, _, _ string) error { return nil }
-func (f fakeUsers) ListUsers(_ context.Context) ([]db.User, error)         { return nil, nil }
+func (f fakeUsers) ListUsersPage(_ context.Context, _ string, _, _ int) ([]db.User, int, error) {
+	return nil, 0, nil
+}
 func (f fakeUsers) CreateUser(_ context.Context, _, _, _ string) (db.User, error) {
 	return db.User{}, nil
 }
-func (f fakeUsers) DeleteUser(_ context.Context, _ string) error { return nil }
+func (f fakeUsers) DeleteUser(_ context.Context, _ string) error                 { return nil }
+func (f fakeUsers) UpdateUserRole(_ context.Context, _, _ string) error          { return nil }
+func (f fakeUsers) SetUserStatus(_ context.Context, _, _ string) error           { return nil }
+func (f fakeUsers) TouchUserLastLogin(_ context.Context, _ string) error         { return nil }
 
 func testDeps(v func(string) (string, error)) Deps {
 	return Deps{Users: fakeUsers{validate: v}, Log: slog.Default()}

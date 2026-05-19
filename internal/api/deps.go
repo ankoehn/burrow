@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/store"
 )
 
 // UserStore is the subset of internal/store the API needs. *store.Store satisfies it.
@@ -21,11 +22,86 @@ type UserStore interface {
 	CreateSession(ctx context.Context, userID, ua, ip string) (string, error)
 	ValidateSession(ctx context.Context, id string) (string, error)
 	DeleteSession(ctx context.Context, id string) error
-	// Multi-user methods (D3).
+	// Multi-user methods.
 	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
-	ListUsers(ctx context.Context) ([]db.User, error)
+	ListUsersPage(ctx context.Context, q string, limit, offset int) ([]db.User, int, error)
 	CreateUser(ctx context.Context, email, password, role string) (db.User, error)
 	DeleteUser(ctx context.Context, id string) error
+	UpdateUserRole(ctx context.Context, id, role string) error
+	SetUserStatus(ctx context.Context, id, status string) error
+	TouchUserLastLogin(ctx context.Context, id string) error
+}
+
+// RoleStore is the roles read surface (built-in roles + code permissions).
+type RoleStore interface {
+	ListRoles(ctx context.Context) ([]db.Role, error)
+	GetRole(ctx context.Context, name string) (store.RoleDetail, error)
+}
+
+// SessionStore is the per-user session list/revoke surface.
+type SessionStore interface {
+	ListSessions(ctx context.Context, userID string) ([]db.Session, error)
+	RevokeSession(ctx context.Context, id, userID string) error
+	RevokeOtherSessions(ctx context.Context, userID, keepID string) (int64, error)
+}
+
+// SettingsStore is the admin settings + SMTP test surface.
+type SettingsStore interface {
+	GetSettings(ctx context.Context) (map[string]string, error)
+	SaveSettings(ctx context.Context, kv map[string]string) error
+	SendTestEmail(ctx context.Context, to string) error
+}
+
+// Pinger lets /readyz verify the database is reachable.
+type Pinger interface {
+	PingContext(ctx context.Context) error
+}
+
+// ClientView is one live client (control session) for the overview.
+type ClientView struct {
+	SessionID     string `json:"session_id"`
+	UserID        string `json:"user_id"`
+	TokenName     string `json:"token_name"`
+	RemoteAddr    string `json:"remote_addr"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	ClientVersion string `json:"client_version"`
+	ServiceCount  int    `json:"service_count"`
+	TotalBytesIn  int64  `json:"total_bytes_in"`
+	TotalBytesOut int64  `json:"total_bytes_out"`
+}
+
+// ClientServiceView is one service (tunnel) under a client: live + persisted
+// byte counters and the per-service access mode.
+type ClientServiceView struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	RemotePort    int    `json:"remote_port"`
+	LocalAddr     string `json:"local_addr"`
+	AccessMode    string `json:"access_mode"`
+	BytesIn       uint64 `json:"bytes_in"`        // live, since connect
+	BytesOut      uint64 `json:"bytes_out"`       // live, since connect
+	TotalBytesIn  int64  `json:"total_bytes_in"`  // persisted, survives reconnect
+	TotalBytesOut int64  `json:"total_bytes_out"` // persisted
+}
+
+// ClientDetail is a client plus its services.
+type ClientDetail struct {
+	ClientView
+	Services []ClientServiceView `json:"services"`
+}
+
+// ClientLister exposes live client sessions + their services (cmd/server
+// adapts the registry + store totals). See client_handlers.go.
+type ClientLister interface {
+	ListClients() []ClientView
+	GetClient(sessionID string) (ClientDetail, bool)
+}
+
+// AccessModeSetter sets a tunnel's per-service access mode (scoped to owner).
+type AccessModeSetter interface {
+	SetTunnelAccessMode(ctx context.Context, id, userID, mode string) error
 }
 
 // TunnelView is one live tunnel as exposed by the API.
@@ -85,6 +161,13 @@ type Deps struct {
 	LoginRateLimitPerIPOverride int
 	// LoginRateLimitGlobalOverride overrides LoginRateLimitGlobal for tests; zero uses the const.
 	LoginRateLimitGlobalOverride int
+	// v0.2.0 surfaces.
+	Roles       RoleStore
+	Sessions    SessionStore
+	Settings    SettingsStore
+	Clients     ClientLister
+	AccessModes AccessModeSetter
+	DB          Pinger
 }
 
 type ctxKey int

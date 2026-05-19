@@ -40,8 +40,8 @@ func (u *userMgmtStore) GetUserByID(_ context.Context, id string) (db.User, erro
 func (u *userMgmtStore) ChangePassword(_ context.Context, _, _, _ string) error {
 	return u.changePwErr
 }
-func (u *userMgmtStore) ListUsers(_ context.Context) ([]db.User, error) {
-	return u.listUsersResult, u.listUsersErr
+func (u *userMgmtStore) ListUsersPage(_ context.Context, _ string, _, _ int) ([]db.User, int, error) {
+	return u.listUsersResult, len(u.listUsersResult), u.listUsersErr
 }
 func (u *userMgmtStore) CreateUser(_ context.Context, email, _, role string) (db.User, error) {
 	if u.createUserErr != nil {
