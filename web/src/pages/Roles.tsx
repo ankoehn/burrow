@@ -1,0 +1,82 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
+import { apiFetch, ApiError } from "@/lib/api";
+import { Button, Badge, Dialog, SkeletonRows } from "@/components/ds";
+import type { RoleSummary, RoleDetail } from "@/lib/contract";
+
+function RoleDetailDialog({ name, onClose }: { name: string | null; onClose: () => void }) {
+  const { data } = useQuery({
+    queryKey: ["role", name],
+    queryFn: () => apiFetch<RoleDetail>(`/roles/${name}`),
+    enabled: name !== null,
+  });
+  return (
+    <Dialog
+      open={name !== null}
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={name ?? ""}
+      description="Read-only — built-in role."
+      footer={<Button variant="primary" onClick={onClose}>Close</Button>}
+    >
+      <div>
+        <p className="muted" role="note">Permissions are fixed for built-in roles. Editable custom roles are planned.</p>
+        <ul aria-label="Permissions" className="perm-list">
+          {(data?.permissions ?? []).map((p) => (
+            <li key={p}><code className="perm-key">{p}</code></li>
+          ))}
+        </ul>
+      </div>
+    </Dialog>
+  );
+}
+
+export default function Roles() {
+  const [open, setOpen] = useState<string | null>(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["roles"],
+    queryFn: () => apiFetch<RoleSummary[]>("/roles"),
+    retry: false,
+  });
+
+  if (error) {
+    return (
+      <div className="users-page">
+        <div className="page-head"><div><h1>Roles</h1></div></div>
+        <div className="notice-block error">
+          <div className="icon-bubble"><AlertTriangle size={18} /></div>
+          <p role="alert">Failed to load roles: {error instanceof ApiError ? error.message : "Unknown error"}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="users-page">
+      <div className="page-head">
+        <div><h1>Roles</h1><p className="sub">What each role is allowed to do.</p></div>
+      </div>
+      {isLoading ? (
+        <div className="table-wrap"><SkeletonRows n={2} /></div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data" aria-label="Roles">
+            <thead><tr><th>Role</th><th>Description</th><th className="col-actions"></th></tr></thead>
+            <tbody>
+              {(data ?? []).map((r) => (
+                <tr key={r.name}>
+                  <td>{r.name} <Badge kind="" nodot>Built-in</Badge></td>
+                  <td>{r.description}</td>
+                  <td className="col-actions">
+                    <Button variant="secondary" size="sm" onClick={() => setOpen(r.name)}>View</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <RoleDetailDialog name={open} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
