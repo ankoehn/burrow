@@ -94,6 +94,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/tokens", d.CreateToken)
 			r.Delete("/tokens/{id}", d.RevokeToken)
 			r.Get("/tunnels", d.ListTunnels)
+			r.Get("/sessions", d.ListSessions)
+			r.Delete("/sessions/{id}", d.RevokeSession)
+			r.Post("/sessions/revoke-all", d.RevokeAllSessions)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
