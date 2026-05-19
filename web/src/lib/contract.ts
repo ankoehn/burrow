@@ -80,3 +80,42 @@ export interface NewToken {
   name: string;
   token: string;
 }
+
+// ---- v0.3.0: durable services + HTTP access config ----
+// Mirror of docs/superpowers/specs/2026-05-19-v0.3.0-api-contract.md Part C/D/E.
+
+export interface Service {
+  id: string;
+  name: string;
+  type: "tcp" | "http";
+  subdomain: string;
+  hostname: string;
+  access_mode: AccessMode;
+  api_key_header: string;
+  connected: boolean;
+  remote_port: number;
+  local_addr: string;
+}
+
+export interface ServiceDetail extends Service {
+  api_key_count: number;
+  access_policy: string[];
+}
+
+export interface ServiceApiKey {
+  id: string;
+  name: string;
+  last_used: string | null;
+  created_at: string;
+}
+
+export interface AccessPolicy {
+  roles: string[];
+}
+
+// create-key response (plaintext, shown once)
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  key: string;
+}
