@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ankoehn/burrow/internal/auth"
+	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/mailer"
 )
 
 // ErrUnauthorized is returned when a client token does not match.
@@ -29,6 +31,17 @@ var ErrEmailConflict = errors.New("store: email already in use")
 // ErrInvalidRole is returned by CreateUser when the role is not 'admin' or 'user'.
 var ErrInvalidRole = errors.New("store: role must be 'admin' or 'user'")
 
+// ErrInvalidStatus is returned by SetUserStatus for a status other than
+// 'active' or 'suspended'.
+var ErrInvalidStatus = errors.New("store: status must be 'active' or 'suspended'")
+
+// ErrInvalidAccessMode is returned by SetTunnelAccessMode for a value other
+// than 'open', 'api_key', or 'burrow_login'.
+var ErrInvalidAccessMode = errors.New("store: access_mode must be 'open', 'api_key', or 'burrow_login'")
+
+// ErrSMTPUnconfigured is returned by SendTestEmail when no smtp.host is set.
+var ErrSMTPUnconfigured = errors.New("store: smtp is not configured")
+
 // minPasswordLen is the minimum required password length.
 const minPasswordLen = 8
 
@@ -44,11 +57,17 @@ type SaveTunnelArg struct {
 }
 
 // Store is the DB-backed implementation of the server/API dependencies.
-// The caller retains ownership of the underlying *sql.DB and must close it (Store has no Close).
-type Store struct{ q *db.DB }
+// The caller retains ownership of the underlying *sql.DB (Store has no Close).
+type Store struct {
+	q            *db.DB
+	smtpPassword string // injected from BURROW_SMTP_PASSWORD(_FILE); never persisted
+}
 
 // New builds a Store over an open, migrated *sql.DB.
 func New(d *sql.DB) *Store { return &Store{q: db.Wrap(d)} }
+
+// SetSMTPPassword injects the SMTP secret (from config). Called by cmd/server.
+func (s *Store) SetSMTPPassword(pw string) { s.smtpPassword = pw }
 
 // SeedAdmin ensures the bootstrap admin user exists.
 // It is a no-op when email or password is empty (unset BURROW_ADMIN_* — safe).
@@ -231,9 +250,169 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID, newHash string) 
 	return s.q.UpdateUserPassword(ctx, userID, newHash)
 }
 
-// ListUsers returns all users (id, email, role, created_at — no password_hash).
-func (s *Store) ListUsers(ctx context.Context) ([]db.User, error) {
-	return s.q.ListUsers(ctx)
+// ListUsersPage returns a filtered, paginated page plus the full filtered total.
+func (s *Store) ListUsersPage(ctx context.Context, q string, limit, offset int) ([]db.User, int, error) {
+	return s.q.ListUsersPage(ctx, q, limit, offset)
+}
+
+// UpdateUserRole validates and sets a user's role.
+func (s *Store) UpdateUserRole(ctx context.Context, id, role string) error {
+	if role != "admin" && role != "user" {
+		return ErrInvalidRole
+	}
+	return s.q.UpdateUserRole(ctx, id, role)
+}
+
+// SetUserStatus validates and sets a user's status. Suspending also revokes
+// every existing session for that user (so suspension takes effect immediately
+// without adding a per-request user lookup to RequireSession).
+func (s *Store) SetUserStatus(ctx context.Context, id, status string) error {
+	if status != "active" && status != "suspended" {
+		return ErrInvalidStatus
+	}
+	if err := s.q.UpdateUserStatus(ctx, id, status); err != nil {
+		return err
+	}
+	if status == "suspended" {
+		if _, err := s.q.DeleteSessionsByUser(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TouchUserLastLogin stamps the user's last_login (best-effort at the call site).
+func (s *Store) TouchUserLastLogin(ctx context.Context, id string) error {
+	return s.q.TouchUserLastLogin(ctx, id)
+}
+
+// RoleDetail is a role row enriched with its code-defined permission set.
+type RoleDetail struct {
+	Name        string
+	Description string
+	CreatedAt   time.Time
+	Permissions []string
+}
+
+// ListRoles returns the built-in roles (DB rows for name/description/created_at).
+func (s *Store) ListRoles(ctx context.Context) ([]db.Role, error) {
+	return s.q.ListRoles(ctx)
+}
+
+// GetRole returns a role's DB row plus its authz permission strings.
+func (s *Store) GetRole(ctx context.Context, name string) (RoleDetail, error) {
+	r, err := s.q.GetRole(ctx, name)
+	if err != nil {
+		return RoleDetail{}, err
+	}
+	d := RoleDetail{Name: r.Name, Description: r.Description, CreatedAt: r.CreatedAt}
+	if ar, ok := authz.Get(name); ok {
+		for _, p := range ar.Permissions {
+			d.Permissions = append(d.Permissions, string(p))
+		}
+	}
+	return d, nil
+}
+
+// ListSessions returns the user's sessions (newest first).
+func (s *Store) ListSessions(ctx context.Context, userID string) ([]db.Session, error) {
+	return s.q.ListSessionsByUser(ctx, userID)
+}
+
+// RevokeSession deletes one of the user's sessions (scoped).
+func (s *Store) RevokeSession(ctx context.Context, id, userID string) error {
+	return s.q.DeleteSessionForUser(ctx, id, userID)
+}
+
+// RevokeOtherSessions signs the user out everywhere except keepID.
+func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepID string) (int64, error) {
+	return s.q.DeleteSessionsByUserExcept(ctx, userID, keepID)
+}
+
+// GetSettings returns the settings table as a flat map.
+func (s *Store) GetSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.q.GetAllSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.Key] = r.Value
+	}
+	return m, nil
+}
+
+// SaveSettings upserts the given non-secret settings.
+func (s *Store) SaveSettings(ctx context.Context, kv map[string]string) error {
+	return s.q.SetSettings(ctx, kv)
+}
+
+// GetTunnel returns one persisted tunnel row, or db.ErrNotFound.
+func (s *Store) GetTunnel(ctx context.Context, id string) (db.Tunnel, error) {
+	return s.q.GetTunnel(ctx, id)
+}
+
+// SetTunnelAccessMode validates the enum and sets a tunnel's access mode
+// scoped to its owner. api_key/burrow_login are accepted and persisted but
+// have no runtime effect in v0.2.0 (inert until HTTP tunnels land in v0.3).
+func (s *Store) SetTunnelAccessMode(ctx context.Context, id, userID, mode string) error {
+	switch mode {
+	case "open", "api_key", "burrow_login":
+	default:
+		return ErrInvalidAccessMode
+	}
+	return s.q.SetTunnelAccessMode(ctx, id, userID, mode)
+}
+
+// FlushTunnelTotals adds the given byte deltas to a tunnel's persisted counters.
+func (s *Store) FlushTunnelTotals(ctx context.Context, id string, addIn, addOut int64) error {
+	return s.q.FlushTunnelTotals(ctx, id, addIn, addOut)
+}
+
+// SMTPConfigFromSettings builds a mailer.Config from the settings table plus
+// the injected secret. ok=false means SMTP is unconfigured (no host).
+func (s *Store) SMTPConfigFromSettings(ctx context.Context) (cfg mailer.Config, ok bool, err error) {
+	m, err := s.GetSettings(ctx)
+	if err != nil {
+		return mailer.Config{}, false, err
+	}
+	host := m["smtp.host"]
+	if host == "" {
+		return mailer.Config{}, false, nil
+	}
+	port := 0
+	for _, r := range m["smtp.port"] {
+		if r < '0' || r > '9' {
+			port = 0
+			break
+		}
+		port = port*10 + int(r-'0')
+	}
+	tlsMode := mailer.TLSMode(m["smtp.tls"])
+	if tlsMode == "" {
+		tlsMode = mailer.TLSSTARTTLS
+	}
+	return mailer.Config{
+		Host:     host,
+		Port:     port,
+		Username: m["smtp.username"],
+		Password: s.smtpPassword,
+		From:     m["smtp.from"],
+		TLS:      tlsMode,
+	}, true, nil
+}
+
+// SendTestEmail builds the SMTP config from settings (+ injected secret) and
+// sends a test message to `to`. Returns ErrSMTPUnconfigured when no host is set.
+func (s *Store) SendTestEmail(ctx context.Context, to string) error {
+	cfg, ok, err := s.SMTPConfigFromSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrSMTPUnconfigured
+	}
+	return mailer.SendTest(ctx, cfg, to)
 }
 
 // CreateUser creates a new user account. Returns ErrEmailConflict on duplicate email,

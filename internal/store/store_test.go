@@ -248,8 +248,8 @@ func TestCreateUserAndListUsers(t *testing.T) {
 	if _, err := s.CreateUser(ctx, "new@x", "password1", "admin"); !errors.Is(err, ErrEmailConflict) {
 		t.Fatalf("duplicate email → ErrEmailConflict, got %v", err)
 	}
-	// ListUsers must not leak password_hash (PasswordHash field is zero-value).
-	users, err := s.ListUsers(ctx)
+	// ListUsersPage must not leak password_hash (PasswordHash field is zero-value).
+	users, _, err := s.ListUsersPage(ctx, "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestCreateUserAndListUsers(t *testing.T) {
 		t.Fatalf("want 1 user, got %d", len(users))
 	}
 	if users[0].PasswordHash != "" {
-		t.Fatalf("ListUsers must not populate PasswordHash, got %q", users[0].PasswordHash)
+		t.Fatalf("ListUsersPage must not populate PasswordHash, got %q", users[0].PasswordHash)
 	}
 }
 
