@@ -42,6 +42,22 @@ var ErrInvalidAccessMode = errors.New("store: access_mode must be 'open', 'api_k
 // ErrSMTPUnconfigured is returned by SendTestEmail when no smtp.host is set.
 var ErrSMTPUnconfigured = errors.New("store: smtp is not configured")
 
+// ErrForbidden is returned when the caller lacks permission for the requested
+// operation (maps to HTTP 403 in the API layer).
+var ErrForbidden = errors.New("store: forbidden")
+
+// ErrServiceNotHTTP is returned by SetServiceAccessMode when mode is not
+// "open" and the service type is not "http" (maps to HTTP 409).
+var ErrServiceNotHTTP = errors.New("store: api_key and burrow_login require an http service")
+
+// ErrNameRequired is returned by CreateAPIKey when the name argument is empty
+// (maps to HTTP 400 in the API layer).
+var ErrNameRequired = errors.New("store: name is required")
+
+// ErrUnknownRole is returned by SetAccessPolicy when a role is not a built-in
+// authz role (maps to HTTP 400 in the API layer).
+var ErrUnknownRole = errors.New("store: unknown role")
+
 // minPasswordLen is the minimum required password length.
 const minPasswordLen = 8
 

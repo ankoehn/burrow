@@ -60,3 +60,29 @@ func TestRandomToken(t *testing.T) {
 		t.Fatal("must be random")
 	}
 }
+
+func TestGenerateAPIKey(t *testing.T) {
+	pt, hash, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pt, "buk_") {
+		t.Fatalf("api key must have buk_ prefix: %s", pt)
+	}
+	if len(hash) != 64 {
+		t.Fatalf("sha256 hex must be 64 chars, got %d", len(hash))
+	}
+	if HashToken(pt) != hash {
+		t.Fatal("HashToken must reproduce the stored hash")
+	}
+	// Client tokens and API keys must be distinct (different prefixes).
+	clientPt, _, _ := GenerateClientToken()
+	if strings.HasPrefix(clientPt, "buk_") {
+		t.Fatal("client token must not have buk_ prefix")
+	}
+	// Two API keys must be unique.
+	pt2, _, _ := GenerateAPIKey()
+	if pt2 == pt {
+		t.Fatal("api keys must be unique")
+	}
+}

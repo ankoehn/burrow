@@ -1,0 +1,291 @@
+package store
+
+// Package store — services.go
+// Permission-gated service/key/policy methods and hot-path lookup helpers.
+//
+// # ServiceView vs ServiceDetail design decision
+//
+// ServiceView carries the durable fields the store can read from the DB:
+// id, name, type, subdomain, access_mode, api_key_header, created_at.
+// It intentionally omits live/runtime fields (hostname, connected,
+// remote_port, local_addr) that come from the in-process tunnel registry or
+// the auth_domain setting — both are owned by the API/wiring layer (Task 10),
+// not the store. Task 10 composes the full response by embedding a ServiceView
+// and populating the live fields itself.
+//
+// ServiceDetail extends ServiceView with the two aggregate fields the API needs
+// for the single-service GET: api_key_count and access_policy. These require an
+// extra db round-trip so they live only on the detail view, not the list view.
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/ankoehn/burrow/internal/auth"
+	"github.com/ankoehn/burrow/internal/authz"
+	"github.com/ankoehn/burrow/internal/db"
+)
+
+// ServiceView is the durable-fields representation of a service returned by
+// ListServices. Live/runtime fields (hostname, connected, remote_port,
+// local_addr) are absent here; Task 10 (api handlers) composes them from the
+// tunnel registry and auth_domain setting.
+type ServiceView struct {
+	ID           string
+	UserID       string
+	Name         string
+	Type         string    // "http" or "tcp"
+	Subdomain    string    // "" for tcp or unset http
+	AccessMode   string    // "open" | "api_key" | "burrow_login"
+	APIKeyHeader string    // effective header name (default "Authorization")
+	CreatedAt    time.Time
+}
+
+// ServiceDetail extends ServiceView with the aggregate fields returned by the
+// single-service GET endpoint. Task 10 may further overlay live runtime fields.
+type ServiceDetail struct {
+	ServiceView
+	APIKeyCount  int
+	AccessPolicy []string // roles; empty slice = deny-all
+}
+
+// canConfigure loads the service and checks whether callerID/callerRole may
+// configure it. It returns the loaded service so callers avoid a second load.
+//
+//   - PermServicesConfigureAny → allow unconditionally (admin)
+//   - PermServicesConfigureOwn → allow only when service.UserID == callerID
+//   - otherwise → ErrForbidden
+//
+// db.ErrNotFound is propagated unchanged (maps to 404, not 403).
+func (s *Store) canConfigure(ctx context.Context, callerID, callerRole, serviceID string) (db.Service, error) {
+	svc, err := s.q.GetServiceByID(ctx, serviceID)
+	if err != nil {
+		return db.Service{}, err // includes db.ErrNotFound
+	}
+	if authz.Can(callerRole, authz.PermServicesConfigureAny) {
+		return svc, nil
+	}
+	if authz.Can(callerRole, authz.PermServicesConfigureOwn) && svc.UserID == callerID {
+		return svc, nil
+	}
+	return db.Service{}, ErrForbidden
+}
+
+// ListServices returns all services visible to the caller.
+// Admins (PermTunnelsReadAny re-used as the read-any signal, matching v0.2
+// pattern — admin has all :any perms) see every service; regular users see
+// only their own. The list is returned as ServiceViews (live fields deferred
+// to Task 10).
+func (s *Store) ListServices(ctx context.Context, callerID, callerRole string) ([]ServiceView, error) {
+	var rows []db.Service
+	var err error
+	if authz.Can(callerRole, authz.PermServicesConfigureAny) {
+		rows, err = s.q.ListAllServices(ctx)
+	} else {
+		rows, err = s.q.ListServicesByUser(ctx, callerID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServiceView, len(rows))
+	for i, r := range rows {
+		out[i] = serviceToView(r)
+	}
+	return out, nil
+}
+
+// GetService returns the full ServiceDetail for a single service.
+// The caller must have configure:own (owner) or configure:any (admin).
+// api_key_count and access_policy are populated; live runtime fields are
+// left at their zero values for Task 10 to populate.
+func (s *Store) GetService(ctx context.Context, callerID, callerRole, serviceID string) (ServiceDetail, error) {
+	svc, err := s.canConfigure(ctx, callerID, callerRole, serviceID)
+	if err != nil {
+		return ServiceDetail{}, err
+	}
+	keys, err := s.q.ListServiceAPIKeys(ctx, svc.ID)
+	if err != nil {
+		return ServiceDetail{}, err
+	}
+	policy, err := s.q.GetAccessPolicy(ctx, svc.ID)
+	if err != nil {
+		return ServiceDetail{}, err
+	}
+	return ServiceDetail{
+		ServiceView:  serviceToView(svc),
+		APIKeyCount:  len(keys),
+		AccessPolicy: policy,
+	}, nil
+}
+
+// SetServiceAccessMode validates and applies a new access mode to the given
+// service. Gate: configure:own (owner) or configure:any (admin).
+// Validation order: gate → mode enum → http-only constraint.
+//   - ErrForbidden if not authorized
+//   - db.ErrNotFound if the service does not exist
+//   - ErrInvalidAccessMode if mode ∉ {open,api_key,burrow_login}
+//   - ErrServiceNotHTTP if mode ≠ "open" and service.Type ≠ "http"
+//
+// An empty header defaults to "Authorization" for api_key mode (stored in DB).
+// For non-api_key modes the header is written as "Authorization" as well,
+// keeping the DB column consistent; the column has no effect when mode is open
+// or burrow_login.
+func (s *Store) SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string) error {
+	svc, err := s.canConfigure(ctx, callerID, callerRole, serviceID)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case "open", "api_key", "burrow_login":
+	default:
+		return ErrInvalidAccessMode
+	}
+	if mode != "open" && svc.Type != "http" {
+		return ErrServiceNotHTTP
+	}
+	if header == "" {
+		header = "Authorization"
+	}
+	return s.q.SetServiceAccessMode(ctx, serviceID, mode, header)
+}
+
+// ListAPIKeys returns all API keys for the given service.
+// Gate: configure:own (owner) or configure:any (admin).
+// Key hashes are included in the returned rows (the caller is trusted).
+func (s *Store) ListAPIKeys(ctx context.Context, callerID, callerRole, serviceID string) ([]db.ServiceAPIKey, error) {
+	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+		return nil, err
+	}
+	return s.q.ListServiceAPIKeys(ctx, serviceID)
+}
+
+// CreateAPIKey generates and stores a new service API key.
+// Gate: configure:own (owner) or configure:any (admin).
+// Returns: (id, plaintext, error).
+//   - ErrNameRequired if name is empty
+//   - ErrForbidden if not authorized
+//   - db.ErrNotFound if the service does not exist
+//
+// Only the sha256-hex hash is persisted; plaintext is returned once and never
+// stored. Plaintext has the "buk_" prefix.
+func (s *Store) CreateAPIKey(ctx context.Context, callerID, callerRole, serviceID, name string) (id, plaintext string, err error) {
+	if name == "" {
+		return "", "", ErrNameRequired
+	}
+	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+		return "", "", err
+	}
+	pt, hash, err := auth.GenerateAPIKey()
+	if err != nil {
+		return "", "", err
+	}
+	id = uuid.NewString()
+	if err := s.q.CreateServiceAPIKey(ctx, db.ServiceAPIKey{
+		ID:        id,
+		ServiceID: serviceID,
+		Name:      name,
+		KeyHash:   hash,
+	}); err != nil {
+		return "", "", err
+	}
+	return id, pt, nil
+}
+
+// DeleteAPIKey removes a service API key.
+// Gate: configure:own (owner) or configure:any (admin).
+// Propagates db.ErrNotFound if the key does not exist.
+func (s *Store) DeleteAPIKey(ctx context.Context, callerID, callerRole, serviceID, keyID string) error {
+	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+		return err
+	}
+	return s.q.DeleteServiceAPIKey(ctx, keyID, serviceID)
+}
+
+// GetAccessPolicy returns the access policy roles for the given service.
+// Gate: configure:own (owner) or configure:any (admin).
+// Returns a non-nil empty slice when no roles are set (deny-all).
+func (s *Store) GetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string) ([]string, error) {
+	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+		return nil, err
+	}
+	return s.q.GetAccessPolicy(ctx, serviceID)
+}
+
+// SetAccessPolicy replaces the full access policy for the given service.
+// Gate: configure:own (owner) or configure:any (admin).
+// Each role is validated against the built-in authz role set; unknown roles
+// return ErrUnknownRole (maps to HTTP 400). An empty roles slice means
+// deny-all.
+func (s *Store) SetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string, roles []string) error {
+	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+		return err
+	}
+	for _, r := range roles {
+		if _, ok := authz.Get(r); !ok {
+			return ErrUnknownRole
+		}
+	}
+	return s.q.SetAccessPolicy(ctx, serviceID, roles)
+}
+
+// ValidateAPIKey checks whether the presented plaintext API key is valid for
+// the given service. This is a hot-path helper used by the proxy middleware;
+// it has NO permission gate (the caller has already proven service identity via
+// subdomain/routing).
+//
+// On a hit: best-effort touch last_used (touch error ignored); returns (true, nil).
+// On miss (db.ErrNotFound): returns (false, nil).
+// On other errors: propagates.
+func (s *Store) ValidateAPIKey(ctx context.Context, serviceID, presented string) (bool, error) {
+	hash := auth.HashToken(presented)
+	key, err := s.q.GetServiceAPIKeyByHash(ctx, serviceID, hash)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	// Best-effort: update last_used without failing validation on error.
+	_ = s.q.TouchServiceAPIKey(ctx, key.ID)
+	return true, nil
+}
+
+// ServiceForSubdomain returns the service registered for the given subdomain.
+// This is a hot-path helper used by the proxy router; it has NO permission gate.
+// Delegates directly to db.GetServiceBySubdomain; propagates db.ErrNotFound.
+func (s *Store) ServiceForSubdomain(ctx context.Context, sub string) (db.Service, error) {
+	return s.q.GetServiceBySubdomain(ctx, sub)
+}
+
+// RoleAllowed reports whether the given role is in the service's access policy.
+// This is a hot-path helper used by the proxy auth middleware; it has NO
+// permission gate.
+// An empty policy (deny-all) returns false.
+func (s *Store) RoleAllowed(ctx context.Context, serviceID, role string) (bool, error) {
+	policy, err := s.q.GetAccessPolicy(ctx, serviceID)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range policy {
+		if r == role {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// serviceToView maps a db.Service row to a ServiceView (durable fields only).
+func serviceToView(s db.Service) ServiceView {
+	return ServiceView{
+		ID:           s.ID,
+		UserID:       s.UserID,
+		Name:         s.Name,
+		Type:         s.Type,
+		Subdomain:    s.Subdomain,
+		AccessMode:   s.AccessMode,
+		APIKeyHeader: s.APIKeyHeader,
+		CreatedAt:    s.CreatedAt,
+	}
+}

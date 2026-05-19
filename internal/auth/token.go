@@ -26,3 +26,17 @@ func HashToken(plaintext string) string {
 	sum := sha256.Sum256([]byte(plaintext))
 	return hex.EncodeToString(sum[:])
 }
+
+// GenerateAPIKey returns a new opaque service API key (shown once) and its
+// sha256-hex hash (the only thing persisted). The buk_ prefix enables future
+// secret scanning and distinguishes service API keys from client tokens (bur_).
+func GenerateAPIKey() (plaintext, hashed string, err error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", err
+	}
+	plaintext = "buk_" + base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(plaintext))
+	hashed = hex.EncodeToString(sum[:])
+	return plaintext, hashed, nil
+}
