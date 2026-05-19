@@ -41,12 +41,63 @@ func buildTunnelSpec(name string, remotePort int, localAddr string, typ string) 
 	}, nil
 }
 
+// singleFlagNames lists the per-tunnel flags that conflict with --config.
+var singleFlagNames = []string{"server", "token", "local", "remote", "name", "type"}
+
 // newConnectCmd constructs the "connect" sub-command.
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: "Connect to a Burrow server and register a tunnel",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+
+			if cfgPath != "" {
+				// --config mode: reject any combination with single-tunnel flags.
+				for _, flag := range singleFlagNames {
+					if cmd.Flags().Changed(flag) {
+						return fmt.Errorf("--config cannot be combined with --%s", flag)
+					}
+				}
+
+				fc, err := client.LoadFileConfig(cfgPath)
+				if err != nil {
+					return err
+				}
+
+				insecure, _ := cmd.Flags().GetBool("insecure")
+				caPath, _ := cmd.Flags().GetString("cacert")
+				serverName, _ := cmd.Flags().GetString("server-name")
+
+				var pool *x509.CertPool
+				if caPath != "" {
+					pem, err := os.ReadFile(caPath)
+					if err != nil {
+						return err
+					}
+					pool = x509.NewCertPool()
+					if !pool.AppendCertsFromPEM(pem) {
+						return fmt.Errorf("cacert %s: no certificates", caPath)
+					}
+				}
+				sn := serverName
+				if sn == "" {
+					if h, _, e := net.SplitHostPort(fc.Server); e == nil {
+						sn = h
+					}
+				}
+				log := logging.New("info", "text")
+				cl := client.New(client.Options{
+					Server: fc.Server, Token: fc.Token, Insecure: insecure,
+					RootCAs: pool, ServerName: sn, Logger: log,
+					Tunnels: fc.Tunnels,
+				})
+				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return cl.Run(ctx)
+			}
+
+			// Single-tunnel mode (original path).
 			server, _ := cmd.Flags().GetString("server")
 			token, _ := cmd.Flags().GetString("token")
 			local, _ := cmd.Flags().GetString("local")
@@ -97,8 +148,9 @@ func newConnectCmd() *cobra.Command {
 			return cl.Run(ctx)
 		},
 	}
-	cmd.Flags().String("server", "", "server host:port (required)")
-	cmd.Flags().String("token", "", "auth token (required)")
+	cmd.Flags().String("config", "", "path to burrow.yaml (multi-service)")
+	cmd.Flags().String("server", "", "server host:port (required without --config)")
+	cmd.Flags().String("token", "", "auth token (required without --config)")
 	cmd.Flags().String("local", "127.0.0.1:3000", "local address to expose")
 	cmd.Flags().Int("remote", 0, "requested remote port (0 = auto)")
 	cmd.Flags().String("name", "", "tunnel name")
@@ -106,8 +158,8 @@ func newConnectCmd() *cobra.Command {
 	cmd.Flags().String("cacert", "", "PEM CA to trust (e.g. certs/dev-ca.pem)")
 	cmd.Flags().String("server-name", "", "TLS SNI/verify name (default: host of --server)")
 	cmd.Flags().String("type", "tcp", "tunnel type: tcp|http (--remote is ignored for http)")
-	_ = cmd.MarkFlagRequired("server")
-	_ = cmd.MarkFlagRequired("token")
+	// --server and --token are required only in single-tunnel mode; cobra's MarkFlagRequired
+	// applies to every invocation, so we enforce the requirement manually inside RunE instead.
 	return cmd
 }
 
