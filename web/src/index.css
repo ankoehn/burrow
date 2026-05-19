@@ -1219,3 +1219,86 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   margin-bottom: 18px;
 }
 .tokens-form .field { flex: 1; max-width: 280px; }
+
+/* ──────────────────────────────────────────────────────────────
+   Account page (adapted from design/account.css). Active-sessions
+   table + custom toast are out of scope (v0.2.0 / sonner handles
+   toasts) and omitted.
+   ────────────────────────────────────────────────────────────── */
+.account-section {
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+}
+.account-section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.section-head .left h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.section-head .left p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  max-width: 540px;
+}
+
+.profile-card {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.profile-card .avatar {
+  width: 56px; height: 56px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.profile-card .body {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.profile-card .email {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--foreground);
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.profile-card .meta {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.profile-card .meta .k { color: var(--muted-foreground); }
+.profile-card .meta .v { color: var(--foreground); }
+
+.pw-form {
+  display: grid;
+  grid-template-columns: minmax(0, 420px);
+  gap: 14px;
+}
+.pw-form .actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.field-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--destructive);
+}

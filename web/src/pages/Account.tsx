@@ -2,10 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/auth/useAuth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
+import { Button, Input } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -63,18 +60,42 @@ export default function Account() {
     changePw.mutate();
   }
 
+  const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
+
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">Account</h1>
-      <Card className="max-w-md space-y-2 p-6 text-sm">
-        <div><span className="text-zinc-500">Email:</span> {user?.email}</div>
-        <div><span className="text-zinc-500">Role:</span> {user?.role}</div>
-      </Card>
-      <Card className="mt-6 max-w-md p-6">
-        <h2 className="mb-4 text-base font-semibold">Change password</h2>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="current-password">Current password</Label>
+    <div className="account-page">
+      <div className="page-head" style={{ marginBottom: 8 }}>
+        <div>
+          <h1>Account</h1>
+        </div>
+      </div>
+
+      <section className="account-section" aria-labelledby="sec-profile">
+        <div className="section-head">
+          <div className="left">
+            <h2 id="sec-profile">Profile</h2>
+          </div>
+        </div>
+        <div className="profile-card">
+          <span className="avatar">{avatarInitial}</span>
+          <div className="body">
+            <span className="email">{user?.email}</span>
+            <div className="meta">
+              <span><span className="k">Role</span> &nbsp;<span className="v">{user?.role}</span></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="account-section" aria-labelledby="sec-pw">
+        <div className="section-head">
+          <div className="left">
+            <h2 id="sec-pw">Change password</h2>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="pw-form">
+          <div className="field">
+            <label htmlFor="current-password">Current password</label>
             <Input
               id="current-password"
               type="password"
@@ -84,8 +105,8 @@ export default function Account() {
               required
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="new-password">New password</Label>
+          <div className="field">
+            <label htmlFor="new-password">New password</label>
             <Input
               id="new-password"
               type="password"
@@ -95,8 +116,8 @@ export default function Account() {
               required
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="confirm-password">Confirm new password</Label>
+          <div className="field">
+            <label htmlFor="confirm-password">Confirm new password</label>
             <Input
               id="confirm-password"
               type="password"
@@ -107,16 +128,18 @@ export default function Account() {
             />
           </div>
           {clientError && (
-            <p role="alert" className="text-sm text-red-600">{clientError}</p>
+            <p role="alert" className="field-error">{clientError}</p>
           )}
           {serverError && (
-            <p role="alert" className="text-sm text-red-600">{serverError}</p>
+            <p role="alert" className="field-error">{serverError}</p>
           )}
-          <Button type="submit" disabled={changePw.isPending}>
-            {changePw.isPending ? "Saving…" : "Change password"}
-          </Button>
+          <div className="actions">
+            <Button type="submit" variant="primary" disabled={changePw.isPending}>
+              {changePw.isPending ? "Saving…" : "Change password"}
+            </Button>
+          </div>
         </form>
-      </Card>
+      </section>
       <Toaster />
     </div>
   );

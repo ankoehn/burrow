@@ -59,6 +59,12 @@ describe("Account", () => {
     expect(screen.getByLabelText("Confirm new password")).toBeInTheDocument();
   });
 
+  it("change-password submit uses the design-system primary button class", async () => {
+    setup();
+    await screen.findByLabelText(/current password/i);
+    expect(screen.getByRole("button", { name: /change password/i }).className).toContain("btn-primary");
+  });
+
   it("blocks submit when new and confirm do not match (client validation, no fetch for change-password)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
       if (String(url).includes("/api/v1/me")) {
