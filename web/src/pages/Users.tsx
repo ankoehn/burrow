@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -32,6 +29,7 @@ export default function Users() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"user" | "admin">("user");
   const [createError, setCreateError] = useState("");
+  const [confirmTarget, setConfirmTarget] = useState<User | null>(null);
 
   const createUser = useMutation({
     mutationFn: () =>
@@ -92,49 +90,64 @@ export default function Users() {
     },
   });
 
-  function handleDelete(u: User) {
-    if (!window.confirm(`Delete user ${u.email}? This cannot be undone.`)) return;
-    deleteUser.mutate(u.id);
+  function confirmDelete() {
+    if (confirmTarget) deleteUser.mutate(confirmTarget.id);
+    setConfirmTarget(null);
   }
 
   // Graceful 403 for non-admins or session state mismatches
   if (error instanceof ApiError && error.status === 403) {
     return (
-      <div>
-        <h1 className="mb-4 text-xl font-semibold">Users</h1>
-        <p role="alert" className="text-sm text-red-600">Admin access required.</p>
+      <div className="users-page">
+        <div className="page-head">
+          <div><h1>Users</h1></div>
+        </div>
+        <div className="notice-block warn">
+          <div className="icon-bubble"><ShieldAlert size={18} /></div>
+          <p role="alert">Admin access required.</p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div>
-        <h1 className="mb-4 text-xl font-semibold">Users</h1>
-        <p role="alert" className="text-sm text-red-600">
-          Failed to load users: {error instanceof ApiError ? error.message : "Unknown error"}
-        </p>
+      <div className="users-page">
+        <div className="page-head">
+          <div><h1>Users</h1></div>
+        </div>
+        <div className="notice-block error">
+          <div className="icon-bubble"><AlertTriangle size={18} /></div>
+          <p role="alert">
+            Failed to load users: {error instanceof ApiError ? error.message : "Unknown error"}
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">Users</h1>
+    <div className="users-page" style={{ position: "relative" }}>
+      <div className="page-head">
+        <div><h1>Users</h1></div>
+      </div>
 
-      {/* Create user form */}
-      <Card className="mb-6 max-w-md p-6">
-        <h2 className="mb-4 text-base font-semibold">Create user</h2>
+      <section className="account-section" aria-labelledby="sec-create-user">
+        <div className="section-head">
+          <div className="left">
+            <h2 id="sec-create-user">Create user</h2>
+          </div>
+        </div>
         <form
+          className="users-form"
           onSubmit={(e) => {
             e.preventDefault();
             setCreateError("");
             createUser.mutate();
           }}
-          className="space-y-3"
         >
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-email">Email</Label>
+          <div className="field">
+            <label htmlFor="user-email">Email</label>
             <Input
               id="user-email"
               type="email"
@@ -144,8 +157,8 @@ export default function Users() {
               required
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-password">Password</Label>
+          <div className="field">
+            <label htmlFor="user-password">Password</label>
             <Input
               id="user-password"
               type="password"
@@ -155,64 +168,92 @@ export default function Users() {
               required
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-role">Role</Label>
+          <div className="field">
+            <label htmlFor="user-role">Role</label>
             <select
               id="user-role"
+              className="input"
               value={role}
               onChange={(e) => setRole(e.target.value as "user" | "admin")}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="user">user</option>
               <option value="admin">admin</option>
             </select>
           </div>
           {createError && (
-            <p role="alert" className="text-sm text-red-600">{createError}</p>
+            <p role="alert" className="field-error">{createError}</p>
           )}
-          <Button type="submit" disabled={createUser.isPending}>
-            {createUser.isPending ? "Creating…" : "Create user"}
-          </Button>
+          <div className="actions">
+            <Button type="submit" variant="primary" disabled={createUser.isPending}>
+              {createUser.isPending ? "Creating…" : "Create user"}
+            </Button>
+          </div>
         </form>
-      </Card>
+      </section>
 
-      {/* Users list */}
       {isLoading ? (
-        <p className="text-sm text-zinc-500">Loading…</p>
+        <div className="table-wrap" style={{ padding: 16 }}>
+          <p className="muted">Loading…</p>
+        </div>
       ) : !data || data.length === 0 ? (
-        <p className="text-sm text-zinc-500">No users found.</p>
+        <div className="state-card">
+          <p>No users found.</p>
+        </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell>{u.email}</TableCell>
-                <TableCell>{u.role}</TableCell>
-                <TableCell>{formatTimestamp(u.created_at)}</TableCell>
-                <TableCell>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Delete user ${u.email}`}
-                    disabled={deleteUser.isPending && me?.id !== u.id}
-                    onClick={() => handleDelete(u)}
-                  >
-                    Delete
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="table-wrap">
+          <table className="data" aria-label="Users">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th className="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.email}</td>
+                  <td>{u.role}</td>
+                  <td className="col-created">{formatTimestamp(u.created_at)}</td>
+                  <td className="col-actions">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Delete user ${u.email}`}
+                      disabled={deleteUser.isPending && me?.id !== u.id}
+                      onClick={() => setConfirmTarget(u)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <Dialog
+        open={confirmTarget !== null}
+        onOpenChange={(o) => { if (!o) setConfirmTarget(null); }}
+        title="Delete user"
+        description={
+          confirmTarget
+            ? `Delete user ${confirmTarget.email}? This cannot be undone.`
+            : ""
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmTarget(null)}>Cancel</Button>
+            <Button variant="destructive-solid" onClick={confirmDelete}>Delete</Button>
+          </>
+        }
+      >
+        <div className="confirm-icon" aria-hidden="true">
+          <AlertTriangle size={16} />
+        </div>
+      </Dialog>
       <Toaster />
     </div>
   );

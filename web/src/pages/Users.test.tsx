@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -79,6 +79,12 @@ describe("Users", () => {
     await screen.findByText("alice@example.com");
     expect(screen.getByRole("button", { name: "Delete user alice@example.com" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete user bob@example.com" })).toBeInTheDocument();
+  });
+
+  it("renders the user list using the design-system table.data class", async () => {
+    setup();
+    await screen.findByText("alice@example.com");
+    expect(screen.getByRole("table").className).toContain("data");
   });
 
   it("renders 'Admin access required' on 403 (not a crash)", async () => {
@@ -196,9 +202,10 @@ describe("Users", () => {
     await screen.findByText("bob@example.com");
     const before = listCalls;
 
-    // Confirm dialog is window.confirm — mock it to return true
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Confirm via the DS dialog (replaces window.confirm)
     await userEvent.click(screen.getByRole("button", { name: "Delete user bob@example.com" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }));
 
     await waitFor(() => expect(deleteCalled).toBe(true));
     await waitFor(() => expect(listCalls).toBeGreaterThan(before));
@@ -222,8 +229,9 @@ describe("Users", () => {
     );
 
     await screen.findByText("alice@example.com");
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     await userEvent.click(screen.getByRole("button", { name: "Delete user alice@example.com" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }));
 
     // Toast renders in a portal; check the message via toast (it's shown via sonner)
     // The mutation onError shows a toast for self-delete 400 with "cannot delete your own account"
@@ -237,7 +245,7 @@ describe("Users", () => {
     });
   });
 
-  it("dismiss on window.confirm=false does not call DELETE", async () => {
+  it("cancelling the confirm dialog does not call DELETE", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
       buildFetch() as typeof globalThis.fetch
     );
@@ -254,8 +262,9 @@ describe("Users", () => {
     );
 
     await screen.findByText("bob@example.com");
-    vi.spyOn(window, "confirm").mockReturnValue(false);
     await userEvent.click(screen.getByRole("button", { name: "Delete user bob@example.com" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
 
     // No DELETE call should be made
     const deleteCalls = fetchSpy.mock.calls.filter(([url, opts]) =>
