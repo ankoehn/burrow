@@ -27,16 +27,23 @@ func versionLine() string {
 		version.Version, version.Commit, version.Date, runtime.GOOS, runtime.GOARCH)
 }
 
-func main() {
-	root := &cobra.Command{
-		Use:           "burrow",
-		Short:         "Burrow local client",
-		Version:       versionLine(),
-		SilenceUsage:  true,
-		SilenceErrors: true,
+// buildTunnelSpec constructs a client.TunnelSpec from the provided flags values,
+// validating that typ is one of "tcp" or "http".
+func buildTunnelSpec(name string, remotePort int, localAddr string, typ string) (client.TunnelSpec, error) {
+	if typ != "tcp" && typ != "http" {
+		return client.TunnelSpec{}, fmt.Errorf("unknown tunnel type %q: must be tcp or http", typ)
 	}
+	return client.TunnelSpec{
+		Name:       name,
+		Type:       typ,
+		RemotePort: remotePort,
+		LocalAddr:  localAddr,
+	}, nil
+}
 
-	connectCmd := &cobra.Command{
+// newConnectCmd constructs the "connect" sub-command.
+func newConnectCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: "Connect to a Burrow server and register a tunnel",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -48,6 +55,13 @@ func main() {
 			insecure, _ := cmd.Flags().GetBool("insecure")
 			caPath, _ := cmd.Flags().GetString("cacert")
 			serverName, _ := cmd.Flags().GetString("server-name")
+			typ, _ := cmd.Flags().GetString("type")
+
+			spec, err := buildTunnelSpec(name, remote, local, typ)
+			if err != nil {
+				return err
+			}
+
 			cfg, err := config.LoadClient(map[string]any{
 				"server": server, "token": token, "insecure": insecure,
 				"cacert": caPath, "server_name": serverName,
@@ -76,24 +90,37 @@ func main() {
 			cl := client.New(client.Options{
 				Server: cfg.Server, Token: cfg.Token, Insecure: cfg.Insecure,
 				RootCAs: pool, ServerName: sn, Logger: log,
-				Tunnels: []client.TunnelSpec{{Name: name, Type: "tcp", RemotePort: remote, LocalAddr: local}},
+				Tunnels: []client.TunnelSpec{spec},
 			})
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return cl.Run(ctx)
 		},
 	}
-	connectCmd.Flags().String("server", "", "server host:port (required)")
-	connectCmd.Flags().String("token", "", "auth token (required)")
-	connectCmd.Flags().String("local", "127.0.0.1:3000", "local address to expose")
-	connectCmd.Flags().Int("remote", 0, "requested remote port (0 = auto)")
-	connectCmd.Flags().String("name", "", "tunnel name")
-	connectCmd.Flags().Bool("insecure", false, "skip TLS verification (DEV ONLY)")
-	connectCmd.Flags().String("cacert", "", "PEM CA to trust (e.g. certs/dev-ca.pem)")
-	connectCmd.Flags().String("server-name", "", "TLS SNI/verify name (default: host of --server)")
-	_ = connectCmd.MarkFlagRequired("server")
-	_ = connectCmd.MarkFlagRequired("token")
-	root.AddCommand(connectCmd)
+	cmd.Flags().String("server", "", "server host:port (required)")
+	cmd.Flags().String("token", "", "auth token (required)")
+	cmd.Flags().String("local", "127.0.0.1:3000", "local address to expose")
+	cmd.Flags().Int("remote", 0, "requested remote port (0 = auto)")
+	cmd.Flags().String("name", "", "tunnel name")
+	cmd.Flags().Bool("insecure", false, "skip TLS verification (DEV ONLY)")
+	cmd.Flags().String("cacert", "", "PEM CA to trust (e.g. certs/dev-ca.pem)")
+	cmd.Flags().String("server-name", "", "TLS SNI/verify name (default: host of --server)")
+	cmd.Flags().String("type", "tcp", "tunnel type: tcp|http (--remote is ignored for http)")
+	_ = cmd.MarkFlagRequired("server")
+	_ = cmd.MarkFlagRequired("token")
+	return cmd
+}
+
+func main() {
+	root := &cobra.Command{
+		Use:           "burrow",
+		Short:         "Burrow local client",
+		Version:       versionLine(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	root.AddCommand(newConnectCmd())
 
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
