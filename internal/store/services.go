@@ -36,10 +36,10 @@ type ServiceView struct {
 	ID           string
 	UserID       string
 	Name         string
-	Type         string    // "http" or "tcp"
-	Subdomain    string    // "" for tcp or unset http
-	AccessMode   string    // "open" | "api_key" | "burrow_login"
-	APIKeyHeader string    // effective header name (default "Authorization")
+	Type         string // "http" or "tcp"
+	Subdomain    string // "" for tcp or unset http
+	AccessMode   string // "open" | "api_key" | "burrow_login"
+	APIKeyHeader string // effective header name (default "Authorization")
 	CreatedAt    time.Time
 }
 
