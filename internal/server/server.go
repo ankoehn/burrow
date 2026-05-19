@@ -318,6 +318,34 @@ func (s *Server) byteTicker(ctx context.Context) {
 	}
 }
 
+// SessionSnapshot is a read-only view of one live client session for the
+// clients overview (cmd/server adapts this to api.ClientView).
+type SessionSnapshot struct {
+	SessionID, UserID, RemoteAddr  string
+	OS, Arch, ClientVersion, Token string
+	Tunnels                        []TunnelView
+}
+
+// SnapshotSessions returns all live client sessions with their tunnels.
+func (s *Server) SnapshotSessions() []SessionSnapshot {
+	var out []SessionSnapshot
+	for _, cs := range s.reg.Sessions() {
+		ss := SessionSnapshot{
+			SessionID: cs.SessionID, UserID: cs.UserID, RemoteAddr: cs.RemoteAddr,
+			OS: cs.OS, Arch: cs.Arch, ClientVersion: cs.ClientVersion, Token: cs.TokenName,
+		}
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			ss.Tunnels = append(ss.Tunnels, TunnelView{
+				ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
+				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
+				Connected: true,
+			})
+		}
+		out = append(out, ss)
+	}
+	return out
+}
+
 // ListUserTunnels returns a snapshot of the live tunnels owned by userID.
 func (s *Server) ListUserTunnels(userID string) []TunnelView {
 	var out []TunnelView

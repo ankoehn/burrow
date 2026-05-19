@@ -90,6 +90,131 @@ func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
 	return out
 }
 
+// sessionSnapshotter is the read-only slice of *server.Server the clients
+// adapter needs (so the adapter stays unit-testable without a live registry).
+type sessionSnapshotter interface {
+	SnapshotSessions() []server.SessionSnapshot
+}
+
+// tunnelGetter is the read-only slice of *store.Store the clients adapter
+// needs for persisted per-tunnel totals + access mode.
+type tunnelGetter interface {
+	GetTunnel(ctx context.Context, id string) (db.Tunnel, error)
+}
+
+// clientsAdapter exposes live sessions + persisted per-service totals to the
+// HTTP API (keeps internal/api decoupled from internal/server and internal/db).
+type clientsAdapter struct {
+	srv sessionSnapshotter
+	st  tunnelGetter
+}
+
+func (a clientsAdapter) services(ss server.SessionSnapshot) ([]api.ClientServiceView, int64, int64) {
+	var svcs []api.ClientServiceView
+	var aggIn, aggOut int64
+	for _, tn := range ss.Tunnels {
+		var totIn, totOut int64
+		mode := "open"
+		if row, err := a.st.GetTunnel(context.Background(), tn.ID); err == nil {
+			totIn, totOut, mode = row.TotalBytesIn, row.TotalBytesOut, row.AccessMode
+		}
+		aggIn += totIn
+		aggOut += totOut
+		svcs = append(svcs, api.ClientServiceView{
+			ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
+			LocalAddr: tn.LocalAddr, AccessMode: mode,
+			BytesIn: tn.BytesIn, BytesOut: tn.BytesOut,
+			TotalBytesIn: totIn, TotalBytesOut: totOut,
+		})
+	}
+	return svcs, aggIn, aggOut
+}
+
+func (a clientsAdapter) toView(ss server.SessionSnapshot, aggIn, aggOut int64, n int) api.ClientView {
+	return api.ClientView{
+		SessionID: ss.SessionID, UserID: ss.UserID, TokenName: ss.Token,
+		RemoteAddr: ss.RemoteAddr, OS: ss.OS, Arch: ss.Arch,
+		ClientVersion: ss.ClientVersion, ServiceCount: n,
+		TotalBytesIn: aggIn, TotalBytesOut: aggOut,
+	}
+}
+
+func (a clientsAdapter) ListClients() []api.ClientView {
+	var out []api.ClientView
+	for _, ss := range a.srv.SnapshotSessions() {
+		_, in, outB := a.services(ss)
+		out = append(out, a.toView(ss, in, outB, len(ss.Tunnels)))
+	}
+	return out
+}
+
+func (a clientsAdapter) GetClient(sessionID string) (api.ClientDetail, bool) {
+	for _, ss := range a.srv.SnapshotSessions() {
+		if ss.SessionID != sessionID {
+			continue
+		}
+		svcs, in, outB := a.services(ss)
+		return api.ClientDetail{
+			ClientView: a.toView(ss, in, outB, len(ss.Tunnels)),
+			Services:   svcs,
+		}, true
+	}
+	return api.ClientDetail{}, false
+}
+
+// runTrafficFlusher periodically persists the delta of each live tunnel's
+// in-memory byte counters into tunnels.total_bytes_*, so traffic survives
+// reconnects. WaitGroup-tracked + ctx-cancelled like runSessionReaper; a final
+// flush runs on ctx cancellation before the DB is closed.
+func runTrafficFlusher(ctx context.Context, wg *sync.WaitGroup, srv *server.Server, st *store.Store, log *slog.Logger, interval time.Duration) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		last := map[string][2]uint64{} // tunnelID -> {in,out} already persisted
+		flush := func() {
+			seen := map[string]struct{}{}
+			for _, ss := range srv.SnapshotSessions() {
+				for _, tn := range ss.Tunnels {
+					seen[tn.ID] = struct{}{}
+					prev := last[tn.ID]
+					dIn := int64(tn.BytesIn) - int64(prev[0])
+					dOut := int64(tn.BytesOut) - int64(prev[1])
+					if dIn < 0 {
+						dIn = int64(tn.BytesIn) // counter reset (reconnect): persist absolute
+					}
+					if dOut < 0 {
+						dOut = int64(tn.BytesOut)
+					}
+					if dIn == 0 && dOut == 0 {
+						continue
+					}
+					if err := st.FlushTunnelTotals(ctx, tn.ID, dIn, dOut); err != nil {
+						log.Warn("traffic flush", "tunnel_id", tn.ID, "err", err)
+						continue
+					}
+					last[tn.ID] = [2]uint64{tn.BytesIn, tn.BytesOut}
+				}
+			}
+			for id := range last { // drop disconnected tunnels
+				if _, ok := seen[id]; !ok {
+					delete(last, id)
+				}
+			}
+		}
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				flush() // final flush before shutdown / DB close
+				return
+			case <-t.C:
+				flush()
+			}
+		}
+	}()
+}
+
 // sessionReaper is the type used to purge expired sessions.
 // Using an interface makes the reaper testable without a real DB.
 type sessionReaper interface {
@@ -178,6 +303,7 @@ func main() {
 				return err
 			}
 			st := store.New(database)
+			st.SetSMTPPassword(cfg.SMTPPassword)
 			if err := st.SeedAdmin(context.Background(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
 				return err
 			}
@@ -198,6 +324,12 @@ func main() {
 			// internal/server: WaitGroup-tracked, ctx-cancelled, stops before
 			// database.Close() (enforced by LIFO defers above).
 			runSessionReaper(ctx, &reaperWg, db.Wrap(database), log, time.Hour)
+
+			// Traffic flusher: persists live byte counters into
+			// tunnels.total_bytes_* every ~30s (and once at shutdown).
+			// Tracked on reaperWg so its final flush runs before the
+			// deferred database.Close() (LIFO defer ordering).
+			runTrafficFlusher(ctx, &reaperWg, srv, st, log, 30*time.Second)
 
 			spaHandler, err := web.Handler()
 			if err != nil {
@@ -223,6 +355,9 @@ func main() {
 					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
 					Log: log, SecureCookies: effectiveSecureCookies, HTTPSEnabled: httpsEnabled,
 					SPA: spaHandler, TrustedProxies: cfg.TrustedProxies,
+					Roles: st, Sessions: st, Settings: st,
+					Clients: clientsAdapter{srv: srv, st: st}, AccessModes: st,
+					DB: database,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}

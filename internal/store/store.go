@@ -162,6 +162,22 @@ func (s *Store) Authenticate(ctx context.Context, plaintext string) (userID stri
 	return ct.UserID, nil
 }
 
+// AuthenticateNamed is like Authenticate but also returns the client-token's
+// name (used by the server to label clients in the overview). Returns
+// ErrUnauthorized for unknown/invalid tokens.
+func (s *Store) AuthenticateNamed(ctx context.Context, plaintext string) (userID, tokenName string, err error) {
+	hash := auth.HashToken(plaintext)
+	ct, err := s.q.GetClientTokenByHash(ctx, hash)
+	if errors.Is(err, db.ErrNotFound) {
+		return "", "", ErrUnauthorized
+	}
+	if err != nil {
+		return "", "", err
+	}
+	_ = s.q.TouchClientTokenLastUsed(ctx, ct.ID)
+	return ct.UserID, ct.Name, nil
+}
+
 // SaveTunnel upserts a tunnel row belonging to the given user.
 func (s *Store) SaveTunnel(ctx context.Context, userID string, t *SaveTunnelArg) error {
 	return s.q.UpsertTunnel(ctx, db.Tunnel{

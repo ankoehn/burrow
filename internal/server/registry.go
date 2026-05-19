@@ -48,9 +48,15 @@ type ClientSession struct {
 	SessionID  string
 	UserID     string
 	RemoteAddr string
-	Yamux      *yamux.Session
-	mu         sync.Mutex
-	Tunnels    map[string]*Tunnel
+	// Handshake metadata (best-effort, from AuthRequest). Zero values when a
+	// client predates these fields. Hostname is reserved (v0.3) and unused.
+	OS            string
+	Arch          string
+	ClientVersion string
+	TokenName     string
+	Yamux         *yamux.Session
+	mu            sync.Mutex
+	Tunnels       map[string]*Tunnel
 
 	pending       *pendingStreams
 	ctrlMu        sync.Mutex

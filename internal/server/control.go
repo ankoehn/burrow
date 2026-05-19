@@ -33,7 +33,15 @@ func HandleHandshake(conn net.Conn, auth TokenAuthenticator, sessionID string) (
 		_ = proto.WriteMessage(conn, proto.MsgError, proto.Error{Message: "bad auth payload"})
 		return nil, err
 	}
-	userID, err := auth.Authenticate(context.Background(), ar.Token)
+	var userID, tokenName string
+	var err error
+	if na, ok := auth.(interface {
+		AuthenticateNamed(ctx context.Context, token string) (string, string, error)
+	}); ok {
+		userID, tokenName, err = na.AuthenticateNamed(context.Background(), ar.Token)
+	} else {
+		userID, err = auth.Authenticate(context.Background(), ar.Token)
+	}
 	if err != nil {
 		_ = proto.WriteMessage(conn, proto.MsgAuthResponse, proto.AuthResponse{OK: false, Error: "invalid token"})
 		return nil, fmt.Errorf("token auth: %w", err)
@@ -42,7 +50,11 @@ func HandleHandshake(conn net.Conn, auth TokenAuthenticator, sessionID string) (
 	if err := proto.WriteMessage(conn, proto.MsgAuthResponse, proto.AuthResponse{OK: true, SessionID: sessionID}); err != nil {
 		return nil, err
 	}
-	return &ClientSession{SessionID: sessionID, UserID: userID, RemoteAddr: conn.RemoteAddr().String(), Tunnels: map[string]*Tunnel{}}, nil
+	return &ClientSession{
+		SessionID: sessionID, UserID: userID, RemoteAddr: conn.RemoteAddr().String(),
+		OS: ar.OS, Arch: ar.Arch, ClientVersion: ar.ClientVersion, TokenName: tokenName,
+		Tunnels: map[string]*Tunnel{},
+	}, nil
 }
 
 // RunControlLoop processes control-stream messages until the stream closes.
