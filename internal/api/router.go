@@ -97,6 +97,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/sessions", d.ListSessions)
 			r.Delete("/sessions/{id}", d.RevokeSession)
 			r.Post("/sessions/revoke-all", d.RevokeAllSessions)
+			r.Put("/tunnels/{id}/access-mode", d.SetAccessMode)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
@@ -111,6 +112,8 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/settings", d.GetSettings)
 				r.Put("/settings", d.SaveSettings)
 				r.Post("/settings/test-email", d.SendTestEmail)
+				r.Get("/clients", d.ListClients)
+				r.Get("/clients/{sessionID}", d.GetClient)
 			})
 		})
 
