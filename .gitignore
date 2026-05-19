@@ -28,6 +28,7 @@ Thumbs.db
 
 # Internal project + AI-workflow docs - kept local, never published
 docs/
+design/
 
 # Playwright e2e outputs
 /web/test-results/
