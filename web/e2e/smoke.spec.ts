@@ -37,11 +37,13 @@ test("smoke: full happy-path", async ({ page }) => {
   await page.getByLabel("Token name").fill("e2e-smoke");
   await page.getByRole("button", { name: "Create" }).click();
 
-  // One-time dialog: DialogTitle="Copy your token now"; pre contains bur_ prefix
+  // One-time dialog: DialogTitle="Copy your token now"; the revealed token
+  // lives in the design-system reveal panel `.reveal-once .key-row .v`
+  // (design/tokens.jsx) — the pre-re-skin `<pre>` no longer exists.
   await expect(
     page.getByRole("heading", { name: "Copy your token now" }),
   ).toBeVisible();
-  const tokenText = await page.locator("pre").textContent();
+  const tokenText = await page.locator(".reveal-once .v").textContent();
   expect(tokenText).toMatch(/^bur_/);
 
   // Close the dialog
