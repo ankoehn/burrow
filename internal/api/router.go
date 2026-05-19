@@ -102,6 +102,8 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/users", d.AdminListUsers)
 				r.Post("/users", d.AdminCreateUser)
 				r.Delete("/users/{id}", d.AdminDeleteUser)
+				r.Get("/roles", d.ListRoles)
+				r.Get("/roles/{name}", d.GetRole)
 			})
 		})
 
