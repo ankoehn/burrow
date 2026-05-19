@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge, SkeletonRows } from "@/components/ds";
 
 interface Tunnel {
   id: string; name: string; type: string; remote_port: number;
@@ -38,34 +38,76 @@ export default function Tunnels() {
     };
   }, [qc]);
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">Tunnels</h1>
+    <div className="tunnels-page">
+      <div className="page-head">
+        <div>
+          <h1>Tunnels</h1>
+        </div>
+      </div>
       {isLoading ? (
-        <p className="text-sm text-zinc-500">Loading…</p>
+        <div className="table-wrap" style={{ padding: 16 }}>
+          <SkeletonRows n={4} />
+        </div>
       ) : !data || data.length === 0 ? (
-        <p className="text-sm text-zinc-500">No live tunnels. Run <code>burrow connect</code> with a token.</p>
+        <div className="state-card">
+          <div className="icon-bubble">
+            <svg
+              width={18}
+              height={18}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="4.5" r="2.5" />
+              <path d="m10.2 6.3-3.9 3.9" />
+              <circle cx="4.5" cy="12" r="2.5" />
+              <path d="M7 12h10" />
+              <circle cx="19.5" cy="12" r="2.5" />
+              <path d="m13.8 17.7 3.9-3.9" />
+              <circle cx="12" cy="19.5" r="2.5" />
+            </svg>
+          </div>
+          <p>No live tunnels. Run <code>burrow connect</code> with a token.</p>
+        </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead>Remote</TableHead>
-              <TableHead>Local</TableHead><TableHead>In</TableHead><TableHead>Out</TableHead><TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell>{t.name || "—"}</TableCell>
-                <TableCell>{t.type}</TableCell>
-                <TableCell>:{t.remote_port}</TableCell>
-                <TableCell>{t.local_addr}</TableCell>
-                <TableCell>{formatBytes(t.bytes_in)}</TableCell>
-                <TableCell>{formatBytes(t.bytes_out)}</TableCell>
-                <TableCell>{t.connected ? "connected" : "—"}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="table-wrap">
+          <table className="data" aria-label="Tunnels">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Remote</th>
+                <th>Local</th>
+                <th className="col-bytes">In</th>
+                <th className="col-bytes">Out</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((t) => (
+                <tr key={t.id}>
+                  <td className={t.name ? "col-name" : "col-name muted-em"}>
+                    {t.name || "—"}
+                  </td>
+                  <td><Badge nodot>{t.type}</Badge></td>
+                  <td className="col-remote">:{t.remote_port}</td>
+                  <td className="col-local">{t.local_addr}</td>
+                  <td className="col-bytes">{formatBytes(t.bytes_in)}</td>
+                  <td className="col-bytes">{formatBytes(t.bytes_out)}</td>
+                  <td>
+                    {t.connected
+                      ? <Badge kind="status-connected">connected</Badge>
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

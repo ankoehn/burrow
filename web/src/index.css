@@ -1144,3 +1144,21 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   letter-spacing: 0.02em;
   color: var(--muted-foreground);
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Tunnels list (adapted from design/tunnels.css — only the
+   columns the v0.1 API actually provides are skinned).
+   ────────────────────────────────────────────────────────────── */
+.tunnels-page table.data td.col-name {
+  font-weight: 500;
+}
+.tunnels-page table.data td.col-name.muted-em {
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+.tunnels-page table.data td.col-remote,
+.tunnels-page table.data td.col-local {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

@@ -46,6 +46,15 @@ describe("Tunnels", () => {
     await waitFor(() => expect(calls).toBeGreaterThan(before));
   });
 
+  it("renders the data table using the design-system table.data class", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([{ id: "t1", name: "web", type: "tcp", remote_port: 9000, local_addr: "127.0.0.1:3000", bytes_in: 11, bytes_out: 22, connected: true }]), { status: 200 }) as any
+    );
+    setup();
+    await screen.findByText("web");
+    expect(screen.getByRole("table").className).toContain("data");
+  });
+
   it("invalidates ['me'] when SSE stream closes (onerror + CLOSED)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("[]", { status: 200 }) as any
