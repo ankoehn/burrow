@@ -125,19 +125,19 @@ func TestListUsersNeverExposesPasswordHash(t *testing.T) {
 	_ = x.CreateUser(ctx, User{ID: "u1", Email: "a@b.c", PasswordHash: "SECRETHASH", Role: "admin"})
 	_ = x.CreateUser(ctx, User{ID: "u2", Email: "b@b.c", PasswordHash: "ANOTHERSECRET", Role: "user"})
 
-	users, err := x.ListUsers(ctx)
+	users, total, err := x.ListUsersPage(ctx, "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 2 {
-		t.Fatalf("want 2 users, got %d", len(users))
+	if len(users) != 2 || total != 2 {
+		t.Fatalf("want 2 users, got %d (total %d)", len(users), total)
 	}
 	for _, u := range users {
 		if u.PasswordHash != "" {
-			t.Errorf("ListUsers must not populate PasswordHash, got %q for %s", u.PasswordHash, u.Email)
+			t.Errorf("ListUsersPage must not populate PasswordHash, got %q for %s", u.PasswordHash, u.Email)
 		}
 		if u.ID == "" || u.Email == "" || u.Role == "" {
-			t.Errorf("ListUsers must populate id/email/role, got %+v", u)
+			t.Errorf("ListUsersPage must populate id/email/role, got %+v", u)
 		}
 	}
 }
