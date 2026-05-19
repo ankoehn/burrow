@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut } from "lucide-react";
+import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
 import { useTheme } from "@/components/theme-provider";
@@ -51,6 +51,10 @@ export function Layout() {
         <div className="sidebar-nav">
           <div className="nav-group">
             <div className="nav-group-title">Tunneling</div>
+            <NavLink to="/clients" className={navItem}>
+              <span className="nav-icon"><Boxes size={16} /></span>
+              <span className="nav-label">Clients</span>
+            </NavLink>
             <NavLink to="/tunnels" className={navItem}>
               <span className="nav-icon"><Waypoints size={16} /></span>
               <span className="nav-label">Tunnels</span>
@@ -67,6 +71,20 @@ export function Layout() {
               <NavLink to="/users" className={navItem}>
                 <span className="nav-icon"><Users size={16} /></span>
                 <span className="nav-label">Users</span>
+              </NavLink>
+              <NavLink to="/roles" className={navItem}>
+                <span className="nav-icon"><ShieldCheck size={16} /></span>
+                <span className="nav-label">Roles</span>
+              </NavLink>
+            </div>
+          )}
+
+          {user?.role === "admin" && (
+            <div className="nav-group">
+              <div className="nav-group-title">Administration</div>
+              <NavLink to="/settings" className={navItem}>
+                <span className="nav-icon"><ServerCog size={16} /></span>
+                <span className="nav-label">Settings</span>
               </NavLink>
             </div>
           )}

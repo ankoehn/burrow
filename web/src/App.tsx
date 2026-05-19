@@ -6,6 +6,11 @@ import Tunnels from "@/pages/Tunnels";
 import Tokens from "@/pages/Tokens";
 import Account from "@/pages/Account";
 import Users from "@/pages/Users";
+import Roles from "@/pages/Roles";
+import Settings from "@/pages/Settings";
+import Clients from "@/pages/Clients";
+import ClientDetail from "@/pages/ClientDetail";
+import ConnectClient from "@/pages/ConnectClient";
 
 export default function App() {
   return (
@@ -15,8 +20,13 @@ export default function App() {
         <Route path="/" element={<Tunnels />} />
         <Route path="/tunnels" element={<Tunnels />} />
         <Route path="/tokens" element={<Tokens />} />
+        <Route path="/clients" element={<Clients />} />
+        <Route path="/clients/connect" element={<ConnectClient />} />
+        <Route path="/clients/:id" element={<ClientDetail />} />
         <Route path="/account" element={<Account />} />
         <Route path="/users" element={<Users />} />
+        <Route path="/roles" element={<Roles />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
