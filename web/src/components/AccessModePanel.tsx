@@ -1,26 +1,53 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button } from "@/components/ds";
+import { Button, Input } from "@/components/ds";
 import { ACCESS_MODES, type AccessMode } from "@/lib/contract";
+import { ApiKeysPanel } from "@/components/ApiKeysPanel";
+import { AccessPolicyEditor } from "@/components/AccessPolicyEditor";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
-const META: Record<AccessMode, { title: string; help: string; enabled: boolean; tag: string }> = {
-  open: { title: "Open — raw passthrough", help: "Burrow adds nothing. The only mode available in v0.2.0; safe default for TCP tunnels.", enabled: true, tag: "default · v0.2.0" },
-  api_key: { title: "API key — header check", help: "Burrow verifies an API key header before proxying.", enabled: false, tag: "needs HTTP tunnels · v0.3.0" },
-  burrow_login: { title: "Burrow login — role-based", help: "Visitors sign in with their Burrow account at a hosted gate.", enabled: false, tag: "needs HTTP tunnels · v0.3.0" },
+// Mode explainers — kept verbatim from the v0.2.0 component (UI_DESIGN §4.15);
+// v0.3.0 only removes the disabled gating, it does not reword these.
+const META: Record<AccessMode, { title: string; help: string }> = {
+  open: { title: "Open — raw passthrough", help: "Burrow adds nothing. The only mode available in v0.2.0; safe default for TCP tunnels." },
+  api_key: { title: "API key — header check", help: "Burrow verifies an API key header before proxying." },
+  burrow_login: { title: "Burrow login — role-based", help: "Visitors sign in with their Burrow account at a hosted gate." },
 };
 
-export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { serviceId: string; serviceName: string; mode: AccessMode; clientId: string }) {
+export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { serviceId: string; serviceName: string; mode: AccessMode; clientId?: string }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<AccessMode>(mode);
-  const dirty = selected !== mode;
+  const [apiKeyHeader, setApiKeyHeader] = useState("Authorization: Bearer");
+  const [err, setErr] = useState<string | null>(null);
 
   const save = useMutation({
-    mutationFn: () => apiFetch(`/tunnels/${serviceId}/access-mode`, { method: "PUT", body: JSON.stringify({ access_mode: selected }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["client", clientId] }); toast.success(`Access settings saved. ${serviceName} · mode: ${selected}`); },
-    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : "Couldn't save access settings."),
+    mutationFn: () =>
+      apiFetch(`/services/${serviceId}/access-mode`, {
+        method: "PUT",
+        body: JSON.stringify(
+          selected === "api_key"
+            ? { access_mode: selected, api_key_header: apiKeyHeader }
+            : { access_mode: selected },
+        ),
+      }),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["services"] });
+      qc.invalidateQueries({ queryKey: ["service", serviceId] });
+      if (clientId) qc.invalidateQueries({ queryKey: ["client", clientId] });
+      toast.success(`Access settings saved. ${serviceName} · mode: ${selected}`);
+    },
+    onError: (e: unknown) => {
+      if (e instanceof ApiError && e.status === 403) {
+        setErr("You don't have permission to configure this service.");
+      } else if (e instanceof ApiError) {
+        setErr(e.message);
+      } else {
+        setErr("Couldn't save access settings.");
+      }
+    },
   });
 
   return (
@@ -34,21 +61,43 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { se
               role="radio"
               aria-label={meta.title}
               aria-checked={selected === m}
-              aria-disabled={!meta.enabled}
-              tabIndex={meta.enabled ? 0 : -1}
+              tabIndex={0}
               className="mode-card"
-              onClick={() => { if (meta.enabled) setSelected(m); }}
-              onKeyDown={(e) => { if (meta.enabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSelected(m); } }}
+              onClick={() => setSelected(m)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
             >
               <strong>{meta.title}</strong>
               <p className="muted">{meta.help}</p>
-              <span className="muted">{meta.tag}</span>
             </div>
           );
         })}
       </div>
+
+      {selected === "api_key" && (
+        <div className="mode-detail">
+          <div className="field">
+            <label htmlFor={`api-key-header-${serviceId}`}>API key header</label>
+            <Input
+              id={`api-key-header-${serviceId}`}
+              className="mono"
+              value={apiKeyHeader}
+              onChange={(e) => setApiKeyHeader(e.target.value)}
+            />
+          </div>
+          <ApiKeysPanel serviceId={serviceId} />
+        </div>
+      )}
+
+      {selected === "burrow_login" && (
+        <div className="mode-detail">
+          <AccessPolicyEditor serviceId={serviceId} />
+        </div>
+      )}
+
+      {err && <p role="alert" className="notice-inline">{err}</p>}
+
       <div className="actions">
-        <Button variant="primary" size="sm" disabled={(!dirty && selected !== "open") || save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? "Saving…" : "Save changes"}
         </Button>
       </div>
