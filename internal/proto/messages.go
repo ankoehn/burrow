@@ -51,7 +51,7 @@ type AuthResponse struct {
 // TunnelRegister asks the server to allocate a public port for a tunnel.
 type TunnelRegister struct {
 	Name       string `json:"name"`        // human-friendly label
-	Type       string `json:"type"`        // "tcp" (only TCP in MVP)
+	Type       string `json:"type"`        // "tcp" | "http"
 	RemotePort int    `json:"remote_port"` // 0 = auto-assign
 	LocalAddr  string `json:"local_addr"`  // "127.0.0.1:3000"
 }
@@ -60,7 +60,8 @@ type TunnelRegister struct {
 type TunnelRegisterResponse struct {
 	OK         bool   `json:"ok"`
 	TunnelID   string `json:"tunnel_id,omitempty"`
-	RemotePort int    `json:"remote_port,omitempty"` // resolved port
+	RemotePort int    `json:"remote_port,omitempty"` // resolved port; 0 for http tunnels
+	Hostname   string `json:"hostname,omitempty"`    // e.g. "k7p2qx.tunnels.example.com" (http only)
 	Error      string `json:"error,omitempty"`
 }
 
