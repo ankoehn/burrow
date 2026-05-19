@@ -54,6 +54,28 @@ type Setting struct {
 	UpdatedAt  time.Time
 }
 
+// Service is a row of the services table (HTTP-tunnel access configuration).
+type Service struct {
+	ID           string
+	UserID       string
+	Name         string
+	Type         string // 'http' or 'tcp'
+	Subdomain    string // "" for tcp
+	AccessMode   string // 'open'|'api_key'|'burrow_login'
+	APIKeyHeader string // default "Authorization"
+	CreatedAt    time.Time
+}
+
+// ServiceAPIKey is a row of the service_api_keys table.
+type ServiceAPIKey struct {
+	ID        string
+	ServiceID string
+	Name      string
+	KeyHash   string
+	LastUsed  *time.Time
+	CreatedAt time.Time
+}
+
 // DB wraps *sql.DB and exposes typed CRUD methods for Burrow's tables.
 type DB struct {
 	sqlDB *sql.DB

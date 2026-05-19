@@ -37,6 +37,48 @@ func TestOpenAndMigrateIdempotent(t *testing.T) {
 	}
 }
 
+func TestMigrate0003Schema(t *testing.T) {
+	x := testDB(t) // opens + migrates a temp DB; FK ON via Open()
+	db := x.DB()
+	ctx := context.Background()
+
+	// Seed a user so FK on services(user_id) is satisfied.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO users(id,email,password_hash,role) VALUES('u1','svc@test.invalid','h','user')`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	for _, q := range []string{
+		`INSERT INTO services(id,user_id,name,type,subdomain,access_mode,api_key_header)
+		   VALUES('s1','u1','web','http','k7p2qx','open','Authorization')`,
+		`INSERT INTO service_api_keys(id,service_id,name,key_hash) VALUES('k1','s1','ci','deadbeef')`,
+		`INSERT INTO service_access_policy(service_id,role) VALUES('s1','user')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+
+	// cascade: deleting the service removes its keys + policy
+	if _, err := db.ExecContext(ctx, `DELETE FROM services WHERE id='s1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM service_api_keys`).Scan(&n); err != nil {
+		t.Fatalf("count service_api_keys: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("api keys not cascaded: %d", n)
+	}
+	var m int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM service_access_policy`).Scan(&m); err != nil {
+		t.Fatalf("count service_access_policy: %v", err)
+	}
+	if m != 0 {
+		t.Fatalf("access policy not cascaded: %d", m)
+	}
+}
+
 func TestMigration0002Foundation(t *testing.T) {
 	x := testDB(t) // testDB in crud_test.go opens + migrates a temp DB
 	ctx := context.Background()
