@@ -98,6 +98,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/sessions/{id}", d.RevokeSession)
 			r.Post("/sessions/revoke-all", d.RevokeAllSessions)
 			r.Put("/tunnels/{id}/access-mode", d.SetAccessMode)
+			// v0.3.0: service-scoped routes (owner-gated via store authz).
+			r.Get("/services", d.ListServices)
+			r.Get("/services/{serviceID}", d.GetService)
+			r.Put("/services/{serviceID}/access-mode", d.SetServiceAccessMode)
+			r.Get("/services/{serviceID}/api-keys", d.ListAPIKeys)
+			r.Post("/services/{serviceID}/api-keys", d.CreateAPIKey)
+			r.Delete("/services/{serviceID}/api-keys/{id}", d.DeleteAPIKey)
+			r.Get("/services/{serviceID}/access-policy", d.GetAccessPolicy)
+			r.Put("/services/{serviceID}/access-policy", d.SetAccessPolicy)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.

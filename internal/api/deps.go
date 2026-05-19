@@ -10,6 +10,38 @@ import (
 	"github.com/ankoehn/burrow/internal/store"
 )
 
+// ServiceStore is the subset of internal/store the service handlers need.
+// *store.Store satisfies it implicitly.
+type ServiceStore interface {
+	ListServices(ctx context.Context, callerID, callerRole string) ([]store.ServiceView, error)
+	GetService(ctx context.Context, callerID, callerRole, serviceID string) (store.ServiceDetail, error)
+	SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string) error
+	ListAPIKeys(ctx context.Context, callerID, callerRole, serviceID string) ([]db.ServiceAPIKey, error)
+	CreateAPIKey(ctx context.Context, callerID, callerRole, serviceID, name string) (id, plaintext string, err error)
+	DeleteAPIKey(ctx context.Context, callerID, callerRole, serviceID, keyID string) error
+	GetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string) ([]string, error)
+	SetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string, roles []string) error
+}
+
+// LiveTunnelSnapshot is the live/runtime subset of a tunnel that the API
+// composes into service responses. It deliberately contains only the fields
+// the handlers need, keeping the interface narrow and test-friendly.
+type LiveTunnelSnapshot struct {
+	LocalAddr string
+	Connected bool
+}
+
+// LiveTunnelLookup is the narrow interface the service handlers use to query
+// the in-memory tunnel registry for live runtime state. The concrete
+// *server.Server (or an adapter) satisfies this; tests provide a fake.
+// Task 12 (cmd/server wiring) will inject the real implementation.
+type LiveTunnelLookup interface {
+	// LookupByServiceID returns the live snapshot for the service with the
+	// given serviceID. ok is false when no connected tunnel is registered for
+	// that service.
+	LookupByServiceID(serviceID string) (LiveTunnelSnapshot, bool)
+}
+
 // UserStore is the subset of internal/store the API needs. *store.Store satisfies it.
 type UserStore interface {
 	VerifyUserPassword(ctx context.Context, email, password string) (bool, error)
@@ -168,6 +200,17 @@ type Deps struct {
 	Clients     ClientLister
 	AccessModes AccessModeSetter
 	DB          Pinger
+	// v0.3.0 surfaces.
+	// Services is the durable service store (api keys, access mode, policy).
+	Services ServiceStore
+	// LiveTunnels allows the service handlers to compose live/runtime fields
+	// (connected, local_addr) into service responses. May be nil before
+	// Task 12 wires the concrete server.Server implementation.
+	LiveTunnels LiveTunnelLookup
+	// AuthDomain is the configured auth domain (e.g. "tunnels.example.com").
+	// Empty means no auth domain is configured; burrow_login mode is rejected
+	// with 409 when this field is empty.
+	AuthDomain string
 }
 
 type ctxKey int
