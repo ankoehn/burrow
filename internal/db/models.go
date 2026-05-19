@@ -12,6 +12,8 @@ var ErrNotFound = errors.New("db: not found")
 // User is a row of the users table.
 type User struct {
 	ID, Email, PasswordHash, Role string
+	Status                        string
+	LastLogin                     *time.Time
 	CreatedAt, UpdatedAt          time.Time
 }
 
@@ -35,6 +37,21 @@ type Tunnel struct {
 	RemotePort                        int
 	CreatedAt                         time.Time
 	LastSeen                          *time.Time
+	TotalBytesIn, TotalBytesOut       int64
+	LastFlushedAt                     *time.Time
+	AccessMode                        string
+}
+
+// Role is a row of the roles table (built-in only in v0.2.0).
+type Role struct {
+	Name, Description string
+	CreatedAt         time.Time
+}
+
+// Setting is a row of the settings key/value table.
+type Setting struct {
+	Key, Value string
+	UpdatedAt  time.Time
 }
 
 // DB wraps *sql.DB and exposes typed CRUD methods for Burrow's tables.
