@@ -49,6 +49,17 @@ describe("Tokens", () => {
     expect(screen.getByText("never")).toBeInTheDocument();
   });
 
+  it("renders the token table using the design-system table.data class", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([
+        { id: "t1", name: "laptop", created_at: "2024-01-15T10:00:00Z", last_used: null },
+      ]), { status: 200 }) as any
+    );
+    setup();
+    await screen.findByText("laptop");
+    expect(screen.getByRole("table").className).toContain("data");
+  });
+
   it("Revoke button has a distinguishing aria-label", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([

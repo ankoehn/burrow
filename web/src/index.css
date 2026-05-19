@@ -1162,3 +1162,60 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Tokens list + token-shown-once reveal (adapted from
+   design/tokens.css). The connect-command disclosure block is
+   omitted (no such feature in the v0.1 app).
+   ────────────────────────────────────────────────────────────── */
+.tokens-page table.data td.col-name { font-weight: 500; }
+.tokens-page table.data td.col-created,
+.tokens-page table.data td.col-lastused {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+.tokens-page table.data td.col-lastused.null { color: var(--muted-foreground); }
+
+.reveal-once {
+  border: 1px solid color-mix(in oklch, var(--success) 40%, var(--border));
+  background: color-mix(in oklch, var(--success) 6%, var(--card));
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 4px;
+}
+.reveal-once .top {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+.reveal-once .top .icon { color: var(--success); }
+.reveal-once .key-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.reveal-once .key-row .v {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.reveal-once .footnote {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.reveal-once .footnote strong { color: var(--foreground); font-weight: 500; }
+
+.tokens-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tokens-form .field { flex: 1; max-width: 280px; }

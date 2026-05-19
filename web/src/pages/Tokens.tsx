@@ -1,12 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Check } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -28,37 +25,77 @@ export default function Tokens() {
     onError: () => toast.error("Failed to revoke token"),
   });
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">Client tokens</h1>
-      <form className="mb-4 flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (name) create.mutate(); }}>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="token-name">Token name</Label>
+    <div className="tokens-page" style={{ position: "relative" }}>
+      <div className="page-head">
+        <div>
+          <h1>Client tokens</h1>
+        </div>
+      </div>
+
+      <form
+        className="tokens-form"
+        onSubmit={(e) => { e.preventDefault(); if (name) create.mutate(); }}
+      >
+        <div className="field">
+          <label htmlFor="token-name">Token name</label>
           <Input id="token-name" placeholder="e.g. laptop" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        <Button type="submit" disabled={!name || create.isPending}>Create</Button>
+        <Button type="submit" variant="primary" disabled={!name || create.isPending}>Create</Button>
       </form>
-      <Table>
-        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Created</TableHead><TableHead>Last used</TableHead><TableHead></TableHead></TableRow></TableHeader>
-        <TableBody>
-          {(data ?? []).map((t) => (
-            <TableRow key={t.id}>
-              <TableCell>{t.name}</TableCell>
-              <TableCell>{formatTimestamp(t.created_at)}</TableCell>
-              <TableCell>{t.last_used ? formatTimestamp(t.last_used) : "never"}</TableCell>
-              <TableCell><Button variant="outline" size="sm" aria-label={`Revoke token ${t.name}`} onClick={() => revoke.mutate(t.id)}>Revoke</Button></TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <Dialog open={plaintext !== null} onOpenChange={(o) => !o && setPlaintext(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Copy your token now</DialogTitle>
-            <DialogDescription>This is shown once. Use it with <code>burrow connect --token …</code></DialogDescription>
-          </DialogHeader>
-          <pre className="overflow-x-auto rounded bg-zinc-100 p-3 text-sm dark:bg-zinc-900">{plaintext}</pre>
-          <Button onClick={() => setPlaintext(null)}>Done</Button>
-        </DialogContent>
+
+      <div className="table-wrap">
+        <table className="data" aria-label="Tokens">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Created</th>
+              <th>Last used</th>
+              <th className="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data ?? []).map((t) => (
+              <tr key={t.id}>
+                <td className="col-name">{t.name}</td>
+                <td className="col-created">{formatTimestamp(t.created_at)}</td>
+                <td className={t.last_used ? "col-lastused" : "col-lastused null"}>
+                  {t.last_used ? formatTimestamp(t.last_used) : "never"}
+                </td>
+                <td className="col-actions">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Revoke token ${t.name}`}
+                    onClick={() => revoke.mutate(t.id)}
+                  >
+                    Revoke
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog
+        open={plaintext !== null}
+        onOpenChange={(o) => !o && setPlaintext(null)}
+        title="Copy your token now"
+        description={<>This is shown once. Use it with <code>burrow connect --token …</code></>}
+        footer={<Button variant="primary" onClick={() => setPlaintext(null)}>Done</Button>}
+      >
+        <div className="reveal-once" role="status" aria-live="polite">
+          <div className="top">
+            <span className="icon"><Check size={14} strokeWidth={2.5} /></span>
+            <strong>Token minted.</strong>
+            <span style={{ color: "var(--muted-foreground)", marginLeft: 4 }}>
+              Store it before closing this dialog.
+            </span>
+          </div>
+          <div className="key-row">
+            <span className="v">{plaintext}</span>
+          </div>
+        </div>
       </Dialog>
       <Toaster />
     </div>
