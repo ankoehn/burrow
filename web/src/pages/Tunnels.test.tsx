@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import Tunnels from "./Tunnels";
 
@@ -75,6 +76,34 @@ describe("Tunnels", () => {
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["me"] }));
     });
+  });
+
+  it("http rows show the hostname (mono, copy) + Access badge + Configure; tcp rows do not", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([
+        { id: "th1", name: "web", type: "http", remote_port: 0, local_addr: "127.0.0.1:3000", hostname: "k7p2qx.tunnels.example.com", access_mode: "open", bytes_in: 11, bytes_out: 22, connected: true },
+        { id: "th2", name: "ai", type: "http", remote_port: 0, local_addr: "127.0.0.1:11434", hostname: "ai4m2q.tunnels.example.com", access_mode: "api_key", bytes_in: 0, bytes_out: 0, connected: true },
+        { id: "tt1", name: "pg", type: "tcp", remote_port: 9000, local_addr: "127.0.0.1:5432", bytes_in: 0, bytes_out: 0, connected: true },
+      ]), { status: 200 }) as any
+    );
+    setup();
+    const webRow = (await screen.findByText("web")).closest("tr")!;
+    expect(within(webRow).getByText("k7p2qx.tunnels.example.com")).toBeInTheDocument();
+    expect(within(webRow).getByRole("button", { name: /copy hostname k7p2qx\.tunnels\.example\.com/i })).toBeInTheDocument();
+    expect(within(webRow).getByText("Open")).toBeInTheDocument();
+
+    const aiRow = screen.getByText("ai").closest("tr")!;
+    expect(within(aiRow).getByText("API key")).toBeInTheDocument();
+
+    const pgRow = screen.getByText("pg").closest("tr")!;
+    expect(within(pgRow).getByText(":9000")).toBeInTheDocument();
+    expect(within(pgRow).getByText("Open")).toBeInTheDocument();
+    expect(within(pgRow).queryByRole("button", { name: /copy hostname/i })).toBeNull();
+    expect(within(pgRow).queryByRole("button", { name: /configure/i })).toBeNull();
+
+    // Configure on an http row opens the AccessModePanel.
+    await userEvent.click(within(webRow).getByRole("button", { name: /configure/i }));
+    expect(await screen.findByRole("radiogroup", { name: /access mode/i })).toBeInTheDocument();
   });
 
   it("does NOT invalidate ['me'] on transient SSE error while CONNECTING", async () => {

@@ -1,16 +1,28 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { Badge, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Dialog, SkeletonRows } from "@/components/ds";
+import type { AccessMode } from "@/lib/contract";
+import { AccessModePanel } from "@/components/AccessModePanel";
 
 interface Tunnel {
   id: string; name: string; type: string; remote_port: number;
   local_addr: string; bytes_in: number; bytes_out: number; connected: boolean;
+  // v0.3.0 additive: present for http tunnels only.
+  hostname?: string; access_mode?: AccessMode;
 }
+
+const ACCESS_LABEL: Record<AccessMode, string> = {
+  open: "Open",
+  api_key: "API key",
+  burrow_login: "Burrow login",
+};
 
 export default function Tunnels() {
   const qc = useQueryClient();
+  const [configure, setConfigure] = useState<Tunnel | null>(null);
   // SSE is primary; poll every 30 s as a fallback when SSE is unavailable.
   const { data, isLoading } = useQuery({
     queryKey: ["tunnels"],
@@ -38,7 +50,7 @@ export default function Tunnels() {
     };
   }, [qc]);
   return (
-    <div className="tunnels-page">
+    <div className="tunnels-page" style={{ position: "relative" }}>
       <div className="page-head">
         <div>
           <h1>Tunnels</h1>
@@ -82,6 +94,8 @@ export default function Tunnels() {
                 <th>Type</th>
                 <th>Remote</th>
                 <th>Local</th>
+                <th>Hostname</th>
+                <th>Access</th>
                 <th className="col-bytes">In</th>
                 <th className="col-bytes">Out</th>
                 <th>Status</th>
@@ -96,6 +110,35 @@ export default function Tunnels() {
                   <td><Badge nodot>{t.type}</Badge></td>
                   <td className="col-remote">:{t.remote_port}</td>
                   <td className="col-local">{t.local_addr}</td>
+                  <td>
+                    {t.type === "http" && t.hostname ? (
+                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                        <span className="mono">{t.hostname}</span>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={`Copy hostname ${t.hostname}`}
+                          onClick={() => void navigator.clipboard?.writeText(t.hostname!)}
+                        >
+                          <Copy size={13} />
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <Badge kind={`access-${t.access_mode ?? "open"}`} nodot>
+                        {ACCESS_LABEL[t.access_mode ?? "open"]}
+                      </Badge>
+                      {t.type === "http" && (
+                        <Button variant="secondary" size="sm" onClick={() => setConfigure(t)}>
+                          Configure
+                        </Button>
+                      )}
+                    </span>
+                  </td>
                   <td className="col-bytes">{formatBytes(t.bytes_in)}</td>
                   <td className="col-bytes">{formatBytes(t.bytes_out)}</td>
                   <td>
@@ -109,6 +152,22 @@ export default function Tunnels() {
           </table>
         </div>
       )}
+
+      <Dialog
+        open={configure !== null}
+        onOpenChange={(o) => { if (!o) setConfigure(null); }}
+        title={configure ? `Access · ${configure.name || configure.id}` : ""}
+        description="Choose how Burrow gates requests before proxying to this service."
+        footer={<Button variant="secondary" onClick={() => setConfigure(null)}>Close</Button>}
+      >
+        {configure && (
+          <AccessModePanel
+            serviceId={configure.id}
+            serviceName={configure.name || configure.id}
+            mode={configure.access_mode ?? "open"}
+          />
+        )}
+      </Dialog>
     </div>
   );
 }
