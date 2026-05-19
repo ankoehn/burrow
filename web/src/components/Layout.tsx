@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog } from "lucide-react";
+import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog, Globe } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
 import { useTheme } from "@/components/theme-provider";
@@ -58,6 +58,10 @@ export function Layout() {
             <NavLink to="/tunnels" className={navItem}>
               <span className="nav-icon"><Waypoints size={16} /></span>
               <span className="nav-label">Tunnels</span>
+            </NavLink>
+            <NavLink to="/services" className={navItem}>
+              <span className="nav-icon"><Globe size={16} /></span>
+              <span className="nav-label">Services</span>
             </NavLink>
             <NavLink to="/tokens" className={navItem}>
               <span className="nav-icon"><KeyRound size={16} /></span>

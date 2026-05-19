@@ -1,6 +1,13 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
+  Service, ServiceApiKey,
 } from "@/lib/contract";
+
+// Internal service row: the wire Service plus the owning user_id (stripped
+// before serialization — owner-scoping the v0.3.0 /services surface).
+export interface ServiceRow extends Service {
+  user_id: string;
+}
 
 export interface MockDb {
   me: { id: string; email: string; role: "admin" | "user" };
@@ -13,6 +20,9 @@ export interface MockDb {
   smtpPasswordSet: boolean;
   clients: ClientDetail[];
   tokens: { id: string; name: string; last_used: string | null; created_at: string }[];
+  services: ServiceRow[];
+  serviceApiKeys: Record<string, ServiceApiKey[]>;
+  serviceAccessPolicy: Record<string, string[]>;
 }
 
 function seed(): MockDb {
@@ -52,6 +62,21 @@ function seed(): MockDb {
     tokens: [
       { id: "tok_1", name: "office-box-1", last_used: "2026-05-18T09:00:00Z", created_at: "2026-05-01T08:00:00Z" },
     ],
+    services: [
+      { id: "svc_web01", user_id: meId, name: "web", type: "http", subdomain: "k7p2qx", hostname: "k7p2qx.tunnels.example.com", access_mode: "open", api_key_header: "Authorization", connected: true, remote_port: 0, local_addr: "127.0.0.1:3000" },
+      { id: "svc_ai001", user_id: meId, name: "ollama", type: "http", subdomain: "ai4m2q", hostname: "ai4m2q.tunnels.example.com", access_mode: "api_key", api_key_header: "Authorization", connected: true, remote_port: 0, local_addr: "127.0.0.1:11434" },
+      { id: "svc_graf01", user_id: meId, name: "grafana", type: "http", subdomain: "gf7x1p", hostname: "gf7x1p.tunnels.example.com", access_mode: "burrow_login", api_key_header: "Authorization", connected: false, remote_port: 0, local_addr: "127.0.0.1:3001" },
+      { id: "svc_pg001", user_id: meId, name: "postgres", type: "tcp", subdomain: "", hostname: "", access_mode: "open", api_key_header: "Authorization", connected: true, remote_port: 9000, local_addr: "127.0.0.1:5432" },
+    ],
+    serviceApiKeys: {
+      svc_ai001: [
+        { id: "sak_ci01", name: "ci", last_used: null, created_at: "2026-05-10T08:00:00Z" },
+        { id: "sak_prod1", name: "prod", last_used: "2026-05-18T09:00:00Z", created_at: "2026-05-01T08:00:00Z" },
+      ],
+    },
+    serviceAccessPolicy: {
+      svc_graf01: ["user"],
+    },
   };
 }
 

@@ -3,6 +3,7 @@ import { RequireAuth } from "@/auth/RequireAuth";
 import { Layout } from "@/components/Layout";
 import Login from "@/pages/Login";
 import Tunnels from "@/pages/Tunnels";
+import Services from "@/pages/Services";
 import Tokens from "@/pages/Tokens";
 import Account from "@/pages/Account";
 import Users from "@/pages/Users";
@@ -19,6 +20,7 @@ export default function App() {
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/" element={<Tunnels />} />
         <Route path="/tunnels" element={<Tunnels />} />
+        <Route path="/services" element={<Services />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />

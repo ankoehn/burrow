@@ -19,6 +19,12 @@ function gate(req: Request, opts: { admin?: boolean } = {}): Response | null {
   return null;
 }
 
+// services:configure — admin holds :any; the owner holds :own (spec Part C).
+function canConfigure(svc: { user_id: string }): boolean {
+  if (db.me.role === "admin") return true;
+  return svc.user_id === db.me.id;
+}
+
 // Parse via text()+JSON.parse rather than req.json(): under jsdom/undici the
 // Request#json() stream read is intermittently flaky, whereas text() is stable.
 async function body<T>(req: Request): Promise<T | null> {
@@ -166,6 +172,96 @@ export const handlers = [
     if (!["open", "api_key", "burrow_login"].includes(b.access_mode))
       return err(400, "access_mode must be 'open', 'api_key', or 'burrow_login'");
     svc.access_mode = b.access_mode as typeof svc.access_mode;
+    return noContent();
+  }),
+
+  // ---- v0.3.0 durable services (spec Part E) ----
+  http.get("/api/v1/services", ({ request }) => {
+    const g = gate(request); if (g) return g;
+    // Owner-scoped; admin (tunnels:read:any) sees all.
+    const rows = db.me.role === "admin"
+      ? db.services
+      : db.services.filter((s) => s.user_id === db.me.id);
+    return json(rows.map(({ user_id: _u, ...s }) => s));
+  }),
+  http.get("/api/v1/services/:id", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const { user_id: _u, ...wire } = svc;
+    return json({
+      ...wire,
+      api_key_count: (db.serviceApiKeys[svc.id] ?? []).length,
+      access_policy: db.serviceAccessPolicy[svc.id] ?? [],
+    });
+  }),
+
+  // ---- v0.3.0 per-service API keys (spec Part C; services:configure) ----
+  http.get("/api/v1/services/:id/api-keys", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    return json(db.serviceApiKeys[svc.id] ?? []);
+  }),
+  http.post("/api/v1/services/:id/api-keys", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const b = await body<{ name?: string }>(request);
+    if (!b?.name) return err(400, "name is required");
+    const id = `sak_${Math.random().toString(36).slice(2, 8)}`;
+    (db.serviceApiKeys[svc.id] ||= []).push({ id, name: b.name, last_used: null, created_at: new Date().toISOString() });
+    return json({ id, name: b.name, key: `buk_mock_${Math.random().toString(36).slice(2, 18)}` }, 201);
+  }),
+  http.delete("/api/v1/services/:id/api-keys/:keyId", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const list = db.serviceApiKeys[svc.id] ?? [];
+    const i = list.findIndex((k) => k.id === params.keyId);
+    if (i < 0) return err(404, "api key not found");
+    list.splice(i, 1);
+    return noContent();
+  }),
+
+  // ---- v0.3.0 per-service access mode (canonical, service-scoped) ----
+  http.put("/api/v1/services/:id/access-mode", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const b = await body<{ access_mode?: string; api_key_header?: string }>(request);
+    if (!b?.access_mode) return err(400, "access_mode is required");
+    if (!["open", "api_key", "burrow_login"].includes(b.access_mode))
+      return err(400, "access_mode must be 'open', 'api_key', or 'burrow_login'");
+    if (b.access_mode !== "open" && svc.type === "tcp")
+      return err(409, "api_key and burrow_login require an http service");
+    svc.access_mode = b.access_mode as typeof svc.access_mode;
+    if (b.access_mode === "api_key" && b.api_key_header) svc.api_key_header = b.api_key_header;
+    return noContent();
+  }),
+
+  // ---- v0.3.0 per-service access policy (spec Part D; services:configure) ----
+  http.get("/api/v1/services/:id/access-policy", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    return json({ roles: db.serviceAccessPolicy[svc.id] ?? [] });
+  }),
+  http.put("/api/v1/services/:id/access-policy", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const b = await body<{ roles?: string[] }>(request);
+    if (!b || !Array.isArray(b.roles)) return err(400, "roles is required");
+    const known = new Set(db.roles.map((r) => r.name));
+    for (const role of b.roles) if (!known.has(role)) return err(400, `unknown role "${role}"`);
+    db.serviceAccessPolicy[svc.id] = [...b.roles];
     return noContent();
   }),
 

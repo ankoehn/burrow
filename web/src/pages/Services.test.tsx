@@ -1,0 +1,76 @@
+import { describe, it, expect } from "vitest";
+import { screen, within, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { renderApp } from "@/mocks/test-utils";
+import { server } from "@/mocks/server";
+import { db } from "@/mocks/db";
+import Services from "@/pages/Services";
+
+function mount() {
+  return renderApp(<Services />, "/services");
+}
+
+describe("Services page", () => {
+  it("shows a loading skeleton before data arrives", () => {
+    const { container } = mount();
+    expect(container.querySelector(".skel")).toBeTruthy();
+  });
+
+  it("renders a row per service with name, type, hostname, access badge", async () => {
+    mount();
+    const table = await screen.findByRole("table", { name: /services/i });
+    const web = within(table).getByText("web").closest("tr")!;
+    expect(within(web).getByText("http")).toBeInTheDocument();
+    // http row: hostname shown mono with an aria-labelled copy button
+    expect(within(web).getByText("k7p2qx.tunnels.example.com")).toBeInTheDocument();
+    expect(
+      within(web).getByRole("button", { name: /copy hostname k7p2qx\.tunnels\.example\.com/i }),
+    ).toBeInTheDocument();
+    expect(within(web).getByText("Open")).toBeInTheDocument();
+
+    const ai = within(table).getByText("ollama").closest("tr")!;
+    expect(within(ai).getByText("API key")).toBeInTheDocument();
+
+    const gf = within(table).getByText("grafana").closest("tr")!;
+    expect(within(gf).getByText("Burrow login")).toBeInTheDocument();
+
+    // tcp row: no hostname, em-dash, no copy button
+    const pg = within(table).getByText("postgres").closest("tr")!;
+    expect(within(pg).getByText("tcp")).toBeInTheDocument();
+    expect(within(pg).queryByRole("button", { name: /copy hostname/i })).toBeNull();
+  });
+
+  it("Configure opens the AccessModePanel for that service", async () => {
+    mount();
+    const table = await screen.findByRole("table", { name: /services/i });
+    const web = within(table).getByText("web").closest("tr")!;
+    await userEvent.click(within(web).getByRole("button", { name: /configure/i }));
+    expect(await screen.findByRole("radiogroup", { name: /access mode/i })).toBeInTheDocument();
+  });
+
+  it("shows the verbatim empty state when there are no services", async () => {
+    db.services = [];
+    mount();
+    expect(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          el.textContent === "No services yet. Run burrow connect with --type http.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an error notice with Retry on failure", async () => {
+    server.use(
+      http.get("/api/v1/services", () => HttpResponse.json({ error: "boom" }, { status: 500 })),
+    );
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/boom|couldn't load/i);
+    const retry = screen.getByRole("button", { name: /retry/i });
+    // Restore a working handler, click Retry, expect the table to appear.
+    server.resetHandlers();
+    await userEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("table", { name: /services/i })).toBeInTheDocument());
+  });
+});
