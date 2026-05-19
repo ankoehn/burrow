@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,6 +33,7 @@ import (
 	"github.com/ankoehn/burrow/internal/devcert"
 	"github.com/ankoehn/burrow/internal/events"
 	"github.com/ankoehn/burrow/internal/logging"
+	"github.com/ankoehn/burrow/internal/proxy"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/version"
@@ -312,6 +314,9 @@ func main() {
 				Listen: cfg.Listen, TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey,
 				PublicBind: cfg.PublicBind, PortMin: cfg.PortMin, PortMax: cfg.PortMax,
 				Auth: st, Tunnels: tunnelStoreAdapter{st}, Events: bus, Logger: log,
+				// v0.3.0: HTTP tunnel service identity + subdomain resolver.
+				Services:   serviceResolverAdapter{db: db.Wrap(database)},
+				AuthDomain: cfg.AuthDomain,
 			})
 			if err != nil {
 				return err
@@ -358,6 +363,10 @@ func main() {
 					Roles: st, Sessions: st, Settings: st,
 					Clients: clientsAdapter{srv: srv, st: st}, AccessModes: st,
 					DB: database,
+					// v0.3.0: service API + live tunnel lookup + auth domain.
+					Services:    st,
+					LiveTunnels: liveTunnelLookupAdapter{srv: srv},
+					AuthDomain:  cfg.AuthDomain,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
@@ -365,7 +374,56 @@ func main() {
 				apiSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 			}
 
-			errc := make(chan error, 2)
+			// senderCount tracks how many goroutines send on errc; capacity must
+			// equal senderCount so that no sender ever blocks after shutdown.
+			// Baseline: control listener (srv.Serve) + api server = 2.
+			// The proxy listener adds 1 when cfg.HTTPProxyListen is non-empty.
+			senderCount := 2
+
+			// Build the optional HTTP reverse-proxy listener (v0.3.0).
+			// Started only when HTTPProxyListen is non-empty (default ":8443").
+			// TLS is used iff both HTTPProxyTLSCert + HTTPProxyTLSKey are set;
+			// otherwise the listener runs plain HTTP (operator may terminate TLS
+			// upstream — e.g. nginx or a cloud load-balancer). A warning is
+			// logged in that case so it is never silently insecure.
+			var proxySrv *http.Server
+			if cfg.HTTPProxyListen != "" {
+				senderCount++
+
+				// Extract the port label for X-Forwarded-Port (e.g. ":8443" → "8443").
+				var ingressPort string
+				if _, port, err := net.SplitHostPort(cfg.HTTPProxyListen); err == nil && port != "" {
+					ingressPort = port
+				}
+
+				proxyTLSEnabled := cfg.HTTPProxyTLSCert != "" && cfg.HTTPProxyTLSKey != ""
+
+				accessChecker := proxy.NewAccessCheckerWithLogger(st, cfg.AuthDomain, log)
+				gate := proxy.NewGate(st, cfg.AuthDomain, effectiveSecureCookies, log)
+				proxyOpts := []proxy.Option{
+					proxy.WithGate(gate),
+				}
+				if ingressPort != "" {
+					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))
+				}
+				proxyHandler := proxy.New(
+					proxyDialerAdapter{st: st, srv: srv},
+					accessChecker,
+					cfg.AuthDomain,
+					log,
+					proxyOpts...,
+				)
+				proxySrv = &http.Server{
+					Addr:              cfg.HTTPProxyListen,
+					Handler:           proxyHandler,
+					ReadHeaderTimeout: 10 * time.Second,
+				}
+				if proxyTLSEnabled {
+					proxySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+				}
+			}
+
+			errc := make(chan error, senderCount)
 			go func() { errc <- srv.Serve(ctx) }()
 			go func() {
 				if httpsEnabled {
@@ -383,6 +441,31 @@ func main() {
 				}
 				errc <- nil
 			}()
+			if proxySrv != nil {
+				proxyTLSEnabled := cfg.HTTPProxyTLSCert != "" && cfg.HTTPProxyTLSKey != ""
+				go func() {
+					if proxyTLSEnabled {
+						log.Info("http proxy listening (TLS)", "addr", cfg.HTTPProxyListen)
+						if err := proxySrv.ListenAndServeTLS(cfg.HTTPProxyTLSCert, cfg.HTTPProxyTLSKey); err != nil && err != http.ErrServerClosed {
+							errc <- err
+							return
+						}
+					} else {
+						// Plaintext proxy: operator is expected to terminate TLS upstream
+						// (e.g. nginx, cloud load-balancer). Logged as a warning so this
+						// configuration is never silently insecure. The listener still
+						// starts; use BURROW_HTTP_PROXY_TLS_CERT/KEY for native TLS.
+						log.Warn("WARNING: http proxy listener enabled without TLS — http tunnels are unsecured; " +
+							"set BURROW_HTTP_PROXY_TLS_CERT/BURROW_HTTP_PROXY_TLS_KEY for native TLS " +
+							"or terminate TLS at a proxy")
+						if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+							errc <- err
+							return
+						}
+					}
+					errc <- nil
+				}()
+			}
 
 			// Wait for a shutdown signal OR an early server error (e.g. a
 			// listener bind failure such as the HTTP port already in use):
@@ -391,21 +474,28 @@ func main() {
 			select {
 			case <-ctx.Done():
 			case firstErr = <-errc:
-				stop() // cancel ctx so the other (healthy) server unwinds too
+				stop() // cancel ctx so the other (healthy) servers unwind too
 			}
 			// apiShutdownGrace (35s) > api.JSONHandlerTimeout (30s): every
 			// in-flight handler completes (or is chi-cancelled at 30s and
 			// returns) before Shutdown returns. The deferred reaperWg.Wait()
 			// and database.Close() then run in LIFO order after this point.
+			//
+			// Shutdown order (reverse of start): proxy → api → control listener (srv).
+			// The proxy is shut first so no new tunnel streams are opened while
+			// the control listener is still draining.
 			shutCtx, cancel := context.WithTimeout(context.Background(), apiShutdownGrace)
 			defer cancel()
+			if proxySrv != nil {
+				_ = proxySrv.Shutdown(shutCtx)
+			}
 			_ = apiSrv.Shutdown(shutCtx)
 			srv.Wait()
 			// One value already consumed iff the select took the errc branch;
-			// drain the remaining sender so neither goroutine leaks.
-			remaining := 2
+			// drain the remaining senders so no goroutine leaks.
+			remaining := senderCount
 			if firstErr != nil {
-				remaining = 1
+				remaining = senderCount - 1
 			}
 			for i := 0; i < remaining; i++ {
 				if e := <-errc; e != nil && e != http.ErrServerClosed && firstErr == nil {
