@@ -18,6 +18,17 @@ type TokenAuthenticator interface {
 	Authenticate(ctx context.Context, token string) (userID string, err error)
 }
 
+// ServiceResolver maps a (user, tunnel-name, type) triple to a stable service
+// identity and an assigned subdomain, creating the service record and
+// generating/persisting the subdomain on first use. Collision retry (when two
+// concurrent registrations race for the same random subdomain) is the
+// responsibility of the concrete adapter (e.g. the serviceResolverAdapter in
+// cmd/server that wraps the store). The server calls Resolve exactly once per
+// http-tunnel registration and trusts the returned subdomain — it does NOT retry.
+type ServiceResolver interface {
+	Resolve(ctx context.Context, userID, name, typ string) (serviceID, subdomain string, err error)
+}
+
 // TunnelStore persists tunnel rows (best-effort; never blocks the data path).
 // Implementations MUST be fast and non-blocking: SaveTunnel is called inline on
 // the serial control loop, and MarkTunnelSeen is called at session/tunnel
@@ -75,6 +86,14 @@ type Options struct {
 	PublicBind string
 	PortMin    int
 	PortMax    int
+	// Services resolves http-tunnel service identity + subdomain. If nil,
+	// http tunnel registrations are rejected with a clear error.
+	Services ServiceResolver
+	// AuthDomain is the base domain appended to a subdomain to form the
+	// routable Hostname returned in TunnelRegisterResponse (e.g. "tunnels.example.com"
+	// → hostname "k7p2qx.tunnels.example.com"). When empty, Hostname is returned
+	// as "" (degraded mode — subdomain is still assigned on the tunnel).
+	AuthDomain string
 }
 
 // Server is the burrowd relay control server.
@@ -359,6 +378,37 @@ func (s *Server) ListUserTunnels(userID string) []TunnelView {
 				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
 				Connected: true,
 			})
+		}
+	}
+	return out
+}
+
+// LookupHTTPTunnel finds the live http tunnel with the given subdomain.
+// It iterates all sessions and their tunnels under a per-session mutex-safe
+// snapshot and returns the first match where t.IsHTTP && t.Subdomain == sub.
+// Subdomains are unique (enforced by ServiceResolver collision retry), so the
+// first match is always the correct one. Returns (nil, false) when not found.
+func (s *Server) LookupHTTPTunnel(sub string) (*Tunnel, bool) {
+	for _, cs := range s.reg.Sessions() {
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			if tn.IsHTTP && tn.Subdomain == sub {
+				return tn, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// HTTPTunnels returns a snapshot slice of all live http tunnels across all
+// sessions. The slice is a copy collected under per-session locks so callers
+// may iterate it safely after this call returns.
+func (s *Server) HTTPTunnels() []*Tunnel {
+	var out []*Tunnel
+	for _, cs := range s.reg.Sessions() {
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			if tn.IsHTTP {
+				out = append(out, tn)
+			}
 		}
 	}
 	return out

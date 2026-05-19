@@ -72,28 +72,59 @@ func (s *Server) RunControlLoop(stream io.ReadWriteCloser, reg *Registry, cs *Cl
 				_ = cs.SendControl(proto.MsgError, proto.Error{Message: "bad tunnel_register"})
 				continue
 			}
-			port, perr := s.ports.Allocate(tr.RemotePort)
-			if perr != nil {
-				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: perr.Error()})
+			switch tr.Type {
+			case "http":
+				if s.opts.Services == nil {
+					_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: "http tunnels not configured"})
+					continue
+				}
+				serviceID, subdomain, rerr := s.opts.Services.Resolve(context.Background(), cs.UserID, tr.Name, "http")
+				if rerr != nil {
+					_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: "resolve service: " + rerr.Error()})
+					continue
+				}
+				tn := &Tunnel{
+					ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, LocalAddr: tr.LocalAddr, sess: cs,
+					IsHTTP: true, Subdomain: subdomain, ServiceID: serviceID,
+				}
+				reg.AddTunnel(cs, tn)
+				if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
+					s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
+				}
+				s.opts.Events.PublishTunnelsChanged(cs.UserID)
+				var hostname string
+				if s.opts.AuthDomain != "" {
+					hostname = subdomain + "." + s.opts.AuthDomain
+				}
+				s.log.Info("http tunnel registered", "tunnel_id", tn.ID, "subdomain", subdomain, "session_id", cs.SessionID)
+				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: 0, Hostname: hostname})
+			case "", "tcp":
+				port, perr := s.ports.Allocate(tr.RemotePort)
+				if perr != nil {
+					_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: perr.Error()})
+					continue
+				}
+				tn := &Tunnel{ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, RemotePort: port, LocalAddr: tr.LocalAddr, sess: cs}
+				if lerr := s.startPublicListener(tn); lerr != nil {
+					s.ports.Release(port)
+					_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: lerr.Error()})
+					continue
+				}
+				reg.AddTunnel(cs, tn)
+				// Best-effort persist. RunControlLoop is serial (ping/pong/register/
+				// unregister on one goroutine), so any TunnelStore wired here MUST be
+				// fast and non-blocking — a slow store would stall heartbeat handling
+				// for this client. (Task 8 wires local sqlite; offload if ever remote.)
+				if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
+					s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
+				}
+				s.opts.Events.PublishTunnelsChanged(cs.UserID)
+				s.log.Info("tunnel registered", "tunnel_id", tn.ID, "remote_port", port, "session_id", cs.SessionID)
+				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: port})
+			default:
+				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: "unknown tunnel type \"" + tr.Type + "\""})
 				continue
 			}
-			tn := &Tunnel{ID: uuid.NewString(), Name: tr.Name, Type: tr.Type, RemotePort: port, LocalAddr: tr.LocalAddr, sess: cs}
-			if lerr := s.startPublicListener(tn); lerr != nil {
-				s.ports.Release(port)
-				_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: false, Error: lerr.Error()})
-				continue
-			}
-			reg.AddTunnel(cs, tn)
-			// Best-effort persist. RunControlLoop is serial (ping/pong/register/
-			// unregister on one goroutine), so any TunnelStore wired here MUST be
-			// fast and non-blocking — a slow store would stall heartbeat handling
-			// for this client. (Task 8 wires local sqlite; offload if ever remote.)
-			if err := s.opts.Tunnels.SaveTunnel(context.Background(), cs.UserID, tn); err != nil {
-				s.log.Warn("persist tunnel failed", "tunnel_id", tn.ID, "err", err)
-			}
-			s.opts.Events.PublishTunnelsChanged(cs.UserID)
-			s.log.Info("tunnel registered", "tunnel_id", tn.ID, "remote_port", port, "session_id", cs.SessionID)
-			_ = cs.SendControl(proto.MsgTunnelRegisterResp, proto.TunnelRegisterResponse{OK: true, TunnelID: tn.ID, RemotePort: port})
 		case proto.MsgTunnelUnregister:
 			var tu proto.TunnelUnregister
 			if err := proto.DecodePayload(env, &tu); err == nil {

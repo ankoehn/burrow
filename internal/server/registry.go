@@ -41,6 +41,11 @@ type Tunnel struct {
 	BytesOut atomic.Uint64
 	// sess is the owning session (for control-channel notifies).
 	sess *ClientSession
+
+	// HTTP tunnel fields (only set when IsHTTP==true).
+	Subdomain string // assigned subdomain; "" for tcp tunnels
+	ServiceID string // stable service identity from ServiceResolver; "" for tcp tunnels
+	IsHTTP    bool   // true for http-mode tunnels (no TCP port allocated)
 }
 
 // ClientSession is one authenticated client connection.
