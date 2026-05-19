@@ -43,6 +43,77 @@ func (x *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
+// ListSessionsByUser returns the user's sessions, newest first.
+func (x *DB) ListSessionsByUser(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := x.sqlDB.QueryContext(ctx,
+		`SELECT id, user_id, expires_at, created_at, COALESCE(user_agent,''), COALESCE(ip,'')
+		   FROM sessions WHERE user_id=? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []Session
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.ID, &s.UserID, &s.ExpiresAt, &s.CreatedAt, &s.UserAgent, &s.IP); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions rows: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteSessionForUser deletes one session scoped to its owner.
+// Returns ErrNotFound if no row matched (missing or owned by another user).
+func (x *DB) DeleteSessionForUser(ctx context.Context, id, userID string) error {
+	res, err := x.sqlDB.ExecContext(ctx,
+		`DELETE FROM sessions WHERE id=? AND user_id=?`, id, userID)
+	if err != nil {
+		return fmt.Errorf("delete session for user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete session for user rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteSessionsByUserExcept deletes all of the user's sessions except keepID
+// and returns the number deleted ("sign out everywhere else").
+func (x *DB) DeleteSessionsByUserExcept(ctx context.Context, userID, keepID string) (int64, error) {
+	res, err := x.sqlDB.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id=? AND id<>?`, userID, keepID)
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions except: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions except rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteSessionsByUser deletes all of the user's sessions (used when an admin
+// suspends an account) and returns the number deleted.
+func (x *DB) DeleteSessionsByUser(ctx context.Context, userID string) (int64, error) {
+	res, err := x.sqlDB.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id=?`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions by user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions by user rows affected: %w", err)
+	}
+	return n, nil
+}
+
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past
 // and returns the number of rows deleted.
 //
