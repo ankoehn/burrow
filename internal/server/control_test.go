@@ -159,8 +159,8 @@ func newTestServerWithHTTP(t *testing.T, resolver ServiceResolver, authDomain st
 			Tunnels: noopTunnelStore{}, Events: noopEventPublisher{},
 			Services: resolver, AuthDomain: authDomain,
 		},
-		log:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		reg:  reg,
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		reg:   reg,
 		ports: newPortAllocator(18100, 18199),
 	}
 	t.Cleanup(func() {
