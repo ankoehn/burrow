@@ -1,11 +1,30 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ds";
+
+/* Brand mark — geometric tunnel-and-arrow glyph (currentColor). */
+function BurrowMark({ size = 26 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5.5" width="12" height="13" rx="2.5" />
+      <path d="M9 12h11.5" />
+      <path d="M17 9l3.5 3-3.5 3" />
+    </svg>
+  );
+}
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -25,22 +44,59 @@ export default function Login() {
     }
   }
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm p-6">
-        <h1 className="mb-4 text-xl font-semibold">Sign in to Burrow</h1>
-        <form onSubmit={submit} className="space-y-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="login-email">Email</Label>
-            <Input id="login-email" type="email" placeholder="you@example.com" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+    <div className="signin-page">
+      <div className="signin-container">
+        <div className="signin-brand">
+          <BurrowMark size={26} />
+          <span>Burrow</span>
+        </div>
+        <h1 className="signin-title">Sign in to Burrow</h1>
+        <p className="signin-sub">Use the credentials issued by your relay admin.</p>
+
+        <form className="signin-form" onSubmit={submit} noValidate>
+          <div className="signin-card">
+            <div className="signin-field">
+              <label htmlFor="login-email">Email</label>
+              <input
+                id="login-email"
+                type="email"
+                name="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={err ? true : undefined}
+              />
+            </div>
+            <div className="signin-field">
+              <label htmlFor="login-password">Password</label>
+              <input
+                id="login-password"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                placeholder="Password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={err ? true : undefined}
+              />
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="login-password">Password</Label>
-            <Input id="login-password" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          </div>
-          {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
-          <Button type="submit" className="w-full">Sign in</Button>
+
+          <Button type="submit" variant="primary" className="signin-submit">Sign in</Button>
+
+          {err && (
+            <div className="signin-error" role="alert" aria-live="polite">
+              <AlertTriangle size={14} className="icon" />
+              <span>{err}</span>
+            </div>
+          )}
         </form>
-      </Card>
+
+        <p className="signin-footer">self-hosted relay · Apache-2.0 · no telemetry</p>
+      </div>
     </div>
   );
 }

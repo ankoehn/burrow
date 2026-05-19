@@ -46,6 +46,11 @@ describe("Login", () => {
     expect(f).toHaveBeenCalledWith("/api/v1/auth/login", expect.objectContaining({ method: "POST" }));
   });
 
+  it("submit button uses the design-system primary button class", () => {
+    setup();
+    expect(screen.getByRole("button", { name: /sign in/i }).className).toContain("btn-primary");
+  });
+
   it("shows banner on 401 and stays on /login (no global redirect)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401 }) as any
