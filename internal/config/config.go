@@ -66,6 +66,23 @@ type ServerConfig struct {
 	// from/tls) live in the settings table instead. Empty = SMTP unconfigured.
 	// Env: BURROW_SMTP_PASSWORD (also _FILE variant).
 	SMTPPassword string `koanf:"smtp_password"`
+	// HTTPProxyListen is the TCP address the HTTP reverse-proxy listener binds
+	// to. Defaults to ":8443". An empty string disables the proxy listener.
+	// Env: BURROW_HTTP_PROXY_LISTEN.
+	HTTPProxyListen string `koanf:"http_proxy_listen"`
+	// HTTPProxyTLSCert and HTTPProxyTLSKey are the TLS certificate and key files
+	// for the HTTP reverse-proxy listener. Both must be set together
+	// (both-or-neither); if exactly one is set, LoadServer returns an error.
+	// When both are empty (the default) the proxy listener runs without TLS and
+	// the operator is expected to terminate TLS upstream.
+	// Env: BURROW_HTTP_PROXY_TLS_CERT / BURROW_HTTP_PROXY_TLS_KEY (also _FILE variants).
+	HTTPProxyTLSCert string `koanf:"http_proxy_tls_cert"`
+	HTTPProxyTLSKey  string `koanf:"http_proxy_tls_key"`
+	// AuthDomain is the domain used as the authentication boundary for the HTTP
+	// reverse proxy (e.g. "tunnels.example.com"). Empty by default; Task 12 will
+	// use this to construct per-tunnel subdomains.
+	// Env: BURROW_AUTH_DOMAIN.
+	AuthDomain string `koanf:"auth_domain"`
 }
 
 // ClientConfig configures burrow.
@@ -205,6 +222,10 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"database_path": "./burrow.db", "http_listen": ":8080", "http_secure_cookies": false,
 		// trusted_proxies defaults to empty: no forwarded headers trusted.
 		"trusted_proxies": []string{},
+		// http_proxy_listen defaults to :8443; empty string disables the listener.
+		// http_proxy_tls_cert/key default to empty (no TLS; operator terminates upstream).
+		// auth_domain defaults to empty (no subdomain-routing configured).
+		"http_proxy_listen": ":8443", "http_proxy_tls_cert": "", "http_proxy_tls_key": "", "auth_domain": "",
 	}, "."), nil)
 	_ = k.Load(burrowEnvProvider(), nil)
 	if err := applyFileSecrets(k); err != nil {
@@ -226,6 +247,10 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	// Both-or-neither validation for HTTP TLS cert/key pair (xor is invalid).
 	if (c.HTTPTLSCert == "") != (c.HTTPTLSKey == "") {
 		return nil, fmt.Errorf("invalid server config: http_tls_cert and http_tls_key must both be set or both be empty")
+	}
+	// Both-or-neither validation for HTTP proxy TLS cert/key pair (xor is invalid).
+	if (c.HTTPProxyTLSCert == "") != (c.HTTPProxyTLSKey == "") {
+		return nil, fmt.Errorf("invalid server config: http_proxy_tls_cert and http_proxy_tls_key must both be set or both be empty")
 	}
 	return &c, nil
 }

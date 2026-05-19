@@ -382,3 +382,158 @@ func TestServerConfigSMTPPassword(t *testing.T) {
 		t.Fatalf("SMTPPassword = %q, want s3cr3t", c.SMTPPassword)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 11: proxy listener, proxy TLS pair, auth domain
+// ---------------------------------------------------------------------------
+
+// TestHTTPProxyListenDefault asserts that the default http_proxy_listen is ":8443".
+func TestHTTPProxyListenDefault(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.HTTPProxyListen != ":8443" {
+		t.Fatalf("default http_proxy_listen = %q, want :8443", c.HTTPProxyListen)
+	}
+}
+
+// TestHTTPProxyListenEnvOverride asserts that BURROW_HTTP_PROXY_LISTEN overrides the default.
+func TestHTTPProxyListenEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_HTTP_PROXY_LISTEN", ":9443")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.HTTPProxyListen != ":9443" {
+		t.Fatalf("env override http_proxy_listen = %q, want :9443", c.HTTPProxyListen)
+	}
+}
+
+// TestHTTPProxyTLSDefaultsEmpty asserts that http_proxy_tls_cert and
+// http_proxy_tls_key default to empty strings.
+func TestHTTPProxyTLSDefaultsEmpty(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.HTTPProxyTLSCert != "" || c.HTTPProxyTLSKey != "" {
+		t.Fatalf("default proxy tls cert/key must be empty, got %q / %q",
+			c.HTTPProxyTLSCert, c.HTTPProxyTLSKey)
+	}
+}
+
+// TestAuthDomainDefault asserts that auth_domain defaults to "".
+func TestAuthDomainDefault(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.AuthDomain != "" {
+		t.Fatalf("default auth_domain = %q, want empty", c.AuthDomain)
+	}
+}
+
+// TestAuthDomainEnvOverride asserts that BURROW_AUTH_DOMAIN overrides the default.
+func TestAuthDomainEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_AUTH_DOMAIN", "tunnels.example.com")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.AuthDomain != "tunnels.example.com" {
+		t.Fatalf("env override auth_domain = %q, want tunnels.example.com", c.AuthDomain)
+	}
+}
+
+// TestHTTPProxyTLSBothSetIsValid asserts that providing both http_proxy_tls_cert and
+// http_proxy_tls_key via overrides is accepted by LoadServer.
+func TestHTTPProxyTLSBothSetIsValid(t *testing.T) {
+	c, err := LoadServer(map[string]any{
+		"http_proxy_tls_cert": "/tmp/proxy-cert.pem",
+		"http_proxy_tls_key":  "/tmp/proxy-key.pem",
+	})
+	if err != nil {
+		t.Fatalf("both proxy tls cert+key set: expected no error, got %v", err)
+	}
+	if c.HTTPProxyTLSCert != "/tmp/proxy-cert.pem" {
+		t.Fatalf("http_proxy_tls_cert = %q, want /tmp/proxy-cert.pem", c.HTTPProxyTLSCert)
+	}
+	if c.HTTPProxyTLSKey != "/tmp/proxy-key.pem" {
+		t.Fatalf("http_proxy_tls_key = %q, want /tmp/proxy-key.pem", c.HTTPProxyTLSKey)
+	}
+}
+
+// TestHTTPProxyTLSBothEmptyIsValid asserts that the default (both empty) is accepted.
+func TestHTTPProxyTLSBothEmptyIsValid(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("both empty: expected no error, got %v", err)
+	}
+	if c.HTTPProxyTLSCert != "" || c.HTTPProxyTLSKey != "" {
+		t.Fatalf("default proxy tls cert/key must be empty, got %q / %q",
+			c.HTTPProxyTLSCert, c.HTTPProxyTLSKey)
+	}
+}
+
+// TestHTTPProxyTLSOnlyCertSetIsError asserts that setting only http_proxy_tls_cert (xor) fails.
+func TestHTTPProxyTLSOnlyCertSetIsError(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"http_proxy_tls_cert": "/tmp/proxy-cert.pem",
+	})
+	if err == nil {
+		t.Fatal("only http_proxy_tls_cert set: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "http_proxy_tls_cert") {
+		t.Fatalf("error should mention http_proxy_tls_cert, got: %v", err)
+	}
+}
+
+// TestHTTPProxyTLSOnlyKeySetIsError asserts that setting only http_proxy_tls_key (xor) fails.
+func TestHTTPProxyTLSOnlyKeySetIsError(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"http_proxy_tls_key": "/tmp/proxy-key.pem",
+	})
+	if err == nil {
+		t.Fatal("only http_proxy_tls_key set: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "http_proxy_tls_cert") {
+		t.Fatalf("error should mention http_proxy_tls_cert, got: %v", err)
+	}
+}
+
+// TestHTTPProxyTLSEnvVars asserts that BURROW_HTTP_PROXY_TLS_CERT/KEY env vars are loaded.
+func TestHTTPProxyTLSEnvVars(t *testing.T) {
+	t.Setenv("BURROW_HTTP_PROXY_TLS_CERT", "/env/proxy-cert.pem")
+	t.Setenv("BURROW_HTTP_PROXY_TLS_KEY", "/env/proxy-key.pem")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("env vars: expected no error, got %v", err)
+	}
+	if c.HTTPProxyTLSCert != "/env/proxy-cert.pem" {
+		t.Fatalf("http_proxy_tls_cert = %q, want /env/proxy-cert.pem", c.HTTPProxyTLSCert)
+	}
+	if c.HTTPProxyTLSKey != "/env/proxy-key.pem" {
+		t.Fatalf("http_proxy_tls_key = %q, want /env/proxy-key.pem", c.HTTPProxyTLSKey)
+	}
+}
+
+// TestHTTPProxyTLSCertFile asserts that BURROW_HTTP_PROXY_TLS_CERT_FILE is resolved
+// via the generic applyFileSecrets mechanism.
+func TestHTTPProxyTLSCertKeyFile(t *testing.T) {
+	certPath := writeSecret(t, "/path/to/proxy-cert.pem\n")
+	keyPath := writeSecret(t, "/path/to/proxy-key.pem\n")
+	t.Setenv("BURROW_HTTP_PROXY_TLS_CERT_FILE", certPath)
+	t.Setenv("BURROW_HTTP_PROXY_TLS_KEY_FILE", keyPath)
+
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer with _FILE secrets: %v", err)
+	}
+	if c.HTTPProxyTLSCert != "/path/to/proxy-cert.pem" {
+		t.Fatalf("http_proxy_tls_cert from _FILE = %q, want /path/to/proxy-cert.pem", c.HTTPProxyTLSCert)
+	}
+	if c.HTTPProxyTLSKey != "/path/to/proxy-key.pem" {
+		t.Fatalf("http_proxy_tls_key from _FILE = %q, want /path/to/proxy-key.pem", c.HTTPProxyTLSKey)
+	}
+}
