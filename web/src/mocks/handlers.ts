@@ -19,8 +19,14 @@ function gate(req: Request, opts: { admin?: boolean } = {}): Response | null {
   return null;
 }
 
+// Parse via text()+JSON.parse rather than req.json(): under jsdom/undici the
+// Request#json() stream read is intermittently flaky, whereas text() is stable.
 async function body<T>(req: Request): Promise<T | null> {
-  try { return (await req.json()) as T; } catch { return null; }
+  try {
+    const t = await req.text();
+    if (!t) return null;
+    return JSON.parse(t) as T;
+  } catch { return null; }
 }
 
 export const handlers = [
