@@ -104,6 +104,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(d.RequireAdmin)
 				r.Get("/users", d.AdminListUsers)
 				r.Post("/users", d.AdminCreateUser)
+				r.Patch("/users/{id}", d.AdminUpdateUser)
 				r.Delete("/users/{id}", d.AdminDeleteUser)
 				r.Get("/roles", d.ListRoles)
 				r.Get("/roles/{name}", d.GetRole)

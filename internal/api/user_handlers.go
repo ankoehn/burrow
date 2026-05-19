@@ -43,22 +43,35 @@ func (d Deps) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// userAdminResp is returned by admin user-list and user-create (no password_hash).
+// userAdminResp is returned by admin user endpoints (never password_hash).
 type userAdminResp struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string     `json:"id"`
+	Email     string     `json:"email"`
+	Role      string     `json:"role"`
+	Status    string     `json:"status"`
+	LastLogin *time.Time `json:"last_login"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 func toUserAdminResp(u db.User) userAdminResp {
-	return userAdminResp{ID: u.ID, Email: u.Email, Role: u.Role, CreatedAt: u.CreatedAt}
+	return userAdminResp{
+		ID: u.ID, Email: u.Email, Role: u.Role,
+		Status: u.Status, LastLogin: u.LastLogin, CreatedAt: u.CreatedAt,
+	}
 }
 
-// AdminListUsers returns all users (admin only).
-// GET /api/v1/users
+type usersPageResp struct {
+	Users []userAdminResp `json:"users"`
+	Total int             `json:"total"`
+}
+
+// AdminListUsers returns a filtered page of users (admin only).
+// GET /api/v1/users?q=&limit=&offset=
 func (d Deps) AdminListUsers(w http.ResponseWriter, r *http.Request) {
-	users, _, err := d.Users.ListUsersPage(r.Context(), "", 0, 0)
+	q := r.URL.Query().Get("q")
+	limit := atoiDefault(r.URL.Query().Get("limit"), 50)
+	offset := atoiDefault(r.URL.Query().Get("offset"), 0)
+	users, total, err := d.Users.ListUsersPage(r.Context(), q, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list users failed")
 		return
@@ -67,7 +80,73 @@ func (d Deps) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	for _, u := range users {
 		out = append(out, toUserAdminResp(u))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, usersPageResp{Users: out, Total: total})
+}
+
+// atoiDefault parses a base-10 int, returning def for empty/invalid input.
+func atoiDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return def
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+type updateUserReq struct {
+	Role   *string `json:"role"`
+	Status *string `json:"status"`
+}
+
+// AdminUpdateUser changes a user's role and/or status (admin only).
+// PATCH /api/v1/users/{id}. An admin cannot change their own status (lockout
+// guard, mirrors the self-delete guard).
+func (d Deps) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	targetID := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var in updateUserReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Role == nil && in.Status == nil) {
+		writeErr(w, http.StatusBadRequest, "role and/or status required")
+		return
+	}
+	if in.Status != nil {
+		if *in.Status != "active" && *in.Status != "suspended" {
+			writeErr(w, http.StatusBadRequest, "status must be 'active' or 'suspended'")
+			return
+		}
+		if targetID == userID(r.Context()) {
+			writeErr(w, http.StatusBadRequest, "cannot change your own status")
+			return
+		}
+		if err := d.Users.SetUserStatus(r.Context(), targetID, *in.Status); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "update status failed")
+			return
+		}
+	}
+	if in.Role != nil {
+		if *in.Role != "admin" && *in.Role != "user" {
+			writeErr(w, http.StatusBadRequest, "role must be 'admin' or 'user'")
+			return
+		}
+		if err := d.Users.UpdateUserRole(r.Context(), targetID, *in.Role); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "update role failed")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // createUserReq is the request body for POST /api/v1/users.

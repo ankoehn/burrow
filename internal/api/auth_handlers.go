@@ -40,6 +40,10 @@ func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	if u.Status == "suspended" {
+		writeErr(w, http.StatusForbidden, "account suspended")
+		return
+	}
 	// Store the host without the port so session.ip is a clean IP address
 	// regardless of whether TrustedProxyMiddleware rewrote RemoteAddr to
 	// "<clientIP>:0" (trusted proxy path) or the TCP peer is host:ephemeralport.
@@ -59,6 +63,8 @@ func (d Deps) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, sid, d.SecureCookies)
 	setCSRFCookie(w, csrfToken, d.SecureCookies)
+	// Best-effort: stamp last_login. Must not fail the login on a DB hiccup.
+	_ = d.Users.TouchUserLastLogin(r.Context(), u.ID)
 	writeJSON(w, http.StatusOK, userResp{ID: u.ID, Email: u.Email, Role: u.Role})
 }
 
