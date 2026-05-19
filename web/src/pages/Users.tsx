@@ -4,104 +4,41 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, Input, Dialog } from "@/components/ds";
+import { Button, Input, Select, Badge, Dialog, SkeletonRows } from "@/components/ds";
+import type { UserAdmin, UsersPage, UserRole } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { CreateUserDialog } from "@/pages/users/CreateUserDialog";
+import { EditUserDialog } from "@/pages/users/EditUserDialog";
 
-export interface User {
-  id: string;
-  email: string;
-  role: string;
-  created_at: string;
-}
+const PAGE = 20;
 
 export default function Users() {
   const { user: me } = useAuth();
   const qc = useQueryClient();
+  const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"" | UserRole>("");
+  const [offset, setOffset] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<UserAdmin | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<UserAdmin | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["users"],
-    queryFn: () => apiFetch<User[]>("/users"),
+    queryKey: ["users", q, offset],
+    queryFn: () => apiFetch<UsersPage>(`/users?q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${offset}`),
     retry: false,
   });
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"user" | "admin">("user");
-  const [createError, setCreateError] = useState("");
-  const [confirmTarget, setConfirmTarget] = useState<User | null>(null);
-
-  const createUser = useMutation({
-    mutationFn: () =>
-      apiFetch<User>("/users", {
-        method: "POST",
-        body: JSON.stringify({ email, password, role }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["users"] });
-      toast.success("User created successfully");
-      setEmail("");
-      setPassword("");
-      setRole("user");
-      setCreateError("");
-    },
-    onError: (err: unknown) => {
-      if (err instanceof ApiError) {
-        if (err.status === 409) {
-          setCreateError("Email already exists");
-        } else if (err.status === 400) {
-          const msg = err.message?.toLowerCase() ?? "";
-          setCreateError(msg.includes("short") || msg.includes("password") ? "Password too short (minimum 8 characters)" : "Invalid request: " + err.message);
-        } else {
-          setCreateError("Failed to create user: " + err.message);
-        }
-      } else {
-        setCreateError("Failed to create user");
-      }
-    },
-  });
-
   const deleteUser = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch(`/users/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["users"] });
-      toast.success("User deleted");
-    },
-    onError: (err: unknown) => {
-      if (err instanceof ApiError) {
-        if (err.status === 400) {
-          const msg = err.message?.toLowerCase() ?? "";
-          if (msg.includes("self") || msg.includes("own") || msg.includes("yourself")) {
-            toast.error("You cannot delete your own account");
-          } else {
-            toast.error("Cannot delete user: " + err.message);
-          }
-        } else if (err.status === 404) {
-          // User already gone — refetch to sync list
-          qc.invalidateQueries({ queryKey: ["users"] });
-          toast.error("User not found");
-        } else {
-          toast.error("Failed to delete user");
-        }
-      } else {
-        toast.error("Failed to delete user");
-      }
-    },
+    mutationFn: (id: string) => apiFetch(`/users/${id}`, { method: "DELETE" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["users"] }); toast.success("User deleted"); },
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : "Failed to delete user"),
   });
 
-  function confirmDelete() {
-    if (confirmTarget) deleteUser.mutate(confirmTarget.id);
-    setConfirmTarget(null);
-  }
-
-  // Graceful 403 for non-admins or session state mismatches
   if (error instanceof ApiError && error.status === 403) {
     return (
       <div className="users-page">
-        <div className="page-head">
-          <div><h1>Users</h1></div>
-        </div>
+        <div className="page-head"><div><h1>Users</h1></div></div>
         <div className="notice-block warn">
           <div className="icon-bubble"><ShieldAlert size={18} /></div>
           <p role="alert">Admin access required.</p>
@@ -109,150 +46,106 @@ export default function Users() {
       </div>
     );
   }
-
   if (error) {
     return (
       <div className="users-page">
-        <div className="page-head">
-          <div><h1>Users</h1></div>
-        </div>
+        <div className="page-head"><div><h1>Users</h1></div></div>
         <div className="notice-block error">
           <div className="icon-bubble"><AlertTriangle size={18} /></div>
-          <p role="alert">
-            Failed to load users: {error instanceof ApiError ? error.message : "Unknown error"}
-          </p>
+          <p role="alert">Failed to load users: {error instanceof ApiError ? error.message : "Unknown error"}</p>
         </div>
       </div>
     );
   }
 
+  const rows = (data?.users ?? []).filter((u) => (roleFilter ? u.role === roleFilter : true));
+  const total = data?.total ?? 0;
+
   return (
     <div className="users-page" style={{ position: "relative" }}>
       <div className="page-head">
-        <div><h1>Users</h1></div>
+        <div><h1>Users</h1><p className="sub">People who can sign in to this Burrow relay.</p></div>
+        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>Create user</Button>
       </div>
 
-      <section className="account-section" aria-labelledby="sec-create-user">
-        <div className="section-head">
-          <div className="left">
-            <h2 id="sec-create-user">Create user</h2>
-          </div>
-        </div>
-        <form
-          className="users-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setCreateError("");
-            createUser.mutate();
-          }}
-        >
-          <div className="field">
-            <label htmlFor="user-email">Email</label>
-            <Input
-              id="user-email"
-              type="email"
-              autoComplete="off"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="user-password">Password</label>
-            <Input
-              id="user-password"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="user-role">Role</label>
-            <select
-              id="user-role"
-              className="input"
-              value={role}
-              onChange={(e) => setRole(e.target.value as "user" | "admin")}
-            >
-              <option value="user">user</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
-          {createError && (
-            <p role="alert" className="field-error">{createError}</p>
-          )}
-          <div className="actions">
-            <Button type="submit" variant="primary" disabled={createUser.isPending}>
-              {createUser.isPending ? "Creating…" : "Create user"}
-            </Button>
-          </div>
-        </form>
-      </section>
+      <div className="row gap-2" style={{ margin: "12px 0", alignItems: "center" }}>
+        <Input
+          type="search"
+          role="searchbox"
+          aria-label="Search users by email"
+          placeholder="search by email…"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOffset(0); }}
+        />
+        <Select
+          options={[
+            { value: "", label: "Role · All" },
+            { value: "admin", label: "Role · Admin" },
+            { value: "user", label: "Role · User" },
+          ]}
+          value={roleFilter}
+          onChange={(v) => setRoleFilter(v as "" | UserRole)}
+        />
+        <span className="muted" style={{ marginLeft: "auto" }}>{total} total</span>
+      </div>
 
       {isLoading ? (
-        <div className="table-wrap" style={{ padding: 16 }}>
-          <p className="muted">Loading…</p>
-        </div>
-      ) : !data || data.length === 0 ? (
-        <div className="state-card">
-          <p>No users found.</p>
-        </div>
+        <div className="table-wrap"><SkeletonRows n={5} /></div>
+      ) : rows.length === 0 ? (
+        <div className="state-card"><p>No users found.</p></div>
       ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Users">
             <thead>
-              <tr>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Created</th>
-                <th className="col-actions"></th>
-              </tr>
+              <tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th className="col-actions"></th></tr>
             </thead>
             <tbody>
-              {data.map((u) => (
+              {rows.map((u) => (
                 <tr key={u.id}>
-                  <td>{u.email}</td>
-                  <td>{u.role}</td>
+                  <td>{u.email}{u.id === me?.id && <span className="tag" aria-label="this is you"> YOU</span>}</td>
+                  <td><Badge kind={u.role === "admin" ? "role-admin-teal" : "role-user"}>{u.role === "admin" ? "Admin" : "User"}</Badge></td>
+                  <td><Badge kind={u.status === "active" ? "status-connected" : "status-suspended-muted"}>{u.status === "active" ? "Active" : "Suspended"}</Badge></td>
                   <td className="col-created">{formatTimestamp(u.created_at)}</td>
+                  <td className="col-created">{u.last_login ? formatTimestamp(u.last_login) : <span className="muted">—</span>}</td>
                   <td className="col-actions">
+                    <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>Edit</Button>{" "}
                     <Button
-                      variant="secondary"
-                      size="sm"
+                      variant="secondary" size="sm"
                       aria-label={`Delete user ${u.email}`}
-                      disabled={deleteUser.isPending && me?.id !== u.id}
+                      disabled={u.id === me?.id}
                       onClick={() => setConfirmTarget(u)}
-                    >
-                      Delete
-                    </Button>
+                    >Delete</Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <div className="row gap-2" style={{ marginTop: 12, alignItems: "center" }}>
+            <span className="muted">Showing {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} of {total}</span>
+            <div style={{ marginLeft: "auto" }} className="row gap-2">
+              <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</Button>
+              <Button variant="secondary" size="sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
+            </div>
+          </div>
         </div>
       )}
+
+      <CreateUserDialog open={creating} onClose={() => setCreating(false)} />
+      <EditUserDialog user={editing} selfId={me?.id} onClose={() => setEditing(null)} />
 
       <Dialog
         open={confirmTarget !== null}
         onOpenChange={(o) => { if (!o) setConfirmTarget(null); }}
-        title="Delete user"
-        description={
-          confirmTarget
-            ? `Delete user ${confirmTarget.email}? This cannot be undone.`
-            : ""
-        }
+        title="Delete user?"
+        description={confirmTarget ? `${confirmTarget.email} will lose access immediately. This cannot be undone.` : ""}
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmTarget(null)}>Cancel</Button>
-            <Button variant="destructive-solid" onClick={confirmDelete}>Delete</Button>
+            <Button variant="destructive-solid" onClick={() => { if (confirmTarget) deleteUser.mutate(confirmTarget.id); setConfirmTarget(null); }}>Delete user</Button>
           </>
         }
       >
-        <div className="confirm-icon" aria-hidden="true">
-          <AlertTriangle size={16} />
-        </div>
+        <div className="confirm-icon" aria-hidden="true"><AlertTriangle size={16} /></div>
       </Dialog>
       <Toaster />
     </div>
