@@ -107,6 +107,9 @@ func NewRouter(d Deps) http.Handler {
 				r.Delete("/users/{id}", d.AdminDeleteUser)
 				r.Get("/roles", d.ListRoles)
 				r.Get("/roles/{name}", d.GetRole)
+				r.Get("/settings", d.GetSettings)
+				r.Put("/settings", d.SaveSettings)
+				r.Post("/settings/test-email", d.SendTestEmail)
 			})
 		})
 
