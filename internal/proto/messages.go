@@ -37,6 +37,8 @@ type AuthRequest struct {
 	ClientVersion   string `json:"client_version"`
 	OS              string `json:"os"`
 	Arch            string `json:"arch"`
+	// hostname (optional, since v0.3 extension)
+	Hostname string `json:"hostname,omitempty"`
 }
 
 // AuthResponse is the server's reply to an AuthRequest.
