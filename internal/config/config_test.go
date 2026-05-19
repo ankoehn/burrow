@@ -371,3 +371,14 @@ func TestClientMissingFileReturnsError(t *testing.T) {
 		t.Fatalf("error should mention 'cannot read secret file', got: %v", err)
 	}
 }
+
+func TestServerConfigSMTPPassword(t *testing.T) {
+	t.Setenv("BURROW_SMTP_PASSWORD", "s3cr3t")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.SMTPPassword != "s3cr3t" {
+		t.Fatalf("SMTPPassword = %q, want s3cr3t", c.SMTPPassword)
+	}
+}

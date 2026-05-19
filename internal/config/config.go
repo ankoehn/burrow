@@ -59,6 +59,13 @@ type ServerConfig struct {
 	// or proxy IP/CIDR (e.g. "10.0.0.0/8") when deploying behind a proxy.
 	// Env: BURROW_TRUSTED_PROXIES (comma-separated CIDRs/IPs).
 	TrustedProxies []string `koanf:"trusted_proxies"`
+	// SMTPPassword is the SMTP auth password for the dashboard mailer. It is a
+	// SECRET: sourced from BURROW_SMTP_PASSWORD or BURROW_SMTP_PASSWORD_FILE
+	// (the _FILE form wins, handled by applyFileSecrets) and is NEVER written
+	// to the settings table. The non-secret SMTP fields (host/port/username/
+	// from/tls) live in the settings table instead. Empty = SMTP unconfigured.
+	// Env: BURROW_SMTP_PASSWORD (also _FILE variant).
+	SMTPPassword string `koanf:"smtp_password"`
 }
 
 // ClientConfig configures burrow.
