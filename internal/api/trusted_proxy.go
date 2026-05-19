@@ -3,79 +3,40 @@ package api
 import (
 	"net"
 	"net/http"
-	"strings"
+
+	"github.com/ankoehn/burrow/pkg/clientip"
 )
 
 // buildCIDRs parses a list of CIDR/IP strings into []*net.IPNet.
 // Bare IPs (no mask) are converted to host-only CIDRs (/32 or /128).
 // Entries that fail to parse are silently skipped; config validation in
 // internal/config ensures all entries are valid before this is called.
+// Delegates to pkg/clientip.BuildCIDRs.
 func buildCIDRs(proxies []string) []*net.IPNet {
-	nets := make([]*net.IPNet, 0, len(proxies))
-	for _, p := range proxies {
-		if p == "" {
-			continue
-		}
-		// Try CIDR first.
-		if _, cidr, err := net.ParseCIDR(p); err == nil {
-			nets = append(nets, cidr)
-			continue
-		}
-		// Bare IP: synthesize a host CIDR.
-		if ip := net.ParseIP(p); ip != nil {
-			bits := 32
-			if ip.To4() == nil {
-				bits = 128
-			}
-			ip4 := ip.To4()
-			if ip4 != nil {
-				ip = ip4
-			}
-			nets = append(nets, &net.IPNet{IP: ip.Mask(net.CIDRMask(bits, bits)), Mask: net.CIDRMask(bits, bits)})
-		}
-	}
-	return nets
+	return clientip.BuildCIDRs(proxies)
 }
 
 // peerIP extracts the host part from r.RemoteAddr (which is always host:port
 // for TCP connections). Returns the raw string unchanged on parse failure.
+// Delegates to pkg/clientip.PeerIP.
 func peerIP(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err != nil {
-		return remoteAddr
-	}
-	return host
+	return clientip.PeerIP(remoteAddr)
 }
 
 // inCIDRList reports whether ip is contained in any of the given CIDRs.
+// Delegates to pkg/clientip.InCIDRList.
 func inCIDRList(ipStr string, cidrs []*net.IPNet) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	for _, cidr := range cidrs {
-		if cidr.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return clientip.InCIDRList(ipStr, cidrs)
 }
 
 // realIPFromHeaders extracts the leftmost address from X-Forwarded-For (or
 // X-Real-IP if XFF is absent), mirroring chi's middleware.RealIP logic.
 // Returns "" if no usable header is present.
 func realIPFromHeaders(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// XFF is a comma-separated list; the leftmost entry is the original client.
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			xff = xff[:idx]
-		}
-		xff = strings.TrimSpace(xff)
-		if xff != "" {
-			return xff
-		}
+	if v := clientip.FromXFF(r.Header.Get("X-Forwarded-For")); v != "" {
+		return v
 	}
-	return strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	return clientip.FromXFF(r.Header.Get("X-Real-IP"))
 }
 
 // TrustedProxyMiddleware returns an HTTP middleware that sets r.RemoteAddr to
