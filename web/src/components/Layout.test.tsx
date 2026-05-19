@@ -132,4 +132,9 @@ describe("Layout nav role-gating", () => {
     expect(screen.getByRole("link", { name: /^tokens$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^account$/i })).toBeInTheDocument();
   });
+
+  it("nav links use the design-system .nav-item class", () => {
+    renderLayout();
+    expect(screen.getByRole("link", { name: /^tunnels$/i }).className).toContain("nav-item");
+  });
 });
