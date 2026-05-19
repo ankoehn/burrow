@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/store"
 )
@@ -134,6 +136,7 @@ func (d Deps) ListServices(w http.ResponseWriter, r *http.Request) {
 			AccessMode:   sv.AccessMode,
 			APIKeyHeader: sv.APIKeyHeader,
 			Connected:    snap.Connected,
+			RemotePort:   snap.RemotePort,
 			LocalAddr:    snap.LocalAddr,
 		}
 	}
@@ -171,6 +174,7 @@ func (d Deps) GetService(w http.ResponseWriter, r *http.Request) {
 			AccessMode:   det.AccessMode,
 			APIKeyHeader: det.APIKeyHeader,
 			Connected:    snap.Connected,
+			RemotePort:   snap.RemotePort,
 			LocalAddr:    snap.LocalAddr,
 		},
 		APIKeyCount:  det.APIKeyCount,
@@ -335,6 +339,14 @@ func (d Deps) SetAccessPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Roles == nil {
 		in.Roles = []string{}
+	}
+	// Spec Part D: pre-validate each role before calling the store so the error
+	// body can include the offending role name: {"error":"unknown role \"<r>\""}
+	for _, roleName := range in.Roles {
+		if _, ok := authz.Get(roleName); !ok {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown role %q", roleName))
+			return
+		}
 	}
 	role, err := d.callerRole(r)
 	if err != nil {

@@ -27,8 +27,17 @@ type ServiceStore interface {
 // composes into service responses. It deliberately contains only the fields
 // the handlers need, keeping the interface narrow and test-friendly.
 type LiveTunnelSnapshot struct {
-	LocalAddr string
-	Connected bool
+	LocalAddr  string
+	Connected  bool
+	RemotePort int // non-zero for tcp services; 0 for http services
+}
+
+// TunnelLocator holds the service and user association for a live tunnel,
+// used by the v0.2 PUT /tunnels/{id}/access-mode back-compat path to resolve
+// a tunnelID → serviceID before delegating to the service store.
+type TunnelLocator struct {
+	ServiceID string
+	UserID    string
 }
 
 // LiveTunnelLookup is the narrow interface the service handlers use to query
@@ -40,6 +49,9 @@ type LiveTunnelLookup interface {
 	// given serviceID. ok is false when no connected tunnel is registered for
 	// that service.
 	LookupByServiceID(serviceID string) (LiveTunnelSnapshot, bool)
+	// LookupByTunnelID resolves a tunnel's runtime ID to its service + user.
+	// ok is false when no live tunnel with that ID is registered.
+	LookupByTunnelID(tunnelID string) (TunnelLocator, bool)
 }
 
 // UserStore is the subset of internal/store the API needs. *store.Store satisfies it.

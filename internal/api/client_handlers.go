@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/store"
 )
 
 // ListClients returns live clients grouped with aggregate traffic (admin only).
@@ -51,6 +52,12 @@ type accessModeReq struct {
 // /api/v1/tunnels/{id}/access-mode. Scoped to the caller (own tunnels);
 // 'open' is runtime-effective, 'api_key'/'burrow_login' are accepted and
 // persisted but inert in v0.2.0.
+//
+// v0.3 back-compat: when d.LiveTunnels is wired and the tunnel ID resolves to
+// a live entry, the handler delegates to d.Services.SetServiceAccessMode on
+// the service row (the v0.3 canonical path). If d.LiveTunnels is nil or the
+// tunnel has no live entry, it falls back to the legacy
+// d.AccessModes.SetTunnelAccessMode path (keeps v0.2 tests green).
 func (d Deps) SetAccessMode(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
@@ -59,6 +66,28 @@ func (d Deps) SetAccessMode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "access_mode is required")
 		return
 	}
+
+	// v0.3 delegation path: resolve tunnelID → serviceID via live registry.
+	if d.LiveTunnels != nil {
+		if loc, ok := d.LiveTunnels.LookupByTunnelID(id); ok {
+			callerRole, err := d.callerRole(r)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			uid := userID(r.Context())
+			if err := d.Services.SetServiceAccessMode(r.Context(), uid, callerRole, loc.ServiceID, in.AccessMode, ""); err != nil {
+				if !mapServiceErr(w, err, "service not found") {
+					writeErr(w, http.StatusInternalServerError, "set access mode failed")
+				}
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+
+	// Legacy v0.2 path: write the tunnels.access_mode column directly.
 	err := d.AccessModes.SetTunnelAccessMode(r.Context(), id, userID(r.Context()), in.AccessMode)
 	if errors.Is(err, db.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "tunnel not found")
@@ -67,7 +96,7 @@ func (d Deps) SetAccessMode(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// store.ErrInvalidAccessMode surfaces as a 400 (its message contains
 		// the allowed set); any other error is a 500.
-		if strings.Contains(err.Error(), "access_mode must be") {
+		if strings.Contains(err.Error(), "access_mode must be") || errors.Is(err, store.ErrInvalidAccessMode) {
 			writeErr(w, http.StatusBadRequest, "access_mode must be 'open', 'api_key', or 'burrow_login'")
 			return
 		}

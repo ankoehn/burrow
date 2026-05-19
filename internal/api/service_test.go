@@ -86,17 +86,29 @@ func (f *fakeServiceStore) SetAccessPolicy(_ context.Context, _, _, _ string, ro
 
 // fakeLiveTunnels satisfies LiveTunnelLookup.
 type fakeLiveTunnels struct {
-	svcID     string
-	localAddr string
-	connected bool
-	exists    bool
+	svcID      string
+	localAddr  string
+	connected  bool
+	remotePort int
+	exists     bool
+
+	// tunnelID → locator mapping for LookupByTunnelID (Fix 3).
+	tunnelID  string
+	tunnelLoc TunnelLocator
 }
 
 func (f fakeLiveTunnels) LookupByServiceID(serviceID string) (LiveTunnelSnapshot, bool) {
 	if !f.exists || serviceID != f.svcID {
 		return LiveTunnelSnapshot{}, false
 	}
-	return LiveTunnelSnapshot{LocalAddr: f.localAddr, Connected: f.connected}, true
+	return LiveTunnelSnapshot{LocalAddr: f.localAddr, Connected: f.connected, RemotePort: f.remotePort}, true
+}
+
+func (f fakeLiveTunnels) LookupByTunnelID(tunnelID string) (TunnelLocator, bool) {
+	if f.tunnelID == "" || tunnelID != f.tunnelID {
+		return TunnelLocator{}, false
+	}
+	return f.tunnelLoc, true
 }
 
 // ---------------------------------------------------------------------------
@@ -706,6 +718,8 @@ func TestSetAccessPolicy_OK(t *testing.T) {
 }
 
 func TestSetAccessPolicy_UnknownRole_400(t *testing.T) {
+	// The store error is now a fallback; pre-validation fires first and must
+	// include the offending role name in the body (spec Part D).
 	ss := &fakeServiceStore{setPolicyErr: store.ErrUnknownRole}
 	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
 	defer srv.Close()
@@ -718,6 +732,10 @@ func TestSetAccessPolicy_UnknownRole_400(t *testing.T) {
 	}
 	if !strings.Contains(body, "unknown role") {
 		t.Errorf("want 'unknown role' in body, got: %s", body)
+	}
+	// Spec Part D: body must include the offending role name.
+	if !strings.Contains(body, "superuser") {
+		t.Errorf("want offending role name 'superuser' in body, got: %s", body)
 	}
 }
 
@@ -744,6 +762,216 @@ func TestSetAccessPolicy_ServiceNotFound(t *testing.T) {
 	r.Body.Close()
 	if r.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", r.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 1: remote_port populated from live tunnel registry
+// ---------------------------------------------------------------------------
+
+// TestRemotePort_TCP_LiveTunnel verifies that a tcp service with a live tunnel
+// having RemotePort=9000 returns remote_port=9000 in both list and detail.
+func TestRemotePort_TCP_LiveTunnel(t *testing.T) {
+	ss := &fakeServiceStore{
+		listSvcs: []store.ServiceView{
+			{ID: "tcp1", Name: "db", Type: "tcp"},
+		},
+		getSvc: store.ServiceDetail{
+			ServiceView: store.ServiceView{ID: "tcp1", Name: "db", Type: "tcp"},
+		},
+	}
+	lt := fakeLiveTunnels{
+		svcID:      "tcp1",
+		localAddr:  "127.0.0.1:5432",
+		connected:  true,
+		remotePort: 9000,
+		exists:     true,
+	}
+	srv, c := newServiceServer(t, newServiceDeps(ss, lt, ""))
+	defer srv.Close()
+
+	// List endpoint
+	r := c.get(t, "/api/v1/services")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("list: want 200, got %d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var list []serviceResp
+	json.NewDecoder(r.Body).Decode(&list)
+	r.Body.Close()
+	if len(list) != 1 {
+		t.Fatalf("want 1 service, got %d", len(list))
+	}
+	if list[0].RemotePort != 9000 {
+		t.Errorf("list remote_port: want 9000, got %d", list[0].RemotePort)
+	}
+
+	// Detail endpoint
+	r2 := c.get(t, "/api/v1/services/tcp1")
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("detail: want 200, got %d body=%s", r2.StatusCode, readBody(t, r2))
+	}
+	var det serviceDetailResp
+	json.NewDecoder(r2.Body).Decode(&det)
+	r2.Body.Close()
+	if det.RemotePort != 9000 {
+		t.Errorf("detail remote_port: want 9000, got %d", det.RemotePort)
+	}
+}
+
+// TestRemotePort_HTTP_LiveTunnel verifies that an http service with no
+// RemotePort in its snapshot returns remote_port=0.
+func TestRemotePort_HTTP_LiveTunnel(t *testing.T) {
+	ss := &fakeServiceStore{
+		listSvcs: []store.ServiceView{
+			{ID: "h1", Name: "web", Type: "http"},
+		},
+		getSvc: store.ServiceDetail{
+			ServiceView: store.ServiceView{ID: "h1", Name: "web", Type: "http"},
+		},
+	}
+	lt := fakeLiveTunnels{
+		svcID:     "h1",
+		localAddr: "127.0.0.1:3000",
+		connected: true,
+		// remotePort is 0 (zero value) — http services don't have a remote port
+		exists: true,
+	}
+	srv, c := newServiceServer(t, newServiceDeps(ss, lt, ""))
+	defer srv.Close()
+
+	r := c.get(t, "/api/v1/services")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", r.StatusCode)
+	}
+	var list []serviceResp
+	json.NewDecoder(r.Body).Decode(&list)
+	r.Body.Close()
+	if len(list) != 1 || list[0].RemotePort != 0 {
+		t.Errorf("http service remote_port: want 0, got %d", list[0].RemotePort)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 3: v0.2 PUT /tunnels/{id}/access-mode delegates via live registry
+// ---------------------------------------------------------------------------
+
+// fakeServiceStoreV3 captures SetServiceAccessMode calls for the v0.3 delegation test.
+type fakeServiceStoreV3 struct {
+	fakeServiceStore
+	capturedServiceID string
+	capturedMode      string
+}
+
+func (f *fakeServiceStoreV3) SetServiceAccessMode(_ context.Context, _, _, serviceID, mode, _ string) error {
+	f.capturedServiceID = serviceID
+	f.capturedMode = mode
+	return nil
+}
+
+// TestSetAccessMode_V3_Delegation verifies that PUT /api/v1/tunnels/{tunnelID}/access-mode
+// calls store.SetServiceAccessMode when d.LiveTunnels resolves the tunnel.
+func TestSetAccessMode_V3_Delegation(t *testing.T) {
+	ss := &fakeServiceStoreV3{}
+	lt := fakeLiveTunnels{
+		tunnelID:  "tn-live",
+		tunnelLoc: TunnelLocator{ServiceID: "svc-abc", UserID: "u-self"},
+	}
+	d := Deps{
+		Users:       &fakeUserStore{role: "user"},
+		Services:    ss,
+		LiveTunnels: lt,
+		Log:         discardLog(),
+		// AccessModes is intentionally nil — v0.3 path must not call it.
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/tunnels/tn-live/access-mode", map[string]string{"access_mode": "open"})
+	r.Body.Close()
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", r.StatusCode)
+	}
+	if ss.capturedServiceID != "svc-abc" {
+		t.Errorf("serviceID: want svc-abc, got %q", ss.capturedServiceID)
+	}
+	if ss.capturedMode != "open" {
+		t.Errorf("mode: want open, got %q", ss.capturedMode)
+	}
+}
+
+// TestSetAccessMode_V3_Forbidden verifies that the v0.3 path surfaces 403
+// when the store's permission gate returns ErrForbidden.
+func TestSetAccessMode_V3_Forbidden(t *testing.T) {
+	ss := &fakeServiceStore{setModeErr: store.ErrForbidden}
+	lt := fakeLiveTunnels{
+		tunnelID:  "tn-live",
+		tunnelLoc: TunnelLocator{ServiceID: "svc-other", UserID: "u-other"},
+	}
+	d := Deps{
+		Users:       &fakeUserStore{role: "user"},
+		Services:    ss,
+		LiveTunnels: lt,
+		Log:         discardLog(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/tunnels/tn-live/access-mode", map[string]string{"access_mode": "open"})
+	r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", r.StatusCode)
+	}
+}
+
+// TestSetAccessMode_V3_TunnelNotInRegistry verifies the legacy fallback when
+// the tunnelID is not found in the live registry (LiveTunnels is non-nil but
+// returns ok=false). Requires d.AccessModes to handle the call.
+func TestSetAccessMode_V3_TunnelNotInRegistry(t *testing.T) {
+	as := &fakeAccessSetter{}
+	lt := fakeLiveTunnels{} // tunnelID empty → LookupByTunnelID always returns ok=false
+	d := Deps{
+		Users:       &fakeUserStore{role: "user"},
+		AccessModes: as,
+		LiveTunnels: lt,
+		Log:         discardLog(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/tunnels/tn-legacy/access-mode", map[string]string{"access_mode": "open"})
+	r.Body.Close()
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204 (legacy fallback), got %d", r.StatusCode)
+	}
+	if as.mode != "open" {
+		t.Errorf("legacy mode: want open, got %q", as.mode)
+	}
+}
+
+// TestSetAccessMode_V3_LiveTunnelsNil verifies the legacy fallback when
+// d.LiveTunnels is nil (v0.2 wiring, Task 12 not yet wired).
+func TestSetAccessMode_V3_LiveTunnelsNil(t *testing.T) {
+	as := &fakeAccessSetter{}
+	d := Deps{
+		Users:       &fakeUserStore{role: "user"},
+		AccessModes: as,
+		LiveTunnels: nil,
+		Log:         discardLog(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/tunnels/tn1/access-mode", map[string]string{"access_mode": "open"})
+	r.Body.Close()
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204 (nil LiveTunnels fallback), got %d", r.StatusCode)
+	}
+	if as.mode != "open" {
+		t.Errorf("mode: want open, got %q", as.mode)
 	}
 }
 
