@@ -1,0 +1,68 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
+import { apiFetch, ApiError } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
+import { Button, Input, Badge, SkeletonRows } from "@/components/ds";
+import type { ClientView } from "@/lib/contract";
+
+export default function Clients() {
+  const [q, setQ] = useState("");
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["clients"],
+    queryFn: () => apiFetch<ClientView[]>("/clients"),
+    retry: false,
+    refetchInterval: 30000,
+  });
+
+  if (error) {
+    return (
+      <div className="users-page">
+        <div className="page-head"><div><h1>Clients</h1></div></div>
+        <div className="notice-block error">
+          <div className="icon-bubble"><AlertTriangle size={18} /></div>
+          <p role="alert">Couldn't load clients: {error instanceof ApiError ? error.message : "Unknown error"}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = (data ?? []).filter((c) =>
+    `${c.token_name} ${c.session_id}`.toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <div className="users-page">
+      <div className="page-head">
+        <div><h1>Clients</h1><p className="sub">Machines running burrow connected to this relay.</p></div>
+        <Link to="/clients/connect"><Button variant="primary" size="sm">Connect a client</Button></Link>
+      </div>
+      <div className="row gap-2" style={{ margin: "12px 0" }}>
+        <Input type="search" role="searchbox" aria-label="Search clients" placeholder="search by client or token…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      {isLoading ? (
+        <div className="table-wrap"><SkeletonRows n={5} /></div>
+      ) : rows.length === 0 ? (
+        <div className="state-card"><p>No clients connected</p></div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data" aria-label="Clients">
+            <thead><tr><th>Client</th><th>Platform</th><th>Remote IP</th><th>Services</th><th>Traffic</th><th className="col-actions"></th></tr></thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.session_id}>
+                  <td>{c.token_name}<div className="muted mono">{c.session_id}</div></td>
+                  <td>{c.os} · burrow {c.client_version}</td>
+                  <td className="col-created">{c.remote_addr}</td>
+                  <td><Badge kind="" nodot>{c.service_count}</Badge></td>
+                  <td className="col-created">↓{formatBytes(c.total_bytes_in)} ↑{formatBytes(c.total_bytes_out)}</td>
+                  <td className="col-actions"><Link to={`/clients/${c.session_id}`}><Button variant="secondary" size="sm">View</Button></Link></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
