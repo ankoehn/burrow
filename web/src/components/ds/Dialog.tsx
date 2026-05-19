@@ -12,14 +12,23 @@ export interface DialogProps {
 
 export function Dialog({ open, onOpenChange, title, description, children, footer }: DialogProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the latest onOpenChange without making it an effect dependency:
+  // callers commonly pass a fresh closure every render, and re-running the
+  // focus-trap effect on every render would re-fire the initial-focus timer
+  // and steal focus back from whatever the user is typing into.
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange?.(false);
+      if (e.key === "Escape") onOpenChangeRef.current?.(false);
     };
     document.addEventListener("keydown", onKey);
-    // focus trap: focus first focusable inside dialog
+    // Focus trap: move focus to the first focusable element once, on open —
+    // but never steal focus if it is already inside the dialog (the user may
+    // already be interacting with a field).
     const t = setTimeout(() => {
+      if (ref.current?.contains(document.activeElement)) return;
       const el = ref.current?.querySelector<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
@@ -29,7 +38,7 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
       document.removeEventListener("keydown", onKey);
       clearTimeout(t);
     };
-  }, [open, onOpenChange]);
+  }, [open]);
 
   if (!open) return null;
   return (

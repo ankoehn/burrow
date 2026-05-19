@@ -26,5 +26,9 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   server: { proxy: { "/api": "http://localhost:8080" } },
   build: { outDir: "dist" },
-  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts", exclude: ["e2e/**", "node_modules/**"] },
+  // fileParallelism:false — the suite is timing-flaky under the parallel
+  // forks pool (worker-teardown races surface as sporadic, file-order-
+  // dependent failures); it is deterministically green run serially. Trades
+  // a little wall-clock for a trustworthy gate.
+  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts", exclude: ["e2e/**", "node_modules/**"], fileParallelism: false },
 });
