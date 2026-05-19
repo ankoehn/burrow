@@ -281,6 +281,42 @@ func TestProxyForwardingHeaders(t *testing.T) {
 	}
 }
 
+// TestProxyStripsXForwardedPortWhenIngressEmpty verifies that a visitor-supplied
+// X-Forwarded-Port header is stripped even when no ingressPort is configured
+// (i.e. WithIngressPort is not used). This is the trust-boundary requirement:
+// Burrow must unconditionally delete inbound X-Forwarded-Port so an attacker
+// cannot inject an arbitrary port value that propagates to upstream.
+func TestProxyStripsXForwardedPortWhenIngressEmpty(t *testing.T) {
+	var gotXFP string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotXFP = r.Header.Get("X-Forwarded-Port")
+		w.WriteHeader(http.StatusOK)
+	})
+	d := newFakeDialer(upstream)
+	d.register("noportlabel", &proxy.Resolved{ServiceID: "svc-noport", AccessMode: "open", LocalHost: "127.0.0.1:3000"})
+
+	// Intentionally NO WithIngressPort — default empty.
+	p := proxy.New(d, openChecker{}, authDomain, testLog())
+
+	ts := httptest.NewServer(p)
+	defer ts.Close()
+
+	req, _ := http.NewRequest("GET", ts.URL+"/", nil)
+	req.Host = "noportlabel." + authDomain
+	// Inject a spoofed X-Forwarded-Port — must NOT reach upstream.
+	req.Header.Set("X-Forwarded-Port", "9999")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotXFP != "" {
+		t.Errorf("X-Forwarded-Port should be empty (stripped), but upstream saw %q", gotXFP)
+	}
+}
+
 // TestProxySSEFlush is the core streaming / FlushInterval=-1 test.
 //
 // The upstream writes 3 SSE chunks 50 ms apart. The test captures the

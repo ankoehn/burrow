@@ -179,9 +179,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 3: build a per-request ReverseProxy.
 	//
 	// We use the Rewrite API (Go 1.20+) instead of Director. When Rewrite is
-	// used, httputil.ReverseProxy removes all X-Forwarded-*, Forwarded, and
-	// hop-by-hop headers from Out before calling Rewrite — giving us a clean
-	// slate to set our own authoritative values without any append/merge behavior.
+	// used, httputil.ReverseProxy removes Forwarded, X-Forwarded-For,
+	// X-Forwarded-Host, X-Forwarded-Proto (stdlib behavior); we explicitly
+	// Del X-Forwarded-Port below since stdlib does not auto-strip it.
+	// Hop-by-hop headers are also removed by the stdlib.
 	//
 	// FlushInterval=-1: disable internal buffering for SSE / chunked streaming.
 	// This is mandatory — LLM token streams and SSE must flush immediately.
@@ -189,12 +190,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		FlushInterval: -1,
 
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			// All X-Forwarded-*, Forwarded headers have been stripped from
-			// pr.Out by httputil before this function is called. We set only
-			// Burrow's authoritative values.
-			//
-			// Trust boundary: Burrow is the TLS edge. Visitors cannot inject
-			// forwarding headers — they are gone before we get here.
+			// Stdlib has stripped Forwarded, X-Forwarded-For, X-Forwarded-Host,
+			// and X-Forwarded-Proto from pr.Out before this function is called.
+			// X-Forwarded-Port is NOT auto-stripped by stdlib, so we delete it
+			// unconditionally here — Burrow is the trust boundary and a visitor
+			// must never be able to inject an arbitrary port value upstream.
+			pr.Out.Header.Del("X-Forwarded-Port")
+
+			// Set Burrow's authoritative forwarding values.
 			pr.Out.Header.Set("X-Forwarded-For", resolvedClientIP)
 			pr.Out.Header.Set("X-Forwarded-Proto", "https")
 			pr.Out.Header.Set("X-Forwarded-Host", label+"."+authDomain)
