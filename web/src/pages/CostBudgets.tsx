@@ -1,0 +1,203 @@
+import { useState } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { apiFetch, ApiError } from "@/lib/api";
+import { Button, Dialog, Input, Select, SkeletonRows } from "@/components/ds";
+import type { Budget, CostSummary } from "@/lib/contract";
+
+type Window = CostSummary["window"];
+
+const WINDOWS: Window[] = ["today", "week", "month", "year"];
+const WINDOW_LABEL: Record<Window, string> = {
+  today: "Today", week: "Week", month: "Month", year: "Year",
+};
+
+const SCOPE_OPTIONS = [
+  { value: "api_key", label: "API key" },
+  { value: "service", label: "Service" },
+  { value: "user", label: "User" },
+  { value: "global", label: "Global" },
+];
+const ACTION_OPTIONS = [
+  { value: "alert_webhook", label: "Alert webhook" },
+  { value: "throttle_zero", label: "Throttle to zero" },
+  { value: "disable_key", label: "Disable key" },
+];
+
+function fmtUsd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+function pctClass(pct: number | null): string {
+  if (pct == null) return "ok";
+  if (pct >= 0.8) return "danger";
+  if (pct >= 0.5) return "warn";
+  return "ok";
+}
+
+function SpendTile({ w, summary }: { w: Window; summary: CostSummary | undefined }) {
+  return (
+    <div role="group" aria-label={`${WINDOW_LABEL[w]} spend metric`} className="metric-tile">
+      <div className="metric-label">{WINDOW_LABEL[w]}</div>
+      <div className="metric-value mono">{summary ? fmtUsd(summary.total_usd) : "—"}</div>
+      <div className="metric-sub muted mono">
+        {summary ? `${summary.tokens_in.toLocaleString()} → ${summary.tokens_out.toLocaleString()}` : "—"}
+      </div>
+      <div className={`pct-bar ${pctClass(summary?.pct_of_budget ?? null)}`} style={{ height: 4 }} />
+    </div>
+  );
+}
+
+export default function CostBudgets() {
+  const qc = useQueryClient();
+  const cost = useQueries({
+    queries: WINDOWS.map((w) => ({
+      queryKey: ["cost", "summary", w],
+      queryFn: () => apiFetch<CostSummary>(`/cost/summary?window=${w}`),
+      retry: false,
+      staleTime: 60_000,
+    })),
+  });
+  const budgets = useQuery({
+    queryKey: ["budgets"],
+    queryFn: () => apiFetch<Budget[]>("/budgets"),
+    retry: false,
+  });
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [scope, setScope] = useState<Budget["scope"]>("api_key");
+  const [subjectId, setSubjectId] = useState("");
+  const [dailyUsd, setDailyUsd] = useState("");
+  const [action, setAction] = useState<Budget["action_on_exceed"]>("alert_webhook");
+  const [err, setErr] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () =>
+      apiFetch<Budget>("/budgets", {
+        method: "POST",
+        body: JSON.stringify({
+          scope,
+          subject_id: subjectId,
+          daily_usd: Number(dailyUsd),
+          action_on_exceed: action,
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Budget created.");
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+      setAddOpen(false);
+      setSubjectId("");
+      setDailyUsd("");
+      setErr(null);
+    },
+    onError: (e: unknown) =>
+      setErr(e instanceof ApiError ? e.message : "Couldn't create budget."),
+  });
+
+  function submit() {
+    if (Number(dailyUsd) <= 0) {
+      setErr("daily_usd must be greater than zero");
+      return;
+    }
+    create.mutate();
+  }
+
+  if (!budgets.data) {
+    return (
+      <div className="cost-page">
+        <div className="page-head"><div><h1>Cost &amp; budgets</h1></div></div>
+        <SkeletonRows n={4} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="cost-page">
+      <div className="page-head">
+        <div>
+          <h1>Cost &amp; budgets</h1>
+          <p className="muted">
+            Estimates from the pricing table shipped with Burrow v0.4. Operators can edit
+            this table in Settings.
+          </p>
+        </div>
+        <div className="row gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void apiFetch("/cost/export?format=ndjson&window=month"); }}
+          >
+            Export cost report
+          </Button>
+        </div>
+      </div>
+
+      <div className="metric-strip" role="list" aria-label="Spend by window">
+        {WINDOWS.map((w, i) => (
+          <SpendTile key={w} w={w} summary={cost[i]!.data} />
+        ))}
+      </div>
+
+      <section className="card">
+        <h2>Budgets</h2>
+        <div className="row gap-2" style={{ marginBottom: 8 }}>
+          <Button variant="primary" size="sm" onClick={() => { setAddOpen(true); setErr(null); }}>
+            Add budget
+          </Button>
+        </div>
+        <div className="table-wrap">
+          <table className="data" aria-label="Budgets">
+            <thead><tr><th>Scope</th><th>Subject</th><th>Daily $</th><th>On exceed</th><th>Spend</th></tr></thead>
+            <tbody>
+              {budgets.data.length === 0
+                ? <tr><td colSpan={5} className="muted">No budgets yet.</td></tr>
+                : budgets.data.map((b) => (
+                    <tr key={b.id}>
+                      <td>{b.scope}</td>
+                      <td className="mono">{b.subject_id}</td>
+                      <td className="mono">{fmtUsd(b.daily_usd)}</td>
+                      <td>{b.action_on_exceed}</td>
+                      <td className="mono">{fmtUsd(b.current_usd)}</td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <Dialog
+        open={addOpen}
+        onOpenChange={(o) => { setAddOpen(o); if (!o) setErr(null); }}
+        title="Add budget"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button variant="primary" disabled={create.isPending} onClick={submit}>
+              Create
+            </Button>
+          </>
+        }
+      >
+        <div className="field">
+          <label htmlFor="budget-scope">Scope</label>
+          <Select id="budget-scope" value={scope} onChange={(v) => setScope(v as Budget["scope"])} options={SCOPE_OPTIONS} />
+        </div>
+        <div className="field">
+          <label htmlFor="budget-subject">Subject</label>
+          <Input id="budget-subject" className="mono" value={subjectId} onChange={(e) => setSubjectId(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="budget-daily">Daily USD</label>
+          <Input id="budget-daily" type="number" className="mono" value={dailyUsd} onChange={(e) => setDailyUsd(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="budget-action">Action on exceed</label>
+          <Select id="budget-action" value={action} onChange={(v) => setAction(v as Budget["action_on_exceed"])} options={ACTION_OPTIONS} />
+        </div>
+        {err && <p role="alert" className="notice-inline error">{err}</p>}
+      </Dialog>
+      <Toaster />
+    </div>
+  );
+}

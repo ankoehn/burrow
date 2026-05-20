@@ -17,6 +17,7 @@ import AiEndpointDetail from "@/pages/AiEndpointDetail";
 import PromptCache from "@/pages/PromptCache";
 import Guardrails from "@/pages/Guardrails";
 import RequestInspector from "@/pages/RequestInspector";
+import CostBudgets from "@/pages/CostBudgets";
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/cache" element={<PromptCache />} />
         <Route path="/guardrails" element={<Guardrails />} />
         <Route path="/inspector/:serviceId/:requestId?" element={<RequestInspector />} />
+        <Route path="/cost" element={<CostBudgets />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />

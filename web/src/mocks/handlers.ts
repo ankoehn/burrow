@@ -474,4 +474,49 @@ export const handlers = [
   }),
   http.get("/api/v1/guardrails/patterns", ({ request }) =>
     gate(request, { admin: true }) ?? json(db.guardrailPatterns)),
+
+  // ---- v0.4.0 cost/pricing (spec §4.24) ----
+  http.get("/api/v1/cost/pricing", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.pricing)),
+  http.put("/api/v1/cost/pricing", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<MockDb["pricing"]>(request);
+    if (!b) return err(400, "invalid pricing table");
+    db.pricing = b;
+    return noContent();
+  }),
+  http.get("/api/v1/cost/export", ({ request }) => {
+    const g = gate(request); if (g) return g;
+    return new HttpResponse("# burrow cost export (stub)\n", {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }),
+  http.get("/api/v1/budgets", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.budgets)),
+  http.post("/api/v1/budgets", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<Partial<MockDb["budgets"][number]>>(request);
+    if (!b || typeof b.daily_usd !== "number" || b.daily_usd <= 0)
+      return err(400, "daily_usd must be greater than zero");
+    const rec: MockDb["budgets"][number] = {
+      id: `bdg_${Math.random().toString(36).slice(2, 8)}`,
+      scope: b.scope ?? "api_key",
+      subject_id: b.subject_id ?? "",
+      daily_usd: b.daily_usd,
+      action_on_exceed: b.action_on_exceed ?? "alert_webhook",
+      alert_webhook_id: b.alert_webhook_id ?? null,
+      current_usd: 0,
+      exceeded: false,
+    };
+    db.budgets.push(rec);
+    return json(rec, 201);
+  }),
+  http.delete("/api/v1/budgets/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.budgets.findIndex((b) => b.id === params.id);
+    if (i < 0) return err(404, "budget not found");
+    db.budgets.splice(i, 1);
+    return noContent();
+  }),
 ];

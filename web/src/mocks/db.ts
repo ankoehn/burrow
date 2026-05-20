@@ -2,7 +2,7 @@ import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
-  GuardrailSettings,
+  GuardrailSettings, Budget, PricingTable,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -51,6 +51,8 @@ export interface MockDb {
   redactionSettings: RedactionSettings;
   guardrailSettings: GuardrailSettings;
   guardrailPatterns: string[];
+  budgets: Budget[];
+  pricing: PricingTable;
 }
 
 function seed(): MockDb {
@@ -151,6 +153,17 @@ function seed(): MockDb {
       "jailbreak",
       "developer mode",
     ],
+    budgets: [
+      { id: "bdg_ci", scope: "api_key", subject_id: "sak_ci01", daily_usd: 10, action_on_exceed: "alert_webhook", alert_webhook_id: null, current_usd: 5, exceeded: false },
+    ],
+    pricing: {
+      version: "v0.4.0",
+      entries: [
+        { provider: "openai", model: "gpt-4o", input_per_million: 5, output_per_million: 15 },
+        { provider: "anthropic", model: "claude-sonnet-4-6", input_per_million: 3, output_per_million: 15 },
+        { provider: "ollama", model: "llama3.1:8b", input_per_million: 0, output_per_million: 0 },
+      ],
+    },
   };
 }
 
