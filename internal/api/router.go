@@ -104,6 +104,17 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)
 			r.Post("/auth/change-password", d.ChangePassword)
+			// v0.4.0 Task 20: backup / restore JSON API (spec Part L.3).
+			// All routes are gated by requireBackupRun (admin OR
+			// authz.PermBackupRun). The download streams application/x-gzip;
+			// every other route is JSON. POST /backups/restore is multipart.
+			r.With(d.requireBackupRun).Get("/backups", d.GetBackups)
+			r.With(d.requireBackupRun).Post("/backups", d.PostBackup)
+			r.With(d.requireBackupRun).Get("/backups/{id}/download", d.GetBackupDownload)
+			r.With(d.requireBackupRun).Post("/backups/{id}/verify", d.PostBackupVerify)
+			r.With(d.requireBackupRun).Delete("/backups/{id}", d.DeleteBackup)
+			r.With(d.requireBackupRun).Post("/backups/restore", d.PostBackupRestore)
+			r.With(d.requireBackupRun).Get("/backups/restores/{id}", d.GetBackupRestoreStatus)
 			// v0.4.0 Task 19: WebAuthn passkey enrollment + credential
 			// management. register/begin + register/finish issue and
 			// validate attestation; list/delete manage the per-user

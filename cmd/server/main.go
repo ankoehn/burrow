@@ -354,6 +354,13 @@ func main() {
 					"or terminate TLS at a proxy and set BURROW_HTTP_SECURE_COOKIES=true")
 			}
 
+			// v0.4.0 Task 20: backup directory + runners. Defaults to
+			// <DatabasePath>.backups/ so a stock deployment gets a working
+			// JSON API out of the box; operators may pin a dedicated
+			// location via BURROW_BACKUP_DIR in a future task.
+			backupDir := cfg.DatabasePath + ".backups"
+			restoreTracker := api.NewRestoreTracker()
+
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
 				Handler: api.NewRouter(api.Deps{
@@ -367,6 +374,11 @@ func main() {
 					Services:    st,
 					LiveTunnels: liveTunnelLookupAdapter{srv: srv},
 					AuthDomain:  cfg.AuthDomain,
+					// v0.4.0 Task 20: backup / restore wiring.
+					BackupDir:      backupDir,
+					BackupRunner:   backupRunnerAdapter{cfg: cfg},
+					RestoreRunner:  restoreRunnerAdapter{cfg: cfg},
+					RestoreTracker: restoreTracker,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
@@ -563,6 +575,13 @@ func main() {
 	}
 	auditCmd.AddCommand(newAuditVerifyCmd())
 	root.AddCommand(auditCmd)
+
+	// v0.4.0 Task 20: `burrowd backup` + `burrowd restore` CLIs. Both are
+	// stand-alone top-level commands so the operator may run them against
+	// any database file (the same path-resolution config.LoadServer uses
+	// for serve), without needing a running burrowd.
+	root.AddCommand(newBackupCmd())
+	root.AddCommand(newRestoreCmd())
 
 	root.AddCommand(&cobra.Command{
 		Use:   "version",

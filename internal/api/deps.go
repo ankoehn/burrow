@@ -344,6 +344,35 @@ type Deps struct {
 	// every /auth/webauthn/* route (handlers return 503
 	// "webauthn unavailable"); password login still works in that case.
 	WebAuthn WebAuthnProvider
+
+	// v0.4.0 Task 20: backup / restore JSON API (spec Part L).
+	// BackupDir is the on-disk directory the GET /backups handler scans and
+	// where POST /backups writes new archives. Empty disables every
+	// /backups route (handlers return 500 "backup directory not
+	// configured"). cmd/server defaults this to <DatabasePath>.backups/.
+	BackupDir string
+	// BackupRunner is invoked by POST /api/v1/backups to actually produce
+	// the .tar.gz at the supplied path. cmd/server wires a thin adapter
+	// over runBackup; tests substitute a fake. Nil makes POST return 500
+	// "backup runner unavailable".
+	BackupRunner BackupRunner
+	// RestoreRunner is invoked by POST /api/v1/backups/restore to extract
+	// the uploaded archive and swap it into the live database. cmd/server
+	// wires a thin adapter over runRestore. Nil keeps the upload working
+	// (the staged file lands on disk) but the tracker reports failure with
+	// a "restore runner unavailable" message, instructing the operator to
+	// run `burrowd restore` against the staged file.
+	RestoreRunner RestoreRunner
+	// RestoreTracker is the in-memory ULID → status map keyed by
+	// restore_id. cmd/server constructs a singleton with NewRestoreTracker.
+	// Nil makes the POST + status routes return 500 "restore tracker
+	// unavailable".
+	RestoreTracker *restoreTracker
+	// AuditAppender writes the audit.backup.run / audit.backup.restore
+	// rows. *audit.Logger satisfies it directly. Nil silently skips the
+	// audit append (the JSON route still succeeds; the chain just doesn't
+	// reflect the API-driven mutation).
+	AuditAppender AuditAppender
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup
