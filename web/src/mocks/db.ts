@@ -3,7 +3,7 @@ import type {
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
-  WebhookDelivery,
+  WebhookDelivery, WebAuthnCredential,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -57,6 +57,7 @@ export interface MockDb {
   audit: AuditEvent[];
   webhooks: Webhook[];
   webhookDeliveries: WebhookDelivery[];
+  webauthnCredentials: WebAuthnCredential[];
 }
 
 function seed(): MockDb {
@@ -181,6 +182,9 @@ function seed(): MockDb {
     webhookDeliveries: [
       { id: "wd_001", webhook_id: "wh_ops", event: "audit.tokens.create", ts: "2026-05-19T07:00:00Z", url: "https://example.com/hook", status_code: 502, attempt: 1, latency_ms: 100, request_body_preview: "{...}", response_body_preview: "gateway" },
       { id: "wd_002", webhook_id: "wh_ops", event: "audit.tokens.create", ts: "2026-05-19T07:00:05Z", url: "https://example.com/hook", status_code: 502, attempt: 2, latency_ms: 110, request_body_preview: "{...}", response_body_preview: "gateway" },
+    ],
+    webauthnCredentials: [
+      { id: "wc_yubi5", label: "YubiKey 5", created_at: "2026-04-01T08:00:00Z", last_used: "2026-05-15T09:00:00Z" },
     ],
   };
 }

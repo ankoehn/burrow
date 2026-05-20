@@ -4,9 +4,58 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
 import { Button, Input } from "@/components/ds";
-import type { Session } from "@/lib/contract";
+import type { Session, WebAuthnCredential } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { WebAuthnRegisterButton } from "@/components/WebAuthnRegisterButton";
+
+function SecurityKeys() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["webauthn", "credentials"],
+    queryFn: () => apiFetch<WebAuthnCredential[]>("/auth/webauthn/credentials"),
+    retry: false,
+  });
+  const revoke = useMutation({
+    mutationFn: (id: string) => apiFetch(`/auth/webauthn/credentials/${id}`, { method: "DELETE" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["webauthn", "credentials"] }); toast.success("Passkey revoked"); },
+  });
+  return (
+    <section className="account-section" aria-labelledby="sec-passkeys">
+      <div className="section-head">
+        <div className="left">
+          <h2 id="sec-passkeys">Security keys (passkeys)</h2>
+          <p className="muted">
+            Passkeys are an unphishable alternative to your password. Add at least one
+            device-bound key for added security.
+          </p>
+        </div>
+        <WebAuthnRegisterButton />
+      </div>
+      {isLoading ? <p className="muted">Loading…</p> : (
+        <div className="table-wrap">
+          <table className="data" aria-label="Passkeys">
+            <thead><tr><th>Label</th><th>Created</th><th>Last used</th><th className="col-actions"></th></tr></thead>
+            <tbody>
+              {(data ?? []).length === 0
+                ? <tr><td colSpan={4} className="muted">No passkeys yet.</td></tr>
+                : (data ?? []).map((c) => (
+                    <tr key={c.id}>
+                      <td>{c.label}</td>
+                      <td className="col-created">{formatTimestamp(c.created_at)}</td>
+                      <td className="col-created">{formatTimestamp(c.last_used)}</td>
+                      <td className="col-actions">
+                        <Button variant="ghost" size="sm" onClick={() => revoke.mutate(c.id)}>Revoke</Button>
+                      </td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function ActiveSessions() {
   const qc = useQueryClient();
@@ -184,6 +233,7 @@ export default function Account() {
           </div>
         </form>
       </section>
+      <SecurityKeys />
       <ActiveSessions />
       <Toaster />
     </div>

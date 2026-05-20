@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ds";
+import { WebAuthnLoginButton } from "@/components/WebAuthnLoginButton";
 
 /* Brand mark — geometric tunnel-and-arrow glyph (currentColor). */
 function BurrowMark({ size = 26 }: { size?: number }) {
@@ -86,6 +87,9 @@ export default function Login() {
           </div>
 
           <Button type="submit" variant="primary" className="signin-submit">Sign in</Button>
+          <div style={{ marginTop: 8 }}>
+            <WebAuthnLoginButton />
+          </div>
 
           {err && (
             <div className="signin-error" role="alert" aria-live="polite">

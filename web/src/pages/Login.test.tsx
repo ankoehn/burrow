@@ -33,7 +33,7 @@ describe("Login", () => {
     setup();
     await userEvent.type(screen.getByLabelText("Email"), "a@x");
     await userEvent.type(screen.getByLabelText("Password"), "bad");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid/i);
   });
 
@@ -42,13 +42,13 @@ describe("Login", () => {
     setup();
     await userEvent.type(screen.getByLabelText("Email"), "a@x");
     await userEvent.type(screen.getByLabelText("Password"), "pw");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
     expect(f).toHaveBeenCalledWith("/api/v1/auth/login", expect.objectContaining({ method: "POST" }));
   });
 
   it("submit button uses the design-system primary button class", () => {
     setup();
-    expect(screen.getByRole("button", { name: /sign in/i }).className).toContain("btn-primary");
+    expect(screen.getByRole("button", { name: /^sign in$/i }).className).toContain("btn-primary");
   });
 
   it("shows banner on 401 and stays on /login (no global redirect)", async () => {
@@ -58,7 +58,7 @@ describe("Login", () => {
     setupWithRoutes();
     await userEvent.type(screen.getByLabelText("Email"), "a@x");
     await userEvent.type(screen.getByLabelText("Password"), "bad");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
     // Error banner must appear — Login stays mounted, no redirect to HOME PAGE
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid/i);
     expect(screen.queryByText("HOME PAGE")).not.toBeInTheDocument();
