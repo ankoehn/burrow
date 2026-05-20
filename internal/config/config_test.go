@@ -537,3 +537,284 @@ func TestHTTPProxyTLSCertKeyFile(t *testing.T) {
 		t.Fatalf("http_proxy_tls_key from _FILE = %q, want /path/to/proxy-key.pem", c.HTTPProxyTLSKey)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 24 (v0.4.0): MCP listener, geo db, pricing override, WebAuthn RP,
+// backup dir, MCP token — defaults + env + _FILE + validation.
+// ---------------------------------------------------------------------------
+
+// TestV04DefaultsAllNewFields asserts every new v0.4.0 ServerConfig field
+// has the documented default when no env / overrides are set.
+//
+// Defaults (Task 24):
+//   MCPListen        ""     (MCP listener disabled)
+//   GeoDBPath        ""     (NoopGeoLookup)
+//   PricingPath      ""     (embedded pricing.yaml)
+//   WebAuthnRPID     "localhost"        (derived from default http_listen :8080)
+//   WebAuthnRPName   "Burrow"
+//   WebAuthnOrigin   "http://localhost:8080"
+//   BackupDir        "./burrow.db.backups"  (derived from default DatabasePath)
+//   BurrowMCPToken   ""     (empty; falls back to automation_tokens lookup)
+func TestV04DefaultsAllNewFields(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.MCPListen != "" {
+		t.Errorf("default mcp_listen = %q, want \"\"", c.MCPListen)
+	}
+	if c.GeoDBPath != "" {
+		t.Errorf("default geo_db_path = %q, want \"\"", c.GeoDBPath)
+	}
+	if c.PricingPath != "" {
+		t.Errorf("default pricing_path = %q, want \"\"", c.PricingPath)
+	}
+	if c.WebAuthnRPID != "localhost" {
+		t.Errorf("default webauthn_rp_id = %q, want \"localhost\" (derived from :8080)", c.WebAuthnRPID)
+	}
+	if c.WebAuthnRPName != "Burrow" {
+		t.Errorf("default webauthn_rp_name = %q, want \"Burrow\"", c.WebAuthnRPName)
+	}
+	if c.WebAuthnOrigin != "http://localhost:8080" {
+		t.Errorf("default webauthn_origin = %q, want \"http://localhost:8080\"", c.WebAuthnOrigin)
+	}
+	if c.BackupDir != "./burrow.db.backups" {
+		t.Errorf("default backup_dir = %q, want \"./burrow.db.backups\"", c.BackupDir)
+	}
+	if c.BurrowMCPToken != "" {
+		t.Errorf("default burrow_mcp_token = %q, want \"\"", c.BurrowMCPToken)
+	}
+}
+
+// TestMCPListenEnvOverride asserts BURROW_MCP_LISTEN takes effect.
+func TestMCPListenEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_MCP_LISTEN", ":7800")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.MCPListen != ":7800" {
+		t.Fatalf("mcp_listen = %q, want :7800", c.MCPListen)
+	}
+}
+
+// TestGeoDBPathEnvOverride asserts BURROW_GEO_DB_PATH takes effect.
+func TestGeoDBPathEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_GEO_DB_PATH", "/var/lib/burrow/GeoLite2.mmdb")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.GeoDBPath != "/var/lib/burrow/GeoLite2.mmdb" {
+		t.Fatalf("geo_db_path = %q, want /var/lib/burrow/GeoLite2.mmdb", c.GeoDBPath)
+	}
+}
+
+// TestPricingPathEnvOverride asserts BURROW_PRICING_PATH takes effect.
+func TestPricingPathEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_PRICING_PATH", "/etc/burrow/pricing.yaml")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.PricingPath != "/etc/burrow/pricing.yaml" {
+		t.Fatalf("pricing_path = %q, want /etc/burrow/pricing.yaml", c.PricingPath)
+	}
+}
+
+// TestWebAuthnRPIDEnvOverride asserts BURROW_WEBAUTHN_RP_ID takes effect
+// and that the explicit env value bypasses the derivation rule.
+func TestWebAuthnRPIDEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_WEBAUTHN_RP_ID", "dash.example.com")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.WebAuthnRPID != "dash.example.com" {
+		t.Fatalf("webauthn_rp_id = %q, want dash.example.com", c.WebAuthnRPID)
+	}
+}
+
+// TestWebAuthnRPNameEnvOverride asserts BURROW_WEBAUTHN_RP_NAME takes effect.
+func TestWebAuthnRPNameEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_WEBAUTHN_RP_NAME", "Acme Tunnels")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.WebAuthnRPName != "Acme Tunnels" {
+		t.Fatalf("webauthn_rp_name = %q, want Acme Tunnels", c.WebAuthnRPName)
+	}
+}
+
+// TestWebAuthnOriginEnvOverride asserts BURROW_WEBAUTHN_ORIGIN takes effect.
+func TestWebAuthnOriginEnvOverride(t *testing.T) {
+	t.Setenv("BURROW_WEBAUTHN_ORIGIN", "https://dash.example.com")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.WebAuthnOrigin != "https://dash.example.com" {
+		t.Fatalf("webauthn_origin = %q, want https://dash.example.com", c.WebAuthnOrigin)
+	}
+}
+
+// TestWebAuthnDerivationFromAuthDomain asserts that when auth_domain is set
+// and neither rp_id nor origin is explicitly provided, both derive from
+// auth_domain (rp_id := auth_domain, origin := https://auth_domain).
+func TestWebAuthnDerivationFromAuthDomain(t *testing.T) {
+	t.Setenv("BURROW_AUTH_DOMAIN", "tunnels.example.com")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.WebAuthnRPID != "tunnels.example.com" {
+		t.Fatalf("webauthn_rp_id derived = %q, want tunnels.example.com", c.WebAuthnRPID)
+	}
+	if c.WebAuthnOrigin != "https://tunnels.example.com" {
+		t.Fatalf("webauthn_origin derived = %q, want https://tunnels.example.com", c.WebAuthnOrigin)
+	}
+}
+
+// TestWebAuthnDerivationFromHTTPListen asserts that without auth_domain, the
+// rp_id and origin derive from http_listen (host:port).
+func TestWebAuthnDerivationFromHTTPListen(t *testing.T) {
+	t.Setenv("BURROW_HTTP_LISTEN", "127.0.0.1:9090")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.WebAuthnRPID != "127.0.0.1" {
+		t.Fatalf("webauthn_rp_id derived = %q, want 127.0.0.1", c.WebAuthnRPID)
+	}
+	if c.WebAuthnOrigin != "http://127.0.0.1:9090" {
+		t.Fatalf("webauthn_origin derived = %q, want http://127.0.0.1:9090", c.WebAuthnOrigin)
+	}
+}
+
+// TestWebAuthnRPIDRejectsScheme asserts that webauthn_rp_id with "://"
+// (operator misconfiguration) fails validation. The WebAuthn spec requires
+// a bare hostname for RP ID.
+func TestWebAuthnRPIDRejectsScheme(t *testing.T) {
+	_, err := LoadServer(map[string]any{"webauthn_rp_id": "https://foo.example.com"})
+	if err == nil {
+		t.Fatal("expected error for webauthn_rp_id with scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "scheme") && !strings.Contains(err.Error(), "://") {
+		t.Fatalf("error should mention scheme or ://, got: %v", err)
+	}
+}
+
+// TestWebAuthnOriginRequiresScheme asserts that webauthn_origin without an
+// http(s):// prefix fails validation.
+func TestWebAuthnOriginRequiresScheme(t *testing.T) {
+	_, err := LoadServer(map[string]any{"webauthn_origin": "example.com"})
+	if err == nil {
+		t.Fatal("expected error for webauthn_origin without scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "webauthn_origin") {
+		t.Fatalf("error should mention webauthn_origin, got: %v", err)
+	}
+}
+
+// TestWebAuthnOriginRejectsTrailingSlash asserts that webauthn_origin with a
+// trailing slash fails validation.
+func TestWebAuthnOriginRejectsTrailingSlash(t *testing.T) {
+	_, err := LoadServer(map[string]any{"webauthn_origin": "https://example.com/"})
+	if err == nil {
+		t.Fatal("expected error for webauthn_origin with trailing slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "webauthn_origin") {
+		t.Fatalf("error should mention webauthn_origin, got: %v", err)
+	}
+}
+
+// TestWebAuthnOriginRejectsPath asserts that webauthn_origin with a path
+// component fails validation.
+func TestWebAuthnOriginRejectsPath(t *testing.T) {
+	_, err := LoadServer(map[string]any{"webauthn_origin": "https://example.com/login"})
+	if err == nil {
+		t.Fatal("expected error for webauthn_origin with path, got nil")
+	}
+	if !strings.Contains(err.Error(), "webauthn_origin") {
+		t.Fatalf("error should mention webauthn_origin, got: %v", err)
+	}
+}
+
+// TestMCPListenInvalidPort asserts that mcp_listen=":abc" fails validation
+// (port must parse).
+func TestMCPListenInvalidPort(t *testing.T) {
+	_, err := LoadServer(map[string]any{"mcp_listen": ":abc"})
+	if err == nil {
+		t.Fatal("expected error for mcp_listen with non-numeric port, got nil")
+	}
+	if !strings.Contains(err.Error(), "mcp_listen") {
+		t.Fatalf("error should mention mcp_listen, got: %v", err)
+	}
+}
+
+// TestMCPListenEmptyHostValid asserts that mcp_listen=":7800" (empty host)
+// is accepted — common bind-all form.
+func TestMCPListenEmptyHostValid(t *testing.T) {
+	c, err := LoadServer(map[string]any{"mcp_listen": ":7800"})
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.MCPListen != ":7800" {
+		t.Fatalf("mcp_listen = %q, want :7800", c.MCPListen)
+	}
+}
+
+// TestMCPTokenFile asserts that BURROW_MCP_TOKEN_FILE is read via the
+// generic applyFileSecrets mechanism into BurrowMCPToken.
+func TestMCPTokenFile(t *testing.T) {
+	path := writeSecret(t, "bua_some_token_value\n")
+	t.Setenv("BURROW_MCP_TOKEN_FILE", path)
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.BurrowMCPToken != "bua_some_token_value" {
+		t.Fatalf("burrow_mcp_token from _FILE = %q, want bua_some_token_value", c.BurrowMCPToken)
+	}
+}
+
+// TestPricingPathFile asserts that BURROW_PRICING_PATH_FILE is resolved.
+// This is the unusual "_FILE points to a path containing a path" variant —
+// included for consistency with the generic _FILE pattern.
+func TestPricingPathFile(t *testing.T) {
+	path := writeSecret(t, "/etc/burrow/pricing.yaml\n")
+	t.Setenv("BURROW_PRICING_PATH_FILE", path)
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.PricingPath != "/etc/burrow/pricing.yaml" {
+		t.Fatalf("pricing_path from _FILE = %q, want /etc/burrow/pricing.yaml", c.PricingPath)
+	}
+}
+
+// TestBackupDirDerivedFromDatabasePath asserts that BackupDir defaults to
+// "<DatabasePath>.backups" when no explicit override is set.
+func TestBackupDirDerivedFromDatabasePath(t *testing.T) {
+	t.Setenv("BURROW_DATABASE_PATH", "/var/lib/burrow/main.db")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.BackupDir != "/var/lib/burrow/main.db.backups" {
+		t.Fatalf("backup_dir derived = %q, want /var/lib/burrow/main.db.backups", c.BackupDir)
+	}
+}
+
+// TestBackupDirExplicitOverride asserts that an explicit backup_dir override
+// wins over the derived default.
+func TestBackupDirExplicitOverride(t *testing.T) {
+	c, err := LoadServer(map[string]any{"backup_dir": "/srv/backups"})
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.BackupDir != "/srv/backups" {
+		t.Fatalf("backup_dir override = %q, want /srv/backups", c.BackupDir)
+	}
+}
