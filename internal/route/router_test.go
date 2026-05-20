@@ -399,6 +399,122 @@ func TestPickEmptyBackends(t *testing.T) {
 	}
 }
 
+// TestPickFailoverRetryIdempotence: calling Retry twice on the same Pick
+// must return the same (Pick, ok) tuple — the closure walks via its
+// captured idx+1, so repeat calls don't advance further into the list.
+// (Documented as the contract for the proxy hot path: it may call Retry
+// once after observing the idempotency rule failing, and a second call
+// — from cleanup logic or a defensive guard — must not skip past the
+// next candidate to the one after it.)
+func TestPickFailoverRetryIdempotence(t *testing.T) {
+	r := newRouterForTest(t, newScriptedHealth())
+	policy := Policy{
+		Strategy: StrategyFailover,
+		Backends: []Backend{
+			{ServiceID: "A", ConcreteModel: "a"},
+			{ServiceID: "B", ConcreteModel: "b"},
+			{ServiceID: "C", ConcreteModel: "c"},
+		},
+	}
+	p, err := r.Pick(context.Background(), policy, RouteContext{})
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	r1, ok1 := p.Retry()
+	r2, ok2 := p.Retry()
+	if ok1 != ok2 || r1.ServiceID != r2.ServiceID || r1.ConcreteModel != r2.ConcreteModel {
+		t.Fatalf("Retry not idempotent: first=(%+v,%v) second=(%+v,%v)", r1, ok1, r2, ok2)
+	}
+	if r1.ServiceID != "B" {
+		t.Fatalf("first Retry should land on B; got %q", r1.ServiceID)
+	}
+}
+
+// TestBreakerStaysReopenAfterCooldown_WithStaleRing is the regression test
+// for the cool-down reopen + stale-ring defect: when a breaker auto-reopens
+// after cool_down_seconds, the rolling-window ring must be cleared so that
+// stale failures from before the trip don't immediately re-trip the
+// breaker on the next probe.
+//
+// Repro before fix: drive the ring full of failures via 30 consecutive
+// recordProbe(false) calls → tripped=true. Advance the clock past
+// cool_down but by less than ringBucketCount seconds (so the
+// recordProbe time-advance loop zeroes only a few buckets, not the
+// whole ring). Healthy() auto-reopens. The next recordProbe — even
+// with ok=true — then sees winFails ≫ winProbes from the un-touched
+// stale buckets and re-trips the breaker immediately.
+func TestBreakerStaysReopenAfterCooldown_WithStaleRing(t *testing.T) {
+	fc := &fakeClock{now: time.Unix(1000, 0)}
+	r := NewWithClock(
+		&staticLookup{rows: map[string]BackendRecord{}},
+		nil, // use Router's internal HealthChecker
+		discardLog(),
+		fc,
+	)
+	r.RegisterBackend("X", BackendRecord{ServiceID: "X"})
+	// failurePct=50, windowSecs=30 (max ring), coolDown=5s. Cool-down
+	// strictly shorter than ringBucketCount so that the recordProbe
+	// time-advance loop after the cool-down gap won't naturally lap
+	// through every bucket — only the ring-clear fix prevents stale
+	// failures from dominating the post-reopen window.
+	r.SetBreakerConfig(50, 30, 5)
+
+	// Find the registered state so we can drive recordProbe directly.
+	r.mu.RLock()
+	st := r.backends["X"]
+	r.mu.RUnlock()
+	if st == nil {
+		t.Fatalf("backend state not registered")
+	}
+
+	// Drive the ring full of failures. Use one probe per fake-clock second
+	// so each lands in a fresh bucket (mirrors the real probe interval).
+	for i := 0; i < ringBucketCount; i++ {
+		r.recordProbe(st, false)
+		fc.mu.Lock()
+		fc.now = fc.now.Add(1 * time.Second)
+		fc.mu.Unlock()
+	}
+	// Re-anchor the trip timestamp to now (recordProbe sets trippedAt at the
+	// first trip — iter ~3 — and won't refresh it on subsequent iterations
+	// because of the `if !st.tripped` guard. Trip("X") explicitly resets
+	// trippedAt to fc.now, anchoring the cool-down window to the *end* of
+	// the failure burst, which is the realistic scenario.)
+	r.Trip("X")
+	if r.Healthy("X") {
+		t.Fatalf("backend should be tripped after %d consecutive failures + explicit Trip", ringBucketCount)
+	}
+
+	// Advance past cool_down by 6s (>5s coolDown, <30 ringBucketCount).
+	// The next Healthy() call should auto-reopen.
+	fc.mu.Lock()
+	fc.now = fc.now.Add(6 * time.Second)
+	fc.mu.Unlock()
+	if !r.Healthy("X") {
+		t.Fatalf("backend should have reopened past cool_down")
+	}
+
+	// Send one successful probe. Without the ring-clear fix the stale
+	// failures in the un-touched buckets dominate the rolling window
+	// and the breaker immediately re-trips. With the fix, the ring is
+	// clean and one success keeps the backend healthy.
+	r.recordProbe(st, true)
+	if !r.Healthy("X") {
+		t.Fatalf("backend re-tripped on first probe after reopen — stale-ring defect")
+	}
+
+	// Several more successful probes should keep it healthy too.
+	for i := 0; i < 4; i++ {
+		fc.mu.Lock()
+		fc.now = fc.now.Add(1 * time.Second)
+		fc.mu.Unlock()
+		r.recordProbe(st, true)
+		if !r.Healthy("X") {
+			t.Fatalf("backend re-tripped after successful probe %d", i+2)
+		}
+	}
+}
+
 // TestStickyAllTrippedFallback: every backend tripped → error (no fallback).
 func TestStickyAllTrippedFallback(t *testing.T) {
 	hc := newScriptedHealth()

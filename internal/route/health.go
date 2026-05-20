@@ -125,7 +125,7 @@ func (r *Router) recordProbe(st *backendState, ok bool) {
 		st.probes.curSec = now
 	}
 	for st.probes.curSec < now {
-		st.probes.cur = (st.probes.cur + 1) % len(st.probes.buckets)
+		st.probes.cur = (st.probes.cur + 1) % ringBucketCount
 		// Subtract the about-to-be-overwritten bucket from the rolling totals.
 		old := st.probes.buckets[st.probes.cur]
 		st.probeCount -= old.probes
@@ -147,11 +147,11 @@ func (r *Router) recordProbe(st *backendState, ok bool) {
 	winProbes := 0
 	winFails := 0
 	w := r.windowSecs
-	if w > len(st.probes.buckets) {
-		w = len(st.probes.buckets)
+	if w > ringBucketCount {
+		w = ringBucketCount
 	}
 	for i := 0; i < w; i++ {
-		idx := (st.probes.cur - i + len(st.probes.buckets)) % len(st.probes.buckets)
+		idx := (st.probes.cur - i + ringBucketCount) % ringBucketCount
 		winProbes += st.probes.buckets[idx].probes
 		winFails += st.probes.buckets[idx].fails
 	}
