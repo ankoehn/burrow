@@ -152,6 +152,14 @@ type ConfigLoader interface {
 	LoadAIConfig(ctx context.Context, serviceID string) (Service, bool, error)
 }
 
+// DefaultMaxRequestBodyBytes caps how much of an inbound request body the
+// chain will buffer into memory before short-circuiting with 413. 8 MiB is
+// chosen as a deliberately generous ceiling for chat-style payloads while
+// still bounding worst-case heap growth — large multi-MB JSON bodies can
+// occur for embeddings batches and Anthropic multimodal content, but a
+// single request larger than this is almost certainly accidental.
+const DefaultMaxRequestBodyBytes int64 = 8 * 1024 * 1024
+
 // Chain wires Tasks 3–9 into a single http.Handler-shaped pipeline. Construct
 // with NewChain; pass it as a dependency to cmd/server and let the proxy
 // layer dispatch into ServeHTTP for services that have an AI config.
@@ -171,6 +179,11 @@ type Chain struct {
 	// downstream handler; the default (nil) is treated as pure pass-through.
 	IPGeo     func(http.Handler) http.Handler
 	RateLimit func(http.Handler) http.Handler
+
+	// MaxRequestBodyBytes bounds how much of an inbound request body the
+	// chain will buffer before short-circuiting with 413. 0 selects
+	// DefaultMaxRequestBodyBytes. Tests override this to small values.
+	MaxRequestBodyBytes int64
 }
 
 // NewChain returns a Chain with the given dependencies. Any nil dep is
@@ -321,9 +334,29 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	cfg := svc.AIConfig
 
 	// ---------------------------------------------------------------
+	// Step 0: cap inbound body so a multi-GB POST cannot OOM the
+	// process. v0.3.0 streamed bodies untouched; once any AI feature
+	// is enabled we must buffer to inspect/redact/cache-key, but the
+	// buffer is hard-capped here. Over-cap → 413 short-circuit before
+	// any downstream work.
+	// ---------------------------------------------------------------
+	maxReqBody := c.MaxRequestBodyBytes
+	if maxReqBody <= 0 {
+		maxReqBody = DefaultMaxRequestBodyBytes
+	}
+	body, overflow, _ := readBodyLimited(r, maxReqBody)
+	if overflow {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		c.Log.Info("aigw: request body exceeds limit",
+			slog.String("service_id", svc.ID),
+			slog.Int64("limit_bytes", maxReqBody),
+		)
+		return
+	}
+
+	// ---------------------------------------------------------------
 	// Step 1: detect — tag the request kind for metering + logging.
 	// ---------------------------------------------------------------
-	body, _ := readBody(r)
 	kind := DetectKind(r, body)
 
 	// ---------------------------------------------------------------
@@ -388,15 +421,18 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusForbidden, nil, 0, false, "MISS", fromReplay)
 				return
 			case guardrails.ActionRefuseSafe:
-				body, hdr := safeRefusalBody(kind)
+				refusalBody, hdr := safeRefusalBody(kind)
 				for k, vs := range hdr {
 					for _, v := range vs {
 						w.Header().Add(k, v)
 					}
 				}
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(body)
-				c.captureEntry(svc, r, []byte{}, []byte{}, redactHits, kind, http.StatusOK, body, 0, false, "MISS", fromReplay)
+				_, _ = w.Write(refusalBody)
+				// Pass the ORIGINAL + redacted request bodies so operators
+				// investigating refusals can see what was sent.
+				// TruncateRequest will cap whatever we pass.
+				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusOK, refusalBody, 0, false, "MISS", fromReplay)
 				return
 			case guardrails.ActionLogOnly:
 				// Fall through; just record the hit in logs.
@@ -495,23 +531,36 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	//  - cache feature is enabled for this service
 	//  - upstream returned 2xx
 	//  - response is not streamed (no SSE / chunked transfer encoding)
+	//  - upstream provided an explicit Content-Length (absence implies
+	//    Go-auto-chunked / unknown-size — must not be cached)
+	//  - capture buffer did NOT hit its cap (otherwise the cached body
+	//    would be truncated and a later HIT would serve an incomplete
+	//    body with the original Content-Length → silent corruption)
 	if cfg.Cache != nil && cfg.Cache.Enabled && c.Cache != nil && !bypass &&
 		wrapped.statusCode >= 200 && wrapped.statusCode < 300 &&
-		!isStreamedResponse(wrapped.Header()) {
-		key := buildCacheKey(svc, r, redactedBody, *cfg.Cache)
-		body := capw.bytes()
-		if int64(len(body)) <= int64(cfg.Cache.MaxPerEntryKB)*1024 {
-			entry := exact.Entry{
-				Body:       body,
-				Status:     wrapped.statusCode,
-				Headers:    cacheableHeaders(wrapped.Header()),
-				CreatedAt:  time.Now().UTC(),
-				TTLSeconds: cfg.Cache.TTLSeconds,
-			}
-			if err := c.Cache.Store(r.Context(), key, entry); err != nil {
-				c.Log.Warn("aigw: cache store failed",
-					slog.String("service_id", svc.ID),
-					slog.String("err", err.Error()))
+		!isStreamedResponse(wrapped.Header()) &&
+		wrapped.Header().Get("Content-Length") != "" {
+		if capw.truncated() {
+			c.Log.Info("aigw: cache store skipped (response exceeds inspector capture cap)",
+				slog.String("service_id", svc.ID),
+				slog.Int("inspector_cap_bytes", inspector.MaxRespBodyBytes),
+			)
+		} else {
+			cachedBody := capw.bytes()
+			if int64(len(cachedBody)) <= int64(cfg.Cache.MaxPerEntryKB)*1024 {
+				key := buildCacheKey(svc, r, redactedBody, *cfg.Cache)
+				entry := exact.Entry{
+					Body:       cachedBody,
+					Status:     wrapped.statusCode,
+					Headers:    cacheableHeaders(wrapped.Header()),
+					CreatedAt:  time.Now().UTC(),
+					TTLSeconds: cfg.Cache.TTLSeconds,
+				}
+				if err := c.Cache.Store(r.Context(), key, entry); err != nil {
+					c.Log.Warn("aigw: cache store failed",
+						slog.String("service_id", svc.ID),
+						slog.String("err", err.Error()))
+				}
 			}
 		}
 	}
@@ -679,6 +728,10 @@ func DetectKind(r *http.Request, body []byte) Kind {
 // readBody fully drains r.Body and replaces it with a fresh ReadCloser so
 // downstream handlers see the same bytes. Returns the empty slice when the
 // body is missing.
+//
+// Deprecated: callers in the chain must use readBodyLimited so a hostile
+// client cannot OOM the process. Kept for any out-of-chain caller; new
+// code should not use this.
 func readBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
@@ -687,6 +740,32 @@ func readBody(r *http.Request) ([]byte, error) {
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(b))
 	return b, err
+}
+
+// readBodyLimited drains r.Body up to limit bytes. If the body is larger
+// than limit, the function returns overflow=true; the caller MUST reject
+// the request (413). On any non-overflow outcome r.Body is replaced with
+// a fresh ReadCloser over the bytes read so downstream handlers see the
+// same bytes.
+//
+// We read limit+1 bytes from a LimitReader to disambiguate "exactly at
+// limit" (legitimate) from "more than limit" (reject). The +1 byte that
+// pushes us over is discarded; the request is rejected before it reaches
+// any downstream handler.
+func readBodyLimited(r *http.Request, limit int64) (body []byte, overflow bool, err error) {
+	if r.Body == nil {
+		return nil, false, nil
+	}
+	// Read up to limit+1 so we can detect overflow without buffering more.
+	lr := io.LimitReader(r.Body, limit+1)
+	b, err := io.ReadAll(lr)
+	_ = r.Body.Close()
+	if int64(len(b)) > limit {
+		// Overflow: do NOT restore r.Body — caller will short-circuit.
+		return nil, true, nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return b, false, err
 }
 
 // buildCacheKey constructs the fully-prefixed cache key for a request. The
@@ -883,11 +962,13 @@ func (w *chainResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // downstream writer immediately (preserving the SSE flush invariant) AND
 // is appended to an internal buffer up to a cap so the inspector + cache
 // can see what was sent. Bytes beyond the cap are forwarded but dropped
-// from the capture.
+// from the capture; truncated() reports whether any bytes were dropped so
+// callers (the cache) can refuse to store an incomplete body.
 type capture struct {
-	dst    io.Writer
-	buf    bytes.Buffer
-	maxBuf int
+	dst     io.Writer
+	buf     bytes.Buffer
+	maxBuf  int
+	dropped bool // true once any byte was forwarded but not buffered
 }
 
 func newCapture(dst io.Writer, maxBuf int) *capture {
@@ -899,18 +980,26 @@ func (c *capture) Write(p []byte) (int, error) {
 	n, err := c.dst.Write(p)
 	if n > 0 {
 		remaining := c.maxBuf - c.buf.Len()
-		if remaining > 0 {
-			take := n
-			if take > remaining {
-				take = remaining
-			}
+		take := n
+		if take > remaining {
+			take = remaining
+		}
+		if take > 0 {
 			c.buf.Write(p[:take])
+		}
+		if take < n {
+			c.dropped = true
 		}
 	}
 	return n, err
 }
 
 func (c *capture) bytes() []byte { return c.buf.Bytes() }
+
+// truncated reports whether any forwarded byte was dropped from the
+// internal buffer because the cap was reached. The cache uses this to
+// avoid storing an incomplete body alongside the original Content-Length.
+func (c *capture) truncated() bool { return c.dropped }
 
 // replayRecorder is the http.ResponseWriter the Replay path writes into.
 // We don't actually ship the response anywhere — the Replayer caller just
