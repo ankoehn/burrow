@@ -1,0 +1,1835 @@
+openapi: 3.0.3
+info:
+  title: Burrow JSON API
+  description: |
+    The hand-written canonical OpenAPI v3 description of the Burrow JSON API
+    (unified across v0.2.0, v0.3.0, and v0.4.0).
+
+    Coverage is locked by `TestOpenAPI_RouteCoverage` in
+    `internal/api/openapi_test.go`: every route the chi mux answers must
+    appear in this document or the build fails. Health probes (`/healthz`,
+    `/readyz`) and the doc-serving endpoints (`/api/v1/openapi.{yaml,json}`)
+    are excluded by convention.
+
+    Schemas are intentionally minimal — the goal is shape coverage for SDK
+    code-generators (TypeScript-fetch, Go), not exhaustive validation. Full
+    schemas can be filled in incrementally without invalidating downstream
+    SDKs (additive only).
+  version: 0.4.0
+  license:
+    name: MIT
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: localhost:8080
+        description: Burrow control-plane host.
+
+tags:
+  - name: auth
+    description: Session login, logout, password change, passkey enrolment.
+  - name: users
+    description: Admin user management.
+  - name: roles
+    description: Roles + permission catalog (editable custom roles).
+  - name: sessions
+    description: Per-user session list / revoke.
+  - name: tokens
+    description: Personal client tokens (burrowc connect).
+  - name: tunnels
+    description: Live tunnels owned by the caller.
+  - name: services
+    description: Durable per-service config (access mode, api-keys, policy, ip/geo, inspector, cache).
+  - name: cache
+    description: Exact-match prompt cache (settings, stats, purge).
+  - name: redaction
+    description: PII / secret redaction rules + preview.
+  - name: guardrails
+    description: Prompt-injection guardrails settings.
+  - name: models
+    description: Model alias registry.
+  - name: rate-limits
+    description: Quota + rate-limit CRUD and usage.
+  - name: cost
+    description: Cost pricing + budgets + summary / export.
+  - name: inspector
+    description: Per-service request inspector (ring buffer, replay, SSE).
+  - name: audit
+    description: Audit log events + chain verify / export / fingerprint.
+  - name: webhooks
+    description: Outbound HMAC webhooks (CRUD + deliveries + test/pause/resume).
+  - name: automation
+    description: Bearer-token automation API.
+  - name: backups
+    description: Backup / restore JSON API.
+  - name: geo
+    description: Global geo lookup status.
+  - name: settings
+    description: Admin settings (config + SMTP test).
+  - name: clients
+    description: Live client (control session) overview.
+  - name: events
+    description: Server-sent events stream (dashboard refresh).
+  - name: metrics
+    description: Prometheus 0.0.4 scrape endpoint.
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: burrow_session
+      description: |
+        Session cookie issued by POST /api/v1/auth/login. State-changing
+        cookie-authed requests MUST also send the burrow_csrf double-submit
+        header (`X-CSRF-Token`).
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: bua_<token>
+      description: |
+        Automation bearer token (`Authorization: Bearer bua_...`). Bypasses
+        CSRF (the token IS the CSRF defense). Permissions are the
+        intersection of the user's current role and the set declared at
+        mint time.
+    CSRFToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: |
+        Double-submit token for cookie-authed state-changing requests.
+        Value mirrors the burrow_csrf cookie.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+    Empty:
+      type: object
+      description: Empty JSON object response.
+    OK:
+      type: object
+      properties:
+        ok:
+          type: boolean
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        role: { type: string }
+        status: { type: string, enum: [active, suspended] }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time, nullable: true }
+    Service:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [http, tcp] }
+        access_mode: { type: string }
+        remote_port: { type: integer }
+        local_addr: { type: string }
+        connected: { type: boolean }
+    Tunnel:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [http, tcp] }
+        remote_port: { type: integer }
+        local_addr: { type: string }
+        bytes_in: { type: integer, format: int64 }
+        bytes_out: { type: integer, format: int64 }
+        connected: { type: boolean }
+    Session:
+      type: object
+      properties:
+        id: { type: string }
+        user_agent: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+    Token:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+    AccessModeReq:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string }
+        header: { type: string }
+        mtls_ca_pem: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing / invalid session or bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but the caller lacks permission.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Malformed request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  parameters:
+    PathID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    PathServiceID:
+      name: serviceID
+      in: path
+      required: true
+      schema: { type: string }
+
+# Default security: cookie+CSRF or bearer. Individual public routes override
+# with `security: []`.
+security:
+  - CookieAuth: []
+    CSRFToken: []
+  - BearerAuth: []
+
+paths:
+  # ────────────────────────────────────────────────────────────────────────
+  # Prometheus scrape (outside /api/v1 by convention; gated by metrics:read)
+  # ────────────────────────────────────────────────────────────────────────
+  /metrics:
+    get:
+      tags: [metrics]
+      summary: Prometheus 0.0.4 scrape (closed metric set)
+      description: |
+        Returns the Burrow closed-metric set in Prometheus text exposition
+        format. Gated by admin OR the `metrics:read` permission.
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Auth (login is public; everything else requires a session)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Password login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Session cookie issued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: Rate-limited (per-IP or global).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Clear the session cookie
+      responses:
+        '204': { description: Session cleared. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change the caller's password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password }
+      responses:
+        '204': { description: Password changed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/webauthn/login/begin:
+    post:
+      tags: [auth]
+      summary: Begin a WebAuthn (passkey) login ceremony
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: WebAuthn PublicKeyCredentialRequestOptions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '503':
+          description: WebAuthn unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/webauthn/login/finish:
+    post:
+      tags: [auth]
+      summary: Finish a WebAuthn (passkey) login ceremony
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: Session cookie issued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/webauthn/register/begin:
+    post:
+      tags: [auth]
+      summary: Begin passkey enrolment (requires session)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: WebAuthn PublicKeyCredentialCreationOptions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/webauthn/register/finish:
+    post:
+      tags: [auth]
+      summary: Finish passkey enrolment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: Credential registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/webauthn/credentials:
+    get:
+      tags: [auth]
+      summary: List the caller's registered passkeys
+      responses:
+        '200':
+          description: List of credential summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/webauthn/credentials/{id}:
+    delete:
+      tags: [auth]
+      summary: Delete a passkey credential
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Credential removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      summary: Current authenticated principal
+      responses:
+        '200':
+          description: The signed-in user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Sessions
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/sessions:
+    get:
+      tags: [sessions]
+      summary: List the caller's active sessions
+      responses:
+        '200':
+          description: List of session records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/sessions/{id}:
+    delete:
+      tags: [sessions]
+      summary: Revoke one of the caller's sessions
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Session revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/sessions/revoke-all:
+    post:
+      tags: [sessions]
+      summary: Revoke every session except the current one
+      responses:
+        '200':
+          description: Count of sessions revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Tokens (personal client tokens)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/tokens:
+    get:
+      tags: [tokens]
+      summary: List the caller's client tokens
+      responses:
+        '200':
+          description: List of tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Token' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [tokens]
+      summary: Issue a new client token (plaintext returned ONCE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: Token created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/tokens/{id}:
+    delete:
+      tags: [tokens]
+      summary: Revoke a client token
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Token revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Tunnels (live runtime view) + v0.2 back-compat access-mode setter
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/tunnels:
+    get:
+      tags: [tunnels]
+      summary: List the caller's live tunnels
+      responses:
+        '200':
+          description: List of tunnels.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tunnel' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/tunnels/{id}/access-mode:
+    put:
+      tags: [tunnels]
+      summary: Set tunnel access mode (v0.2 back-compat — delegates to services)
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessModeReq' }
+      responses:
+        '204': { description: Access mode set. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Services
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/services:
+    get:
+      tags: [services]
+      summary: List services visible to the caller
+      responses:
+        '200':
+          description: List of services.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Service' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}:
+    get:
+      tags: [services]
+      summary: Service detail (config + live state)
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: Service detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Service' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/services/{serviceID}/access-mode:
+    put:
+      tags: [services]
+      summary: Set the service's access mode
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessModeReq' }
+      responses:
+        '204': { description: Access mode set. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/services/{serviceID}/api-keys:
+    get:
+      tags: [services]
+      summary: List per-service API keys
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: List of api-key summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [services]
+      summary: Mint a new per-service API key (plaintext returned ONCE)
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: Key created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  key: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}/api-keys/{id}:
+    delete:
+      tags: [services]
+      summary: Revoke a per-service API key
+      parameters:
+        - { $ref: '#/components/parameters/PathServiceID' }
+        - { $ref: '#/components/parameters/PathID' }
+      responses:
+        '204': { description: Key revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/services/{serviceID}/access-policy:
+    get:
+      tags: [services]
+      summary: Get the role allowlist for burrow_login access
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: List of role names.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [services]
+      summary: Replace the role allowlist
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roles:
+                  type: array
+                  items: { type: string }
+      responses:
+        '204': { description: Policy updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}/ip-geo:
+    get:
+      tags: [services]
+      summary: Get per-service IP / Geo allow / deny rules
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: IP/Geo configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [services]
+      summary: Replace per-service IP / Geo rules
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}/cache/entries:
+    delete:
+      tags: [services, cache]
+      summary: Purge per-service exact-cache entries
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: Count purged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Inspector (per-service ring buffer + replay + SSE)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/services/{serviceID}/inspector/requests:
+    get:
+      tags: [inspector]
+      summary: List captured requests
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: List of request envelopes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}/inspector/requests/{rid}:
+    get:
+      tags: [inspector]
+      summary: Get a captured request envelope
+      parameters:
+        - { $ref: '#/components/parameters/PathServiceID' }
+        - name: rid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Request envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/services/{serviceID}/inspector/requests/{rid}/replay:
+    post:
+      tags: [inspector]
+      summary: Re-fire the captured request through the proxy chain
+      parameters:
+        - { $ref: '#/components/parameters/PathServiceID' }
+        - name: rid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Replay result envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: Replay engine unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/services/{serviceID}/inspector/requests/{rid}/replay-compare:
+    post:
+      tags: [inspector]
+      summary: Replay and diff against the original response
+      parameters:
+        - { $ref: '#/components/parameters/PathServiceID' }
+        - name: rid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Diff envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/services/{serviceID}/inspector/stream:
+    get:
+      tags: [inspector]
+      summary: SSE stream of newly-captured requests (no timeout, no CSRF)
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: text/event-stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Cache (global settings + stats + purge)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/cache/settings:
+    get:
+      tags: [cache]
+      summary: Get prompt-cache settings
+      responses:
+        '200':
+          description: Cache settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [cache]
+      summary: Replace prompt-cache settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/cache/stats:
+    get:
+      tags: [cache]
+      summary: Cache hit / miss / size counters
+      responses:
+        '200':
+          description: Stats.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/cache/entries:
+    delete:
+      tags: [cache]
+      summary: Purge ALL cache entries (admin / ai:configure:any)
+      responses:
+        '200':
+          description: Count purged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Redaction
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/redaction/rules:
+    get:
+      tags: [redaction]
+      summary: List redaction rules
+      responses:
+        '200':
+          description: List of rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [redaction]
+      summary: Create a new redaction rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Rule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/redaction/rules/{id}:
+    put:
+      tags: [redaction]
+      summary: Update a redaction rule
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [redaction]
+      summary: Delete a redaction rule
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/redaction/settings:
+    get:
+      tags: [redaction]
+      summary: Get redaction settings
+      responses:
+        '200':
+          description: Settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [redaction]
+      summary: Replace redaction settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/redaction/preview:
+    post:
+      tags: [redaction]
+      summary: Preview redaction of a sample payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: Preview result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Guardrails
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/guardrails/settings:
+    get:
+      tags: [guardrails]
+      summary: Get prompt-injection guardrail settings
+      responses:
+        '200':
+          description: Settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [guardrails]
+      summary: Replace guardrail settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/guardrails/patterns:
+    get:
+      tags: [guardrails]
+      summary: List bundled guardrail pattern names + descriptions
+      responses:
+        '200':
+          description: List of patterns.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Model aliases
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/models/aliases:
+    get:
+      tags: [models]
+      summary: List model aliases
+      responses:
+        '200':
+          description: List of aliases.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [models]
+      summary: Create a model alias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/models/aliases/{alias}:
+    put:
+      tags: [models]
+      summary: Replace a model alias
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [models]
+      summary: Delete a model alias
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Rate limits
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/rate-limits:
+    get:
+      tags: [rate-limits]
+      summary: List configured rate-limit rules
+      responses:
+        '200':
+          description: List of rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [rate-limits]
+      summary: Create a rate-limit rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/rate-limits/usage:
+    get:
+      tags: [rate-limits]
+      summary: Current rate-limit consumption per rule
+      responses:
+        '200':
+          description: Usage rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/rate-limits/{id}:
+    put:
+      tags: [rate-limits]
+      summary: Update a rate-limit rule
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [rate-limits]
+      summary: Delete a rate-limit rule
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Cost
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/cost/pricing:
+    get:
+      tags: [cost]
+      summary: Get the model-pricing table
+      responses:
+        '200':
+          description: Pricing rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [cost]
+      summary: Replace the pricing table (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/cost/summary:
+    get:
+      tags: [cost]
+      summary: Aggregated cost summary
+      responses:
+        '200':
+          description: Summary rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/cost/export:
+    get:
+      tags: [cost]
+      summary: CSV export of cost data
+      responses:
+        '200':
+          description: CSV.
+          content:
+            text/csv:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/budgets:
+    get:
+      tags: [cost]
+      summary: List budgets (admin)
+      responses:
+        '200':
+          description: List of budgets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [cost]
+      summary: Create a budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/budgets/{id}:
+    put:
+      tags: [cost]
+      summary: Update a budget
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [cost]
+      summary: Delete a budget
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Audit
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/audit/events:
+    get:
+      tags: [audit]
+      summary: Query audit events
+      responses:
+        '200':
+          description: List of audit rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/audit/export:
+    get:
+      tags: [audit]
+      summary: Export audit chain (signed JSONL)
+      responses:
+        '200':
+          description: JSONL stream.
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/audit/fingerprint:
+    get:
+      tags: [audit]
+      summary: Audit signing-key public fingerprint
+      responses:
+        '200':
+          description: Fingerprint.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/audit/verify:
+    post:
+      tags: [audit]
+      summary: Verify a range of audit chain entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Webhooks
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/webhooks:
+    get:
+      tags: [webhooks]
+      summary: List webhooks
+      responses:
+        '200':
+          description: List of webhooks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [webhooks]
+      summary: Create a webhook (signing_secret returned ONCE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Webhook created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/webhooks/deliveries:
+    get:
+      tags: [webhooks]
+      summary: List delivery attempts (recent)
+      responses:
+        '200':
+          description: Delivery rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/webhooks/{id}:
+    put:
+      tags: [webhooks]
+      summary: Update a webhook
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [webhooks]
+      summary: Delete a webhook
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/webhooks/{id}/test:
+    post:
+      tags: [webhooks]
+      summary: Trigger a synchronous test delivery
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '200':
+          description: Delivery result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/webhooks/{id}/pause:
+    post:
+      tags: [webhooks]
+      summary: Pause webhook deliveries
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Paused. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/webhooks/{id}/resume:
+    post:
+      tags: [webhooks]
+      summary: Resume webhook deliveries
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Resumed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Automation (bearer-token API)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/automation/tokens:
+    get:
+      tags: [automation]
+      summary: List automation bearer tokens
+      responses:
+        '200':
+          description: List of token summaries (no plaintext).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [automation]
+      summary: Mint an automation bearer token (plaintext returned ONCE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Token minted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/automation/tokens/{id}:
+    delete:
+      tags: [automation]
+      summary: Revoke an automation bearer token
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Backups
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/backups:
+    get:
+      tags: [backups]
+      summary: List backup archives on disk
+      responses:
+        '200':
+          description: List of backups.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [backups]
+      summary: Trigger a new backup
+      responses:
+        '200':
+          description: New backup metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/backups/{id}:
+    delete:
+      tags: [backups]
+      summary: Delete a backup archive
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/backups/{id}/download:
+    get:
+      tags: [backups]
+      summary: Stream a backup archive
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '200':
+          description: gzipped tarball.
+          content:
+            application/x-gzip:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/backups/{id}/verify:
+    post:
+      tags: [backups]
+      summary: Verify a backup archive
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/backups/restore:
+    post:
+      tags: [backups]
+      summary: Upload + restore an archive
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Restore accepted (poll status endpoint).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restore_id: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/backups/restores/{id}:
+    get:
+      tags: [backups]
+      summary: Poll restore status
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '200':
+          description: Status envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Roles (catalog + custom-role CRUD)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/roles:
+    get:
+      tags: [roles]
+      summary: List roles (admin)
+      responses:
+        '200':
+          description: List of roles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [roles]
+      summary: Create a custom role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/roles/permissions:
+    get:
+      tags: [roles]
+      summary: List the permission catalog (every signed-in user)
+      responses:
+        '200':
+          description: List of permissions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/roles/{name}:
+    get:
+      tags: [roles]
+      summary: Get a role (admin)
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Role detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [roles]
+      summary: Update a custom role
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [roles]
+      summary: Delete a custom role
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Users (admin)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List users (admin)
+      responses:
+        '200':
+          description: Paginated list of users.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+                  total: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [users]
+      summary: Create a user (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, role]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                role: { type: string }
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/users/{id}:
+    patch:
+      tags: [users]
+      summary: Update a user (role / status) — admin
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string }
+                status: { type: string, enum: [active, suspended] }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [users]
+      summary: Delete a user (admin)
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Settings (admin)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/settings:
+    get:
+      tags: [settings]
+      summary: Get admin settings (admin)
+      responses:
+        '200':
+          description: Settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [settings]
+      summary: Replace admin settings (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/settings/test-email:
+    post:
+      tags: [settings]
+      summary: Send a test SMTP email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string, format: email }
+      responses:
+        '200':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OK' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Clients
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/clients:
+    get:
+      tags: [clients]
+      summary: List live clients (admin)
+      responses:
+        '200':
+          description: List of clients.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/clients/{sessionID}:
+    get:
+      tags: [clients]
+      summary: Get one live client (admin)
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Client detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Geo
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/geo/status:
+    get:
+      tags: [geo]
+      summary: Global geo-lookup status (enabled, db path, age)
+      responses:
+        '200':
+          description: Status envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  db_path: { type: string }
+                  db_age_seconds: { type: integer, format: int64 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Events (SSE)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/events:
+    get:
+      tags: [events]
+      summary: Server-sent events stream (dashboard refresh)
+      responses:
+        '200':
+          description: text/event-stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }

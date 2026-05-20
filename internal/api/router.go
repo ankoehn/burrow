@@ -89,6 +89,15 @@ func NewRouter(d Deps) http.Handler {
 	loginPerIP, loginGlobal := d.loginRateLimiters()
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// v0.4.0 Task 22: OpenAPI spec discovery. Both routes are public
+		// (no auth) so SDK code-generators can curl the canonical doc
+		// without bootstrapping a session. They are excluded from
+		// TestOpenAPI_RouteCoverage by convention (the spec describes the
+		// JSON API; pinning its own discovery surface inside the spec
+		// would be self-referential and adds no SDK value).
+		r.Get("/openapi.yaml", d.GetOpenAPIYAML)
+		r.Get("/openapi.json", d.GetOpenAPIJSON)
+
 		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
 		// v0.4.0 Task 19: WebAuthn passkey login endpoints. begin +
 		// finish are public (no session yet) and share the same per-IP
