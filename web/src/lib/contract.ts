@@ -22,6 +22,9 @@ export interface RoleSummary {
   name: string;
   description: string;
   created_at: string;
+  // v0.4.0 additive — built-in roles are locked; custom roles are editable.
+  // Older backends omit it; treat undefined as built-in for backwards safety.
+  builtin?: boolean;
 }
 
 export interface RoleDetail extends RoleSummary {

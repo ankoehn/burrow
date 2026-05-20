@@ -70,12 +70,14 @@ function seed(): MockDb {
       { id: "bur_usr_carol03", email: "carol@acme.io", role: "user", status: "suspended", last_login: "2026-04-10T12:00:00Z", created_at: "2026-03-01T08:00:00Z" },
     ],
     roles: [
-      { name: "admin", description: "Full access — manage tunnels, tokens, users and roles.", created_at: "2026-01-01T00:00:00Z" },
-      { name: "user", description: "Use own tunnels and tokens; manage own account.", created_at: "2026-01-01T00:00:00Z" },
+      { name: "admin", description: "Full access — manage tunnels, tokens, users and roles.", created_at: "2026-01-01T00:00:00Z", builtin: true },
+      { name: "user", description: "Use own tunnels and tokens; manage own account.", created_at: "2026-01-01T00:00:00Z", builtin: true },
+      { name: "analyst", description: "Read-only access to traffic, cost, and audit.", created_at: "2026-03-01T00:00:00Z", builtin: false },
     ],
     rolePerms: {
       admin: ["tunnels:read:any", "tunnels:manage:any", "tokens:manage:any", "services:configure:any", "sessions:manage:any", "users:read", "users:manage", "roles:read", "settings:manage"],
       user: ["tunnels:read:own", "tunnels:manage:own", "tokens:manage:own", "services:configure:own", "sessions:manage:own"],
+      analyst: ["tunnels:read:any", "audit:read", "cost:read"],
     },
     sessions: [
       { id: "sess_cur", ip: "203.0.113.7", user_agent: "Mozilla/5.0 (current)", created_at: "2026-05-18T09:00:00Z", expires_at: "2026-05-25T09:00:00Z", current: true },

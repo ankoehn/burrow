@@ -10,11 +10,17 @@ describe("mock db", () => {
     expect(db.users.find((u) => u.id === db.me.id)).toBeTruthy();
   });
 
-  it("seeds two built-in roles with permissions", () => {
+  it("seeds the two built-in roles with permissions (v0.4.0 adds a custom 'analyst' alongside)", () => {
     const names = db.roles.map((r) => r.name).sort();
-    expect(names).toEqual(["admin", "user"]);
+    expect(names).toContain("admin");
+    expect(names).toContain("user");
     expect(db.rolePerms["admin"].length).toBeGreaterThan(0);
     expect(db.rolePerms["user"]).toContain("tunnels:read:own");
+    // v0.4.0 ships a custom role in the seed so the Roles page Edit flow has
+    // a row to act on without needing to first create one.
+    const analyst = db.roles.find((r) => r.name === "analyst");
+    expect(analyst).toBeDefined();
+    expect(analyst!.builtin).toBe(false);
   });
 
   it("seeds at least one session marked current", () => {

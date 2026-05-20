@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Badge, Dialog, SkeletonRows } from "@/components/ds";
+import { CustomRoleEditor } from "@/components/CustomRoleEditor";
 import type { RoleSummary, RoleDetail } from "@/lib/contract";
 
 function RoleDetailDialog({ name, onClose }: { name: string | null; onClose: () => void }) {
@@ -32,12 +33,18 @@ function RoleDetailDialog({ name, onClose }: { name: string | null; onClose: () 
 }
 
 export default function Roles() {
-  const [open, setOpen] = useState<string | null>(null);
+  const [viewName, setViewName] = useState<string | null>(null);
+  // editor open state: null = closed; "" = new role; otherwise existing role name
+  const [editorName, setEditorName] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["roles"],
     queryFn: () => apiFetch<RoleSummary[]>("/roles"),
     retry: false,
   });
+
+  function openNew() { setEditorName(null); setEditorOpen(true); }
+  function openEdit(name: string) { setEditorName(name); setEditorOpen(true); }
 
   if (error) {
     return (
@@ -55,6 +62,7 @@ export default function Roles() {
     <div className="users-page">
       <div className="page-head">
         <div><h1>Roles</h1><p className="sub">What each role is allowed to do.</p></div>
+        <Button variant="primary" size="sm" onClick={openNew}>New role</Button>
       </div>
       {isLoading ? (
         <div className="table-wrap"><SkeletonRows n={2} /></div>
@@ -63,20 +71,35 @@ export default function Roles() {
           <table className="data" aria-label="Roles">
             <thead><tr><th>Role</th><th>Description</th><th className="col-actions"></th></tr></thead>
             <tbody>
-              {(data ?? []).map((r) => (
-                <tr key={r.name}>
-                  <td>{r.name} <Badge kind="" nodot>Built-in</Badge></td>
-                  <td>{r.description}</td>
-                  <td className="col-actions">
-                    <Button variant="secondary" size="sm" onClick={() => setOpen(r.name)}>View</Button>
-                  </td>
-                </tr>
-              ))}
+              {(data ?? []).map((r) => {
+                const isBuiltin = r.builtin !== false;
+                return (
+                  <tr key={r.name}>
+                    <td>
+                      {r.name}{" "}
+                      {isBuiltin
+                        ? <Badge kind="" nodot>Built-in</Badge>
+                        : <Badge kind="badge-custom" nodot>Custom</Badge>}
+                    </td>
+                    <td>{r.description}</td>
+                    <td className="col-actions">
+                      {isBuiltin
+                        ? <Button variant="secondary" size="sm" onClick={() => setViewName(r.name)}>View</Button>
+                        : <Button variant="secondary" size="sm" onClick={() => openEdit(r.name)}>Edit</Button>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-      <RoleDetailDialog name={open} onClose={() => setOpen(null)} />
+      <RoleDetailDialog name={viewName} onClose={() => setViewName(null)} />
+      <CustomRoleEditor
+        open={editorOpen}
+        roleName={editorName}
+        onClose={() => setEditorOpen(false)}
+      />
     </div>
   );
 }

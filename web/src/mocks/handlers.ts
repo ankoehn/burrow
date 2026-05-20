@@ -102,11 +102,54 @@ export const handlers = [
 
   // ---- roles ----
   http.get("/api/v1/roles", ({ request }) => gate(request, { admin: true }) ?? json(db.roles)),
+  http.get("/api/v1/roles/permissions", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return json([
+      { key: "tunnels:read:any",     group: "tunnels",  description: "Read all tunnels"   },
+      { key: "tunnels:read:own",     group: "tunnels",  description: "Read own tunnels"   },
+      { key: "tunnels:manage:any",   group: "tunnels",  description: "Manage all tunnels" },
+      { key: "services:configure:any", group: "services", description: "Configure any service" },
+      { key: "tokens:manage:any",    group: "tokens",   description: "Manage all tokens"  },
+      { key: "audit:read",           group: "audit",    description: "Read audit log"     },
+      { key: "cost:read",            group: "cost",     description: "Read cost data"     },
+      { key: "webhooks:manage",      group: "webhooks", description: "Manage webhooks"    },
+      { key: "users:manage",         group: "users",    description: "Manage users"       },
+      { key: "settings:manage",      group: "settings", description: "Manage settings"    },
+    ]);
+  }),
   http.get("/api/v1/roles/:name", ({ request, params }) => {
     const g = gate(request, { admin: true }); if (g) return g;
     const r = db.roles.find((x) => x.name === params.name);
     if (!r) return err(404, "role not found");
     return json({ ...r, permissions: db.rolePerms[r.name] ?? [] });
+  }),
+  http.post("/api/v1/roles", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ name?: string; description?: string; permissions?: string[]; default_for_new_users?: boolean }>(request);
+    if (!b?.name) return err(400, "name is required");
+    if (db.roles.some((r) => r.name === b.name)) return err(409, "role already exists");
+    db.roles.push({ name: b.name, description: b.description ?? "", created_at: new Date().toISOString(), builtin: false });
+    db.rolePerms[b.name] = Array.isArray(b.permissions) ? [...b.permissions] : [];
+    return json({ name: b.name, description: b.description ?? "", created_at: new Date().toISOString(), builtin: false, permissions: db.rolePerms[b.name]! }, 201);
+  }),
+  http.put("/api/v1/roles/:name", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const r = db.roles.find((x) => x.name === params.name);
+    if (!r) return err(404, "role not found");
+    if (r.builtin) return err(409, "built-in roles cannot be edited");
+    const b = await body<{ description?: string; permissions?: string[] }>(request);
+    if (b?.description != null) r.description = b.description;
+    if (b?.permissions != null) db.rolePerms[r.name] = [...b.permissions];
+    return noContent();
+  }),
+  http.delete("/api/v1/roles/:name", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.roles.findIndex((x) => x.name === params.name);
+    if (i < 0) return err(404, "role not found");
+    if (db.roles[i]!.builtin) return err(409, "built-in roles cannot be deleted");
+    db.roles.splice(i, 1);
+    delete db.rolePerms[String(params.name)];
+    return noContent();
   }),
 
   // ---- sessions ----
