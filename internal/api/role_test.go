@@ -20,7 +20,20 @@ func (fakeRoles) GetRole(_ context.Context, name string) (store.RoleDetail, erro
 	if name != "admin" {
 		return store.RoleDetail{}, db.ErrNotFound
 	}
-	return store.RoleDetail{Name: "admin", Description: "all", Permissions: []string{"users:manage"}}, nil
+	return store.RoleDetail{Name: "admin", Description: "all", Permissions: []string{"users:manage"}, Builtin: true}, nil
+}
+
+// v0.4.0 Task 15 stubs — this fake is read-only; the existing assertions in
+// TestRolesEndpoints only exercise the GET surface. Mutation tests use the
+// full-featured fakeRoleStore from role_admin_test.go.
+func (fakeRoles) CreateRole(context.Context, string, string, []string, bool) error {
+	return store.ErrRoleBuiltin
+}
+func (fakeRoles) UpdateRole(context.Context, string, store.RoleUpdate) error {
+	return store.ErrRoleBuiltin
+}
+func (fakeRoles) DeleteRole(context.Context, string) ([]string, error) {
+	return nil, store.ErrRoleBuiltin
 }
 
 func TestRolesEndpoints(t *testing.T) {

@@ -3,7 +3,16 @@
 // the role string; this map is the read-only extension seam that custom roles
 // (v0.4) will grow from. The :own/:any scope split is committed from day one
 // so the permission enum never has to change incompatibly later.
+//
+// v0.4.0 Task 15: custom (non-builtin) roles persist their permission set in
+// the roles.permissions JSON column. The store loads the table at startup and
+// re-publishes the map after every CreateRole / UpdateRole / DeleteRole via
+// SetRoles below. Can() consults that map for non-builtin role names, keeping
+// the admin/user hot path on the hardcoded constants. Mutex-protected so a
+// concurrent SetRoles cannot race a hot-path Can().
 package authz
+
+import "sync"
 
 // Permission is a scoped capability string ("<domain>:<action>[:own|:any]").
 type Permission string
@@ -168,14 +177,63 @@ func AllPermissions() []Permission {
 	}
 }
 
+// customRoles is the process-wide cache of non-builtin role→permission sets,
+// populated by SetRoles after every store-side write. Reads on the hot path
+// take an RLock; writes (cache repopulation) take a Lock. Empty map (the
+// zero value here) means "no custom roles defined yet", which keeps Can()
+// returning false for unknown role names — the safe default.
+var (
+	customRolesMu sync.RWMutex
+	customRoles   = map[string][]Permission{}
+)
+
+// SetRoles installs a fresh map of custom (non-builtin) role→permissions.
+// The store calls this after every CreateRole / UpdateRole / DeleteRole so
+// subsequent Can() lookups see the new shape. Built-in admin/user are NOT
+// in this map (their permissions are hard-coded in builtin above); callers
+// MUST NOT pass them through here. A nil map is treated as "no custom
+// roles" (everything falls back to the safe-default deny).
+//
+// The slice values are copied to insulate the cache from later mutation by
+// the caller — the store may reuse its source slice for the next refresh.
+func SetRoles(roles map[string][]Permission) {
+	customRolesMu.Lock()
+	defer customRolesMu.Unlock()
+	customRoles = make(map[string][]Permission, len(roles))
+	for name, perms := range roles {
+		if _, isBuiltin := builtin[name]; isBuiltin {
+			// Defensive: never let a custom-roles refresh shadow the
+			// hardcoded admin/user paths. Skip silently — callers that
+			// pass builtin names did so by accident and the hot path is
+			// unaffected.
+			continue
+		}
+		cp := make([]Permission, len(perms))
+		copy(cp, perms)
+		customRoles[name] = cp
+	}
+}
+
 // Can reports whether the named role holds permission p. Unknown roles get
-// nothing (safe default).
+// nothing (safe default). Built-in admin/user resolve via the hard-coded
+// table; any other role name falls back to the custom-roles cache populated
+// by SetRoles.
 func Can(role string, p Permission) bool {
-	r, ok := builtin[role]
+	if r, ok := builtin[role]; ok {
+		for _, have := range r.Permissions {
+			if have == p {
+				return true
+			}
+		}
+		return false
+	}
+	customRolesMu.RLock()
+	perms, ok := customRoles[role]
+	customRolesMu.RUnlock()
 	if !ok {
 		return false
 	}
-	for _, have := range r.Permissions {
+	for _, have := range perms {
 		if have == p {
 			return true
 		}

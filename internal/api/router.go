@@ -206,6 +206,17 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/pause", d.PostWebhookPause)
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/resume", d.PostWebhookResume)
 			r.With(d.requireWebhooksManage).Get("/webhooks/deliveries", d.GetWebhookDeliveries)
+			// v0.4.0 Task 15: editable custom roles + permission matrix
+			// (spec Part I). The permission catalog read is session-authed
+			// (every signed-in user may see the list of capabilities); the
+			// list / detail reads stay admin-only (registered below); the
+			// POST/PUT/DELETE writes are gated by admin OR roles:manage so
+			// a curator role can edit non-builtin definitions without full
+			// admin escalation.
+			r.Get("/roles/permissions", d.GetRolePermissions)
+			r.With(d.requireRolesManage).Post("/roles", d.PostRole)
+			r.With(d.requireRolesManage).Put("/roles/{name}", d.PutRole)
+			r.With(d.requireRolesManage).Delete("/roles/{name}", d.DeleteRole)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.

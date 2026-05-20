@@ -39,6 +39,53 @@ func TestBuiltinRoles(t *testing.T) {
 	}
 }
 
+// TestCustomRoleCache covers SetRoles + Can() for non-builtin roles. After
+// SetRoles publishes {"analyst": [ai:read:any]}, Can("analyst", PermAIReadAny)
+// must return true; passing the empty map restores the deny-default. The
+// builtin admin/user paths must remain unaffected throughout.
+func TestCustomRoleCache(t *testing.T) {
+	// Reset at end so other tests see a clean cache.
+	defer SetRoles(nil)
+
+	// Empty state: any custom role is unknown.
+	if Can("analyst", PermAIReadAny) {
+		t.Fatal("analyst must deny before SetRoles")
+	}
+
+	SetRoles(map[string][]Permission{
+		"analyst": {PermAIReadAny, PermAuditRead},
+	})
+	if !Can("analyst", PermAIReadAny) {
+		t.Fatal("analyst should hold ai:read:any after SetRoles")
+	}
+	if !Can("analyst", PermAuditRead) {
+		t.Fatal("analyst should hold audit:read after SetRoles")
+	}
+	if Can("analyst", PermUsersManage) {
+		t.Fatal("analyst must NOT hold users:manage (not in its set)")
+	}
+
+	// Builtin admin/user must still resolve from the hard-coded table.
+	if !Can("admin", PermUsersManage) {
+		t.Fatal("builtin admin path must be unaffected by SetRoles")
+	}
+	if Can("user", PermUsersManage) {
+		t.Fatal("builtin user path must be unaffected by SetRoles")
+	}
+
+	// Attempting to overwrite a builtin via SetRoles is a silent no-op.
+	SetRoles(map[string][]Permission{"admin": {}, "analyst": {PermAuditRead}})
+	if !Can("admin", PermUsersManage) {
+		t.Fatal("builtin admin must not be shadowed by SetRoles")
+	}
+	if Can("analyst", PermAIReadAny) {
+		t.Fatal("analyst's perm set should have shrunk to {audit:read} only")
+	}
+	if !Can("analyst", PermAuditRead) {
+		t.Fatal("analyst should still hold audit:read after refresh")
+	}
+}
+
 func TestCanScopes(t *testing.T) {
 	cases := []struct {
 		role string

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -318,32 +319,204 @@ func (s *Store) TouchUserLastLogin(ctx context.Context, id string) error {
 	return s.q.TouchUserLastLogin(ctx, id)
 }
 
-// RoleDetail is a role row enriched with its code-defined permission set.
+// RoleDetail is a role row enriched with its permission set. For builtin
+// roles (admin/user) the Permissions slice comes from the code-defined
+// authz table; for non-builtin (v0.4.0) roles it comes from the DB row's
+// permissions JSON column.
 type RoleDetail struct {
-	Name        string
-	Description string
-	CreatedAt   time.Time
-	Permissions []string
+	Name               string
+	Description        string
+	CreatedAt          time.Time
+	Permissions        []string
+	Builtin            bool
+	DefaultForNewUsers bool
 }
 
-// ListRoles returns the built-in roles (DB rows for name/description/created_at).
+// ErrRoleBuiltin is returned by UpdateRole / DeleteRole when the caller
+// targets a built-in role (admin/user). Mapped to HTTP 409 by the API.
+var ErrRoleBuiltin = errors.New("store: role is built-in")
+
+// ErrUnknownPermission is returned by CreateRole / UpdateRole when the
+// permissions slice contains a key that is not in authz.AllPermissions().
+// The handler surfaces the offending key in the 400 response body.
+type ErrUnknownPermission struct{ Key string }
+
+// Error implements error.
+func (e ErrUnknownPermission) Error() string { return "store: unknown permission " + strconv.Quote(e.Key) }
+
+// ErrRoleExists is returned by CreateRole on a duplicate name.
+var ErrRoleExists = errors.New("store: role already exists")
+
+// ListRoles returns every roles row, builtin first then custom (alphabetical
+// within each group — the underlying db.ListRoles orders by name, so the
+// "admin" row will naturally precede "user" and any custom role whose name
+// starts after "u" sorts last). The shape preserves the v0.4.0 columns.
 func (s *Store) ListRoles(ctx context.Context) ([]db.Role, error) {
 	return s.q.ListRoles(ctx)
 }
 
-// GetRole returns a role's DB row plus its authz permission strings.
+// GetRole returns a role's DB row plus its effective permission set. For
+// builtin roles the permission list is the hard-coded authz catalog (the DB
+// row's permissions JSON is intentionally left empty for admin/user by
+// migration 0005); for custom roles the list is the DB row itself.
 func (s *Store) GetRole(ctx context.Context, name string) (RoleDetail, error) {
 	r, err := s.q.GetRole(ctx, name)
 	if err != nil {
 		return RoleDetail{}, err
 	}
-	d := RoleDetail{Name: r.Name, Description: r.Description, CreatedAt: r.CreatedAt}
-	if ar, ok := authz.Get(name); ok {
-		for _, p := range ar.Permissions {
-			d.Permissions = append(d.Permissions, string(p))
+	d := RoleDetail{
+		Name:               r.Name,
+		Description:        r.Description,
+		CreatedAt:          r.CreatedAt,
+		Builtin:            r.Builtin,
+		DefaultForNewUsers: r.DefaultForNewUsers,
+	}
+	if r.Builtin {
+		if ar, ok := authz.Get(name); ok {
+			for _, p := range ar.Permissions {
+				d.Permissions = append(d.Permissions, string(p))
+			}
 		}
+	} else {
+		d.Permissions = append(d.Permissions, r.Permissions...)
 	}
 	return d, nil
+}
+
+// CreateRole inserts a new non-builtin role. The permissions slice is
+// validated against authz.AllPermissions(); the first unknown key returns
+// ErrUnknownPermission so the handler can surface "unknown permission <key>".
+// If defaultForNewUsers is true the prior default is cleared in the same DB
+// transaction (single-default invariant). After a successful insert the
+// process-wide authz custom-roles cache is refreshed so the new role's
+// permissions become visible to every Can() lookup.
+func (s *Store) CreateRole(ctx context.Context, name, description string, permissions []string, defaultForNewUsers bool) error {
+	if err := validateRolePermissions(permissions); err != nil {
+		return err
+	}
+	if err := s.q.CreateRole(ctx, name, description, permissions, defaultForNewUsers); err != nil {
+		if errors.Is(err, db.ErrRoleExists) {
+			return ErrRoleExists
+		}
+		return err
+	}
+	return s.refreshRolesCache(ctx)
+}
+
+// RoleUpdate is the optional-field patch shape; see db.RoleUpdate.
+type RoleUpdate = db.RoleUpdate
+
+// UpdateRole patches a non-builtin role. Returns ErrRoleBuiltin (→409) when
+// the target row is admin/user, ErrUnknownPermission on a stray perm key,
+// or db.ErrNotFound when no row matches. Refreshes the authz custom-roles
+// cache on success so subsequent Can() lookups see the new permission set.
+func (s *Store) UpdateRole(ctx context.Context, name string, u RoleUpdate) error {
+	if u.Permissions != nil {
+		if err := validateRolePermissions(*u.Permissions); err != nil {
+			return err
+		}
+	}
+	if err := s.q.UpdateRole(ctx, name, u); err != nil {
+		if errors.Is(err, db.ErrRoleBuiltin) {
+			return ErrRoleBuiltin
+		}
+		return err
+	}
+	return s.refreshRolesCache(ctx)
+}
+
+// DeleteRole removes a non-builtin role in one transaction. Users on the
+// deleted role are re-assigned to the current default-for-new-users role.
+// The list of affected user IDs is returned so the caller (handler) can
+// log audit events once the v0.4.0 Task 25 wiring lands; in this stage the
+// handler simply discards the list (TODO Task 25). Returns ErrRoleBuiltin
+// or db.ErrNotFound as appropriate. Refreshes the authz cache on success.
+func (s *Store) DeleteRole(ctx context.Context, name string) (affectedUserIDs []string, err error) {
+	fallback, err := s.q.DefaultRoleName(ctx)
+	if err != nil {
+		// No default role configured — fall back to the builtin "user" so
+		// the cascade is guaranteed to land on a valid row. (Migration 0005
+		// leaves both builtins with default_for_new_users=0; the API forces
+		// callers to nominate a default via UpdateRole / CreateRole. Until
+		// then we keep the safe default rather than failing the DELETE.)
+		if errors.Is(err, db.ErrNotFound) {
+			fallback = "user"
+		} else {
+			return nil, err
+		}
+	}
+	// Defensive guard: refuse to fall back to the role we're about to drop
+	// (would cascade users onto a deleted row). This can only happen if the
+	// caller is dropping the current default role; we route them to "user"
+	// in that case. Task 25 will add an explicit "set a new default before
+	// deleting the current one" handler error if we want stricter behavior.
+	if fallback == name {
+		fallback = "user"
+	}
+	affected, err := s.q.DeleteRole(ctx, name, fallback)
+	if err != nil {
+		if errors.Is(err, db.ErrRoleBuiltin) {
+			return nil, ErrRoleBuiltin
+		}
+		return nil, err
+	}
+	if err := s.refreshRolesCache(ctx); err != nil {
+		return nil, err
+	}
+	return affected, nil
+}
+
+// RefreshRolesCache repopulates the process-wide authz custom-roles cache
+// from the current DB state. Exported so cmd/server can call it once at
+// startup (Task 25 wires it); after that every store-side mutation calls
+// the unexported helper directly. Builtin rows are skipped — their
+// permissions live in the hardcoded authz table.
+func (s *Store) RefreshRolesCache(ctx context.Context) error {
+	return s.refreshRolesCache(ctx)
+}
+
+func (s *Store) refreshRolesCache(ctx context.Context) error {
+	rows, err := s.q.ListRoles(ctx)
+	if err != nil {
+		return err
+	}
+	custom := make(map[string][]authz.Permission, len(rows))
+	for _, r := range rows {
+		if r.Builtin {
+			continue
+		}
+		perms := make([]authz.Permission, 0, len(r.Permissions))
+		for _, k := range r.Permissions {
+			perms = append(perms, authz.Permission(k))
+		}
+		custom[r.Name] = perms
+	}
+	authz.SetRoles(custom)
+	return nil
+}
+
+// validateRolePermissions checks every supplied key against the closed
+// authz.AllPermissions() catalog and returns ErrUnknownPermission for the
+// first stray. The check is O(n*m) but n,m are tiny so the linear scan
+// keeps the dependency surface minimal (no need for an in-memory set).
+func validateRolePermissions(perms []string) error {
+	if len(perms) == 0 {
+		return nil
+	}
+	allowed := authz.AllPermissions()
+	for _, k := range perms {
+		ok := false
+		for _, a := range allowed {
+			if string(a) == k {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return ErrUnknownPermission{Key: k}
+		}
+	}
+	return nil
 }
 
 // ListSessions returns the user's sessions (newest first).

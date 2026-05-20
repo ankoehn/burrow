@@ -76,10 +76,17 @@ type UserStore interface {
 	TouchUserLastLogin(ctx context.Context, id string) error
 }
 
-// RoleStore is the roles read surface (built-in roles + code permissions).
+// RoleStore is the roles surface: read for the list/get endpoints, and the
+// v0.4.0 Task 15 CRUD methods for custom-roles. *store.Store satisfies it.
+// The CRUD methods are nil-safe at the route level (the handlers dispatch
+// to them only when the route is registered, and Deps.Roles is set).
 type RoleStore interface {
 	ListRoles(ctx context.Context) ([]db.Role, error)
 	GetRole(ctx context.Context, name string) (store.RoleDetail, error)
+	// v0.4.0: editable custom roles.
+	CreateRole(ctx context.Context, name, description string, permissions []string, defaultForNewUsers bool) error
+	UpdateRole(ctx context.Context, name string, u store.RoleUpdate) error
+	DeleteRole(ctx context.Context, name string) (affectedUserIDs []string, err error)
 }
 
 // SessionStore is the per-user session list/revoke surface.
