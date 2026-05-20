@@ -552,4 +552,62 @@ export const handlers = [
     const sorted = db.audit.slice().sort((a, b) => (a.ts < b.ts ? -1 : 1));
     return json({ ok: true, first_id: sorted[0]!.id, last_id: sorted.at(-1)!.id });
   }),
+
+  // ---- v0.4.0 webhooks (spec §4.26) ----
+  http.get("/api/v1/webhooks", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.webhooks)),
+  http.post("/api/v1/webhooks", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<Partial<MockDb["webhooks"][number]>>(request);
+    if (!b?.name || !b?.url) return err(400, "name and url are required");
+    if (!b.url.startsWith("https://")) return err(400, "url must be https://");
+    const wh: MockDb["webhooks"][number] = {
+      id: `wh_${Math.random().toString(36).slice(2, 8)}`,
+      name: b.name,
+      url: b.url,
+      events: b.events ?? [],
+      paused: false,
+      consecutive_failures: 0,
+      first_failure_at: null,
+      created_at: new Date().toISOString(),
+    };
+    db.webhooks.push(wh);
+    return json({ webhook: wh, signing_secret: `whsec_${Math.random().toString(36).slice(2, 18)}` }, 201);
+  }),
+  http.delete("/api/v1/webhooks/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.webhooks.findIndex((w) => w.id === params.id);
+    if (i < 0) return err(404, "webhook not found");
+    db.webhooks.splice(i, 1);
+    return noContent();
+  }),
+  http.post("/api/v1/webhooks/:id/pause", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const wh = db.webhooks.find((w) => w.id === params.id);
+    if (!wh) return err(404, "webhook not found");
+    wh.paused = true;
+    return noContent();
+  }),
+  http.post("/api/v1/webhooks/:id/resume", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const wh = db.webhooks.find((w) => w.id === params.id);
+    if (!wh) return err(404, "webhook not found");
+    wh.paused = false;
+    return noContent();
+  }),
+  http.post("/api/v1/webhooks/:id/test", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const wh = db.webhooks.find((w) => w.id === params.id);
+    if (!wh) return err(404, "webhook not found");
+    return noContent();
+  }),
+  http.get("/api/v1/webhooks/deliveries", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const url = new URL(request.url);
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 50));
+    const webhookId = url.searchParams.get("webhook_id");
+    let rows = db.webhookDeliveries.slice().sort((a, b) => (a.ts < b.ts ? 1 : -1));
+    if (webhookId) rows = rows.filter((d) => d.webhook_id === webhookId);
+    return json(rows.slice(0, limit));
+  }),
 ];
