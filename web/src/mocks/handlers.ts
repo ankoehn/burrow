@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { db, type MockDb } from "@/mocks/db";
+import { db, type MockDb, type CacheSettingsPayload } from "@/mocks/db";
 import type { AiEndpoint, CostSummary, ServiceAIConfig } from "@/lib/contract";
 
 const json = (body: unknown, status = 200) => HttpResponse.json(body as object, { status });
@@ -390,4 +390,19 @@ export const handlers = [
     if (!canConfigure(svc)) return err(403, "forbidden");
     return noContent();
   }),
+
+  // ---- v0.4.0 global cache settings (spec §4.21) ----
+  http.get("/api/v1/cache/settings", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.cacheSettings)),
+  http.put("/api/v1/cache/settings", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<CacheSettingsPayload>(request);
+    if (!b) return err(400, "invalid cache settings body");
+    db.cacheSettings = b;
+    return noContent();
+  }),
+  http.get("/api/v1/cache/stats", ({ request }) =>
+    gate(request, { admin: true }) ?? json({ entries: 47, on_disk_bytes: 3 * 1024 * 1024, hit_rate_24h: 0.31 })),
+  http.delete("/api/v1/cache/entries", ({ request }) =>
+    gate(request, { admin: true }) ?? noContent()),
 ];

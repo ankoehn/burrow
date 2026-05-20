@@ -1,8 +1,13 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
-  InspectorEntry,
+  InspectorEntry, CacheSettings,
 } from "@/lib/contract";
+
+export interface CacheSettingsPayload {
+  global: CacheSettings;
+  per_service: Record<string, CacheSettings>;
+}
 
 // Internal service row: the wire Service plus the owning user_id (stripped
 // before serialization — owner-scoping the v0.3.0 /services surface).
@@ -40,6 +45,7 @@ export interface MockDb {
   costSummary: Record<"today" | "week" | "month" | "year", CostSummary>;
   aiConfigs: Record<string, ServiceAIConfig>;
   inspectorEntries: Record<string, InspectorEntry[]>;
+  cacheSettings: CacheSettingsPayload;
 }
 
 function seed(): MockDb {
@@ -118,6 +124,10 @@ function seed(): MockDb {
     },
     inspectorEntries: {
       svc_ai001: seedInspector("svc_ai001"),
+    },
+    cacheSettings: {
+      global: { enabled: true, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64 },
+      per_service: {},
     },
   };
 }
