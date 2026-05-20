@@ -4,6 +4,7 @@ import type {
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
+  AutomationToken,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -60,6 +61,7 @@ export interface MockDb {
   webauthnCredentials: WebAuthnCredential[];
   provisioningKeys: ProvisioningKey[];
   provisioningPending: ProvisioningPending[];
+  automationTokens: AutomationToken[];
 }
 
 function seed(): MockDb {
@@ -193,6 +195,9 @@ function seed(): MockDb {
     ],
     provisioningPending: [
       { id: "pp_node1", hostname: "node-1.lan", os: "linux", arch: "amd64", remote_ip: "10.0.1.7", provisioning_key_id: "pk_fleet", first_seen: "2026-05-19T07:30:00Z" },
+    ],
+    automationTokens: [
+      { id: "at_ci01", name: "ci-runner", prefix: "bua_x9k", user_id: meId, role_at_mint: "user", permissions: ["tunnels:read:any", "audit:read"], expires_at: null, last_used: "2026-05-18T09:00:00Z", created_at: "2026-04-01T00:00:00Z" },
     ],
   };
 }

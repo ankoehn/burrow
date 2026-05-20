@@ -740,4 +740,33 @@ export const handlers = [
     db.provisioningPending.splice(i, 1);
     return noContent();
   }),
+
+  // ---- v0.4.0 automation tokens (spec Part M) ----
+  http.get("/api/v1/automation/tokens", ({ request }) =>
+    gate(request) ?? json(db.automationTokens.filter((t) => db.me.role === "admin" || t.user_id === db.me.id))),
+  http.post("/api/v1/automation/tokens", async ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const b = await body<{ name?: string; expires_at?: string | null; permissions?: string[] }>(request);
+    if (!b?.name) return err(400, "name is required");
+    const t: MockDb["automationTokens"][number] = {
+      id: `at_${Math.random().toString(36).slice(2, 8)}`,
+      name: b.name,
+      prefix: `bua_${Math.random().toString(36).slice(2, 7)}`,
+      user_id: db.me.id,
+      role_at_mint: db.me.role,
+      permissions: b.permissions ?? [],
+      expires_at: b.expires_at ?? null,
+      last_used: null,
+      created_at: new Date().toISOString(),
+    };
+    db.automationTokens.push(t);
+    return json({ token: t, plaintext: `${t.prefix}_${Math.random().toString(36).slice(2, 22)}` }, 201);
+  }),
+  http.delete("/api/v1/automation/tokens/:id", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const i = db.automationTokens.findIndex((t) => t.id === params.id);
+    if (i < 0) return err(404, "token not found");
+    db.automationTokens.splice(i, 1);
+    return noContent();
+  }),
 ];
