@@ -2,6 +2,30 @@ package authz
 
 import "testing"
 
+func TestPermsV040(t *testing.T) {
+	for _, p := range []Permission{
+		PermAIReadAny, PermAIConfigureAny, PermAuditRead,
+		PermWebhooksManage, PermRolesManage, PermBackupRun,
+		PermMetricsRead, PermMtlsManageAny, PermIPGeoManageAny,
+		PermInspectorReadAny, PermInspectorReplayAny,
+		PermAutomationTokensManageAny, PermQuotasManageAny,
+		PermMcpToolsRead,
+	} {
+		if !Can("admin", p) {
+			t.Fatalf("admin should have %s", p)
+		}
+	}
+	for _, p := range []Permission{
+		PermAIReadOwn, PermAIConfigureOwn, PermInspectorReadOwn,
+		PermInspectorReplayOwn, PermAutomationTokensManageOwn,
+		PermQuotasReadOwn, PermMtlsManageOwn, PermIPGeoManageOwn,
+	} {
+		if !Can("user", p) {
+			t.Fatalf("user should have %s", p)
+		}
+	}
+}
+
 func TestBuiltinRoles(t *testing.T) {
 	rs := Roles()
 	if len(rs) != 2 {

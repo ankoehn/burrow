@@ -29,6 +29,38 @@ const (
 	PermUsersManage    Permission = "users:manage"
 	PermRolesRead      Permission = "roles:read"
 	PermSettingsManage Permission = "settings:manage"
+
+	// v0.4.0: AI, quotas, inspector, audit, webhooks, custom roles,
+	// automation tokens, backups, metrics, mTLS, IP-geo, MCP tools.
+	PermAIReadOwn      Permission = "ai:read:own"
+	PermAIReadAny      Permission = "ai:read:any"
+	PermAIConfigureOwn Permission = "ai:configure:own"
+	PermAIConfigureAny Permission = "ai:configure:any"
+
+	PermQuotasReadOwn   Permission = "quotas:read:own"
+	PermQuotasReadAny   Permission = "quotas:read:any"
+	PermQuotasManageAny Permission = "quotas:manage:any"
+
+	PermInspectorReadOwn   Permission = "inspector:read:own"
+	PermInspectorReadAny   Permission = "inspector:read:any"
+	PermInspectorReplayOwn Permission = "inspector:replay:own"
+	PermInspectorReplayAny Permission = "inspector:replay:any"
+
+	PermAuditRead      Permission = "audit:read"
+	PermWebhooksManage Permission = "webhooks:manage"
+	PermRolesManage    Permission = "roles:manage"
+
+	PermAutomationTokensManageOwn Permission = "automation:tokens:manage:own"
+	PermAutomationTokensManageAny Permission = "automation:tokens:manage:any"
+
+	PermBackupRun    Permission = "backup:run"
+	PermMetricsRead  Permission = "metrics:read"
+	PermMcpToolsRead Permission = "mcp:tools:read"
+
+	PermMtlsManageOwn  Permission = "mtls:manage:own"
+	PermMtlsManageAny  Permission = "mtls:manage:any"
+	PermIPGeoManageOwn Permission = "ipgeo:manage:own"
+	PermIPGeoManageAny Permission = "ipgeo:manage:any"
 )
 
 // Role is a named permission set (built-in only in v0.2.0).
@@ -47,6 +79,17 @@ var adminPerms = []Permission{
 	PermSessionsManageAny, PermSessionsManageOwn,
 	PermUsersRead, PermUsersManage,
 	PermRolesRead, PermSettingsManage,
+	// v0.4.0 admin :any + admin-only globals.
+	PermAIReadAny, PermAIReadOwn,
+	PermAIConfigureAny, PermAIConfigureOwn,
+	PermQuotasReadAny, PermQuotasReadOwn, PermQuotasManageAny,
+	PermInspectorReadAny, PermInspectorReadOwn,
+	PermInspectorReplayAny, PermInspectorReplayOwn,
+	PermAuditRead, PermWebhooksManage, PermRolesManage,
+	PermAutomationTokensManageAny, PermAutomationTokensManageOwn,
+	PermBackupRun, PermMetricsRead, PermMcpToolsRead,
+	PermMtlsManageAny, PermMtlsManageOwn,
+	PermIPGeoManageAny, PermIPGeoManageOwn,
 }
 
 // userPerms is the standard-user :own subset.
@@ -56,6 +99,14 @@ var userPerms = []Permission{
 	PermTokensManageOwn,
 	PermServicesConfigureOwn,
 	PermSessionsManageOwn,
+	// v0.4.0 additive :own perms (read/configure own AI, inspect own
+	// traffic, manage own automation tokens, read own quota, manage own
+	// mTLS/IP-geo lists).
+	PermAIReadOwn, PermAIConfigureOwn,
+	PermQuotasReadOwn,
+	PermInspectorReadOwn, PermInspectorReplayOwn,
+	PermAutomationTokensManageOwn,
+	PermMtlsManageOwn, PermIPGeoManageOwn,
 }
 
 var builtin = map[string]Role{
@@ -87,6 +138,34 @@ func Roles() []Role {
 func Get(name string) (Role, bool) {
 	r, ok := builtin[name]
 	return r, ok
+}
+
+// AllPermissions returns the closed set of every permission Burrow defines,
+// in declaration order. Used by the custom-roles API (v0.4 Task 15) to
+// validate role definitions against the code-defined enum so the wire
+// contract can never drift from the constants above.
+func AllPermissions() []Permission {
+	return []Permission{
+		// v0.2.0 / v0.3.0
+		PermTunnelsReadOwn, PermTunnelsReadAny,
+		PermTunnelsManageOwn, PermTunnelsManageAny,
+		PermTokensManageOwn, PermTokensManageAny,
+		PermServicesConfigureOwn, PermServicesConfigureAny,
+		PermSessionsManageOwn, PermSessionsManageAny,
+		PermUsersRead, PermUsersManage,
+		PermRolesRead, PermSettingsManage,
+		// v0.4.0
+		PermAIReadOwn, PermAIReadAny,
+		PermAIConfigureOwn, PermAIConfigureAny,
+		PermQuotasReadOwn, PermQuotasReadAny, PermQuotasManageAny,
+		PermInspectorReadOwn, PermInspectorReadAny,
+		PermInspectorReplayOwn, PermInspectorReplayAny,
+		PermAuditRead, PermWebhooksManage, PermRolesManage,
+		PermAutomationTokensManageOwn, PermAutomationTokensManageAny,
+		PermBackupRun, PermMetricsRead, PermMcpToolsRead,
+		PermMtlsManageOwn, PermMtlsManageAny,
+		PermIPGeoManageOwn, PermIPGeoManageAny,
+	}
 }
 
 // Can reports whether the named role holds permission p. Unknown roles get
