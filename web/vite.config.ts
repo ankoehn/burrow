@@ -26,9 +26,11 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   server: { proxy: { "/api": "http://localhost:8080" } },
   build: { outDir: "dist" },
-  // fileParallelism:false — the suite is timing-flaky under the parallel
-  // forks pool (worker-teardown races surface as sporadic, file-order-
-  // dependent failures); it is deterministically green run serially. Trades
-  // a little wall-clock for a trustworthy gate.
-  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts", exclude: ["e2e/**", "node_modules/**"], fileParallelism: false },
+  // pool:"threads" — Vitest 4's default "forks" pool drops the per-worker
+  // state set up before setupFiles run, so any `import { beforeAll } from
+  // "vitest"` in setup.ts throws "Vitest failed to access its internal
+  // state." on Windows + Node 24. Threads is also deterministically green
+  // (the v0.3.0 wall-clock-vs-stability trade), and fileParallelism:false
+  // keeps the suite serial to avoid the historical worker-teardown races.
+  test: { environment: "jsdom", globals: true, setupFiles: "./src/test/setup.ts", exclude: ["e2e/**", "node_modules/**"], fileParallelism: false, pool: "threads" },
 });
