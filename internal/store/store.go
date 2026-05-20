@@ -81,11 +81,35 @@ type SaveTunnelArg struct {
 	RemotePort                int
 }
 
+// AuditAppender is the narrow audit-append surface the store may use to
+// chain mutation calls onto the audit hash chain. *audit.Logger satisfies
+// it. Defined here (rather than imported from internal/audit) so the
+// store package does not pull in internal/audit just to hold an optional
+// callback (and so the cmd/server wiring layer can pass nil before the
+// logger has been built without forcing an import cycle).
+type AuditAppender interface {
+	// The argument type is deliberately `any` so the store package can
+	// stay free of any audit-package import. Callers in cmd/server pass
+	// audit.Event values; future store-side audit emissions construct the
+	// same shape via reflection-free type assertions at the audit layer.
+	// v0.4.0 ships the field unused on the store hot path (no store
+	// methods append yet); the setter exists so Task 25 wiring is complete.
+	Append(ctx context.Context, e any) error
+}
+
 // Store is the DB-backed implementation of the server/API dependencies.
 // The caller retains ownership of the underlying *sql.DB (Store has no Close).
 type Store struct {
 	q            *db.DB
 	smtpPassword string // injected from BURROW_SMTP_PASSWORD(_FILE); never persisted
+
+	// auditLogger is the optional chain logger the store would consult on
+	// future audit-emitting mutations (Task 25 wires it via SetAuditLogger).
+	// v0.4.0 does not emit any audit events from the store package itself
+	// — the api/handlers own that responsibility — but the field is kept
+	// so future store-side mutations can append without an additional
+	// constructor change. Nil-safe (no caller calls .Append on it today).
+	auditLogger AuditAppender
 }
 
 // New builds a Store over an open, migrated *sql.DB.
@@ -93,6 +117,13 @@ func New(d *sql.DB) *Store { return &Store{q: db.Wrap(d)} }
 
 // SetSMTPPassword injects the SMTP secret (from config). Called by cmd/server.
 func (s *Store) SetSMTPPassword(pw string) { s.smtpPassword = pw }
+
+// SetAuditLogger installs the optional audit appender used by future
+// store-side audit emissions. Idempotent + concurrency-safe to call once
+// at startup; not safe to mutate after the store has been handed out to
+// goroutines (Task 25 wires it during cmd/server's serve bootstrap,
+// before any HTTP handler runs).
+func (s *Store) SetAuditLogger(a AuditAppender) { s.auditLogger = a }
 
 // SeedAdmin ensures the bootstrap admin user exists.
 // It is a no-op when email or password is empty (unset BURROW_ADMIN_* — safe).

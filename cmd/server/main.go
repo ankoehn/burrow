@@ -359,7 +359,32 @@ func main() {
 			// JSON API out of the box; operators may pin a dedicated
 			// location via BURROW_BACKUP_DIR in a future task.
 			backupDir := cfg.DatabasePath + ".backups"
+			if cfg.BackupDir != "" {
+				backupDir = cfg.BackupDir
+			}
 			restoreTracker := api.NewRestoreTracker()
+
+			// v0.4.0 Task 25: compose every Task 3–23 engine into a single
+			// stack. The constructor honours cfg.PricingPath, auto-generates
+			// the audit signing key on first boot, and ships a no-op geo
+			// lookup in the default build (real MMDB under -tags geo).
+			v04, err := buildV04Stack(ctx, cfg, database, st, log)
+			if err != nil {
+				return err
+			}
+			v04.WebhookDispatcher.Start()
+			defer v04.WebhookDispatcher.Close()
+			// RefreshRolesCache populates the process-wide authz custom-roles
+			// table once at startup so the very first request sees the same
+			// permission map every store-level role mutation maintains.
+			if err := st.RefreshRolesCache(ctx); err != nil {
+				log.Warn("v0.4 refresh roles cache failed", "err", err)
+			}
+
+			// v0.4.0 Task 25: optional MCP listener — constructed only when
+			// cfg.MCPListen is non-empty. The ToolStore adapter binds to the
+			// live tunnel registry + audit query store + metrics recorder.
+			v04.MCPServer = BuildMCPServer(cfg, st, v04, mcpTunnelAdapter{s: srv}, db.Wrap(database), log)
 
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
@@ -379,6 +404,35 @@ func main() {
 					BackupRunner:   backupRunnerAdapter{cfg: cfg},
 					RestoreRunner:  restoreRunnerAdapter{cfg: cfg},
 					RestoreTracker: restoreTracker,
+					AuditAppender:  v04.AuditAppender,
+					// v0.4.0 Task 25 wiring — every additive Deps surface.
+					AuditEvents:       v04.AuditEvents,
+					AuditChain:        v04.AuditChain,
+					Metrics:           api.NewMetricsRecorderAdapter(v04.Metrics),
+					Webhooks:          db.Wrap(database),
+					WebhookDispatcher: v04.WebhookDispatcher,
+					WebhookSecrets:    v04.WebhookSecrets,
+					Bearer:            api.NewStoreBearerStore(st),
+					Automation:        st,
+					MCP: api.MCPInfo{
+						Enabled: cfg.MCPListen != "",
+						Listen:  cfg.MCPListen,
+						Server:  v04.MCPServer,
+					},
+					RateLimitDB:       db.Wrap(database),
+					RateLimits:        v04.QuotaEngine,
+					Budgets:           db.Wrap(database),
+					CostEngine:        v04.CostEngine,
+					CacheEngine:       v04.CacheEngine,
+					CacheServices:     cacheServiceLookupAdapter{db: db.Wrap(database)},
+					InspectorRings:    v04.InspectorMgr,
+					InspectorServices: cacheServiceLookupAdapter{db: db.Wrap(database)},
+					InspectorReplayer: newInspectorReplayer(v04.AIChain, log),
+					ModelAliases:      db.Wrap(database),
+					WebAuthn:          webauthnProviderOrNil(v04.WebAuthn),
+					IPGeo:             db.Wrap(database),
+					IPGeoServices:     db.Wrap(database),
+					GeoLookup:         v04.GeoLookup,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
@@ -390,6 +444,7 @@ func main() {
 			// equal senderCount so that no sender ever blocks after shutdown.
 			// Baseline: control listener (srv.Serve) + api server = 2.
 			// The proxy listener adds 1 when cfg.HTTPProxyListen is non-empty.
+			// The MCP listener (Task 25) adds 1 more when cfg.MCPListen is set.
 			senderCount := 2
 
 			// Build the optional HTTP reverse-proxy listener (v0.3.0).
@@ -414,6 +469,12 @@ func main() {
 				gate := proxy.NewGate(st, cfg.AuthDomain, effectiveSecureCookies, log)
 				proxyOpts := []proxy.Option{
 					proxy.WithGate(gate),
+					// v0.4.0 Task 25: wire the AI middleware chain into the
+					// proxy. The chain is pure pass-through when no
+					// service_ai_config row exists (IsAIPassThrough), which
+					// preserves the FlushInterval=-1 / SSE / WebSocket
+					// invariants byte-for-byte for v0.3.0 traffic.
+					proxy.WithAIChain(v04.AIChain),
 				}
 				if ingressPort != "" {
 					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))
@@ -432,6 +493,18 @@ func main() {
 				}
 				if proxyTLSEnabled {
 					proxySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+				}
+			}
+
+			// v0.4.0 Task 25: optional MCP JSON-RPC listener (default :7800).
+			// Same errc/Shutdown LIFO pattern as the :8443 proxy listener.
+			var mcpSrv *http.Server
+			if v04.MCPServer != nil {
+				senderCount++
+				mcpSrv = &http.Server{
+					Addr:              cfg.MCPListen,
+					Handler:           v04.MCPServer,
+					ReadHeaderTimeout: 10 * time.Second,
 				}
 			}
 
@@ -478,6 +551,16 @@ func main() {
 					errc <- nil
 				}()
 			}
+			if mcpSrv != nil {
+				go func() {
+					log.Info("mcp jsonrpc listening", "addr", cfg.MCPListen)
+					if err := mcpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						errc <- err
+						return
+					}
+					errc <- nil
+				}()
+			}
 
 			// Wait for a shutdown signal OR an early server error (e.g. a
 			// listener bind failure such as the HTTP port already in use):
@@ -493,11 +576,16 @@ func main() {
 			// returns) before Shutdown returns. The deferred reaperWg.Wait()
 			// and database.Close() then run in LIFO order after this point.
 			//
-			// Shutdown order (reverse of start): proxy → api → control listener (srv).
+			// Shutdown order (reverse of start): mcp → proxy → api → control listener (srv).
 			// The proxy is shut first so no new tunnel streams are opened while
-			// the control listener is still draining.
+			// the control listener is still draining. The MCP listener uses
+			// the same in-process surfaces as the API, so it shuts first to
+			// drain any in-flight automation calls before the proxy quiesces.
 			shutCtx, cancel := context.WithTimeout(context.Background(), apiShutdownGrace)
 			defer cancel()
+			if mcpSrv != nil {
+				_ = mcpSrv.Shutdown(shutCtx)
+			}
 			if proxySrv != nil {
 				_ = proxySrv.Shutdown(shutCtx)
 			}
