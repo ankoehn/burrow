@@ -77,6 +77,12 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
+		// v0.4.0 Task 19: WebAuthn passkey login endpoints. begin +
+		// finish are public (no session yet) and share the same per-IP
+		// + global rate-limiter as password login — a brute-force
+		// guesser can't target the passkey path to dodge the cap.
+		r.With(loginPerIP, loginGlobal).Post("/auth/webauthn/login/begin", d.PostWebAuthnLoginBegin)
+		r.With(loginPerIP, loginGlobal).Post("/auth/webauthn/login/finish", d.PostWebAuthnLoginFinish)
 
 		// JSON routes: session-protected + CSRF-protected + JSONHandlerTimeout.
 		// RequireCSRF is placed after RequireSession so unauthenticated requests
@@ -98,6 +104,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)
 			r.Post("/auth/change-password", d.ChangePassword)
+			// v0.4.0 Task 19: WebAuthn passkey enrollment + credential
+			// management. register/begin + register/finish issue and
+			// validate attestation; list/delete manage the per-user
+			// credential set. All four require an existing session — they
+			// add a SECOND factor / replacement to the password login.
+			r.Post("/auth/webauthn/register/begin", d.PostWebAuthnRegisterBegin)
+			r.Post("/auth/webauthn/register/finish", d.PostWebAuthnRegisterFinish)
+			r.Get("/auth/webauthn/credentials", d.GetWebAuthnCredentials)
+			r.Delete("/auth/webauthn/credentials/{id}", d.DeleteWebAuthnCredential)
 			r.Get("/me", d.Me)
 			r.Get("/tokens", d.ListTokens)
 			r.Post("/tokens", d.CreateToken)

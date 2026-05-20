@@ -338,6 +338,12 @@ type Deps struct {
 	IPGeo         IPGeoStore
 	IPGeoServices ServiceOwnerLookup
 	GeoLookup     GeoLookupSurface
+
+	// v0.4.0 Task 19: WebAuthn / passkey dashboard login. The concrete
+	// *webauthn.Provider in internal/webauthn satisfies it. Nil disables
+	// every /auth/webauthn/* route (handlers return 503
+	// "webauthn unavailable"); password login still works in that case.
+	WebAuthn WebAuthnProvider
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup
