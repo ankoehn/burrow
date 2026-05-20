@@ -1,0 +1,936 @@
+// Package aigw — AI gateway middleware chain.
+//
+// chain.go composes Tasks 3–9 into a single http.Handler-shaped pipeline
+// that the v0.3.0 reverse-proxy ingress calls *between* Access.Allow and
+// httputil.ReverseProxy.ServeHTTP, but only for services whose
+// service_ai_config has a non-default block.
+//
+// # Chain order (spec Part B + Task 10 plan)
+//
+//	1. detect()        — tag the request: openai|anthropic|mcp|unknown
+//	2. ipgeo()         — STUB in Task 10 (Task 16 swaps in the real impl)
+//	3. ratelimit()     — STUB in Task 10 (Task 11 swaps in the real impl)
+//	4. redact()        — Task 5; rewrites the body
+//	5. guardrails()    — Task 6; may refuse
+//	6. cache.lookup()  — Task 4; on HIT short-circuits
+//	7. inspector.pre() — Task 8; buffers req
+//	8. route()         — Task 7; picks an upstream (logging seam in Task 10)
+//	9. proxy() + inspector.post() + meter() — meter+capture during stream
+//
+// # Pass-through invariant
+//
+// When the Chain is invoked with a Service whose AIConfig has every section
+// nil (i.e. no AI features configured), ServeHTTP delegates directly to the
+// downstream proxy handler without observing or rewriting bytes. The
+// v0.3.0 behavior — including FlushInterval=-1 and the Director rewrite —
+// is preserved bit-for-bit.
+//
+// # SSE no-buffering invariant
+//
+// Cache HITs bypass the proxy entirely (they write a small synthetic body).
+// On a MISS the chain wraps the visitor-side ResponseWriter with the
+// aimeter Stream + an inspector capture writer; both forward bytes
+// immediately and flush after each frame. The underlying ReverseProxy's
+// FlushInterval=-1 is untouched.
+//
+// # Cache key + redaction ordering
+//
+// Redaction runs BEFORE cache-key computation and BEFORE the metered
+// byte-count snapshot, so:
+//   - two requests differing only in redacted fields cache-hit each other;
+//   - metered bytes_in reflects what upstream saw (the redacted body).
+//
+// The Burrow-Cache: bypass header (used by the inspector replay-compare
+// arm, Task 8) skips the cache Lookup step entirely while leaving every
+// other middleware in the path.
+package aigw
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ankoehn/burrow/internal/aimeter"
+	"github.com/ankoehn/burrow/internal/cache/exact"
+	"github.com/ankoehn/burrow/internal/guardrails"
+	"github.com/ankoehn/burrow/internal/inspector"
+	"github.com/ankoehn/burrow/internal/redact"
+	"github.com/ankoehn/burrow/internal/route"
+)
+
+// Kind names the detected request shape. Mirrors aimeter.Kind for ease of
+// downstream wiring; the values are deliberately the same strings.
+type Kind string
+
+const (
+	KindOpenAI    Kind = "openai"
+	KindAnthropic Kind = "anthropic"
+	KindMCP       Kind = "mcp"
+	KindUnknown   Kind = "unknown"
+)
+
+// Service is the per-request input the Chain needs. proxy.Proxy constructs
+// one of these from its own *proxy.Resolved + the AI config blob, then
+// calls Chain.ServeHTTP. Defining it here (rather than re-exporting
+// proxy.Resolved) avoids an import cycle between internal/aigw and
+// internal/proxy — the chain depends on nothing in the proxy package.
+type Service struct {
+	// ID is the stable service identity (matches store.Service.ID).
+	ID string
+	// OwnerID is the user_id that owns this service (for audit/meter labels).
+	OwnerID string
+	// LocalHost is the upstream host (typically "127.0.0.1:3000"), used for
+	// diagnostic logging only — the proxy handler still owns dial-out.
+	LocalHost string
+	// APIKeyHeader is the header carrying the upstream's API key. Default
+	// "Authorization"; passed straight to cache canonicalisation.
+	APIKeyHeader string
+	// APIKeyID is the matched api_key row id (when AccessMode == api_key),
+	// or "" for other access modes. Used as the cache scope prefix for
+	// applies_per: per_api_key and as the usage_events label.
+	APIKeyID string
+	// AIConfig is the parsed service_ai_config blob. Any nil section means
+	// "feature disabled for this service" — Chain treats it as a no-op.
+	AIConfig ServiceAIConfig
+}
+
+// ServiceAIConfig is the typed view of service_ai_config.config JSON. Any
+// nil sub-section disables that middleware. Mirrors spec Part B.7.
+type ServiceAIConfig struct {
+	Cache      *exact.Settings      // nil = cache disabled
+	Redaction  *RedactionConfig     // nil = redaction disabled
+	Guardrails *guardrails.Settings // nil = guardrails disabled
+	Inspector  *InspectorConfig     // nil = inspector disabled
+	Routing    *route.Policy        // nil = single-backend (v0.3.0 default)
+	Anthropic  *AnthropicConfig     // nil = no Anthropic adapter
+}
+
+// RedactionConfig is the per-service redaction toggle. ForLogsOnly = true
+// means: redacted body is what the inspector + audit see, but the ORIGINAL
+// body is forwarded upstream. ForLogsOnly = false (the default) means the
+// redacted body is also what upstream sees.
+type RedactionConfig struct {
+	Enabled     bool
+	ForLogsOnly bool
+}
+
+// InspectorConfig is the per-service inspector toggle.
+type InspectorConfig struct {
+	Enabled     bool
+	MaxRequests int // capacity of the per-service ring; 0 → default
+}
+
+// AnthropicConfig is the per-service Anthropic-adapter toggle. For Task 10
+// we wire the simpler case (visitor speaks Anthropic, upstream is
+// Anthropic, no translation at all — just kind=anthropic + meter labels).
+// Bidirectional translation (OpenAI ↔ Anthropic) is deferred to a follow-up.
+type AnthropicConfig struct {
+	// Enabled gates whether the Anthropic adapter even runs. For v0.4.0
+	// Task 10 this is informational; the Chain detects Anthropic-shaped
+	// requests on its own and metering uses KindAnthropic accordingly.
+	Enabled bool
+}
+
+// ConfigLoader resolves the per-service AI config blob (decoded into
+// ServiceAIConfig). Returning a zero-value config + ok=false sends the
+// request through the v0.3.0 pass-through path. Errors are logged + treated
+// as ok=false (fail-open).
+//
+// cmd/server (Task 25) wires the concrete implementation backed by the
+// service_ai_config table; tests pass a small in-memory stub.
+type ConfigLoader interface {
+	LoadAIConfig(ctx context.Context, serviceID string) (Service, bool, error)
+}
+
+// Chain wires Tasks 3–9 into a single http.Handler-shaped pipeline. Construct
+// with NewChain; pass it as a dependency to cmd/server and let the proxy
+// layer dispatch into ServeHTTP for services that have an AI config.
+//
+// Chain is safe for concurrent use after construction.
+type Chain struct {
+	Loader     ConfigLoader       // nil = no AI features wired
+	Cache      *exact.Cache       // nil = cache feature unavailable
+	Redact     *redact.Engine     // nil = redaction feature unavailable
+	Guardrails *guardrails.Engine // nil = guardrails feature unavailable
+	Inspector  *inspector.Manager // nil = inspector feature unavailable
+	Router     *route.Router      // nil = routing strategies unavailable
+	Meter      aimeter.Sink       // nil = metering disabled
+	Log        *slog.Logger
+
+	// IPGeo and RateLimit are stubs for Tasks 16 and 11. They wrap the
+	// downstream handler; the default (nil) is treated as pure pass-through.
+	IPGeo     func(http.Handler) http.Handler
+	RateLimit func(http.Handler) http.Handler
+}
+
+// NewChain returns a Chain with the given dependencies. Any nil dep is
+// treated as "feature unavailable" and the corresponding step is skipped at
+// request time — operators can wire only the subset they care about.
+func NewChain(
+	cache *exact.Cache,
+	redactEngine *redact.Engine,
+	guardrailsEngine *guardrails.Engine,
+	inspectorMgr *inspector.Manager,
+	router *route.Router,
+	meter aimeter.Sink,
+	log *slog.Logger,
+) *Chain {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Chain{
+		Cache:      cache,
+		Redact:     redactEngine,
+		Guardrails: guardrailsEngine,
+		Inspector:  inspectorMgr,
+		Router:     router,
+		Meter:      meter,
+		Log:        log,
+	}
+}
+
+// IsAIPassThrough reports whether the given AIConfig has every section
+// nil (i.e. the service has no AI features enabled). The proxy layer
+// short-circuits to the v0.3.0 path when this returns true.
+func IsAIPassThrough(c ServiceAIConfig) bool {
+	return c.Cache == nil && c.Redaction == nil && c.Guardrails == nil &&
+		c.Inspector == nil && c.Routing == nil && c.Anthropic == nil
+}
+
+// ServeHTTP runs the middleware chain for one request. svc carries the
+// resolved service identity + AI config; proxyHandler is the v0.3.0
+// ReverseProxy handler that the chain calls into on a cache MISS / no
+// short-circuit.
+//
+// Pure pass-through when svc.AIConfig has every section nil — caller is
+// expected to check IsAIPassThrough before dispatching, but we re-check
+// here so misuse is safe.
+func (c *Chain) ServeHTTP(w http.ResponseWriter, r *http.Request, svc Service, proxyHandler http.Handler) {
+	if IsAIPassThrough(svc.AIConfig) {
+		proxyHandler.ServeHTTP(w, r)
+		return
+	}
+	c.run(w, r, svc, proxyHandler, false)
+}
+
+// Dispatch is the entry point the proxy calls (satisfies the
+// proxy.AIChain interface). It resolves the AI config via Loader, falls
+// through to proxyHandler when no config exists (or the config is fully
+// pass-through), and otherwise runs the chain.
+//
+// The proxy passes primitive arguments — keeping internal/aigw entirely
+// out of internal/proxy's imports, and vice versa.
+func (c *Chain) Dispatch(w http.ResponseWriter, r *http.Request,
+	serviceID, localHost, apiKeyHeader string,
+	proxyHandler http.Handler,
+) {
+	svc := Service{
+		ID:           serviceID,
+		LocalHost:    localHost,
+		APIKeyHeader: apiKeyHeader,
+	}
+	if c.Loader != nil {
+		loaded, ok, err := c.Loader.LoadAIConfig(r.Context(), serviceID)
+		if err != nil {
+			c.Log.Warn("aigw: load ai config failed",
+				slog.String("service_id", serviceID),
+				slog.String("err", err.Error()))
+		}
+		if ok {
+			// Take the loader's full Service (which carries AIConfig) but
+			// preserve any caller-supplied identity fields the loader didn't
+			// set — keeps the contract explicit.
+			if loaded.ID == "" {
+				loaded.ID = serviceID
+			}
+			if loaded.APIKeyHeader == "" {
+				loaded.APIKeyHeader = apiKeyHeader
+			}
+			svc = loaded
+		}
+	}
+	c.ServeHTTP(w, r, svc, proxyHandler)
+}
+
+// Replay re-fires r through the entire chain and returns the resulting
+// inspector entry. This satisfies the InspectorReplayer interface that
+// Task 8's inspector handler consumes (Task 25 plumbs the wiring in
+// cmd/server/main.go).
+//
+// When the caller has pre-set "Burrow-Cache: bypass" on r, the chain skips
+// the cache Lookup step (see Task 8 replay-compare). Every other step
+// runs as in a normal request.
+//
+// proxyHandler is the same downstream ReverseProxy handler used by
+// ServeHTTP. The Replayer caller (cmd/server) is responsible for providing
+// one wired up to the same StreamDialer.
+func (c *Chain) Replay(ctx context.Context, svc Service, r *http.Request, proxyHandler http.Handler) (inspector.Entry, error) {
+	if c.Inspector == nil {
+		return inspector.Entry{}, errors.New("aigw: inspector manager not configured")
+	}
+	maxReq := inspector.DefaultMaxRequests
+	if svc.AIConfig.Inspector != nil && svc.AIConfig.Inspector.MaxRequests > 0 {
+		maxReq = svc.AIConfig.Inspector.MaxRequests
+	}
+	ring := c.Inspector.GetOrCreate(svc.ID, maxReq)
+
+	// Subscribe before firing so the entry the chain captures is observable.
+	sub, cancel := ring.Subscribe()
+	defer cancel()
+
+	// Use the supplied context so callers can cancel the replay.
+	r = r.WithContext(ctx)
+
+	// Run the chain into a buffer so we don't ship anything anywhere real.
+	rec := &replayRecorder{header: http.Header{}, body: &bytes.Buffer{}}
+	c.run(rec, r, svc, proxyHandler, true)
+
+	// The chain's Capture call lands on the bus before run returns; with the
+	// buffer of 16 it's safe to read after run.
+	select {
+	case e := <-sub:
+		return e, nil
+	default:
+		// Inspector might be disabled for this service; synthesise a minimal
+		// entry from the recorder so the API handler still has something.
+		return inspector.Entry{
+			ID:        inspector.NewID(),
+			ServiceID: svc.ID,
+			TS:        time.Now().UTC(),
+			Method:    r.Method,
+			Path:      r.URL.Path,
+			Status:    rec.statusCode,
+		}, nil
+	}
+}
+
+// run is the shared dispatch path used by both ServeHTTP and Replay. The
+// fromReplay flag exists only to flip the inspector entry's downstream
+// labelling; the rest of the steps run unchanged.
+func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHandler http.Handler, fromReplay bool) {
+	cfg := svc.AIConfig
+
+	// ---------------------------------------------------------------
+	// Step 1: detect — tag the request kind for metering + logging.
+	// ---------------------------------------------------------------
+	body, _ := readBody(r)
+	kind := DetectKind(r, body)
+
+	// ---------------------------------------------------------------
+	// Step 2: ipgeo — STUB. Task 16 swaps in the real impl.
+	//
+	// For pure-pass-through we never construct the wrapper; this keeps the
+	// happy-path allocation-free. When set on the Chain, the wrapper is
+	// expected to short-circuit 403 on deny and call next on allow.
+	// ---------------------------------------------------------------
+
+	// ---------------------------------------------------------------
+	// Step 3: ratelimit — STUB. Task 11 swaps in the real impl.
+	// Same shape as ipgeo: a func(http.Handler) http.Handler.
+	// ---------------------------------------------------------------
+
+	// ---------------------------------------------------------------
+	// Step 4: redact — rewrites the body before cache + metering.
+	// ---------------------------------------------------------------
+	var (
+		redactedBody []byte    = body
+		redactHits   []redact.RuleHit
+		redactDrop   *redact.Rule
+	)
+	if cfg.Redaction != nil && cfg.Redaction.Enabled && c.Redact != nil && len(body) > 0 {
+		var err error
+		redactedBody, redactDrop, redactHits, err = c.Redact.Apply(body, redact.ScopeRequestBody)
+		if err != nil {
+			c.Log.Warn("aigw: redact apply failed", slog.String("service_id", svc.ID), slog.String("err", err.Error()))
+			// Fail open: forward the original body. Redaction errors should
+			// never break the proxy.
+			redactedBody = body
+		}
+		if redactDrop != nil {
+			// Drop-action rule fired — short-circuit with 400 redaction.drop.
+			writeJSONError(w, http.StatusBadRequest, "redaction.drop")
+			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusBadRequest, nil, 0, false, "MISS", fromReplay)
+			return
+		}
+	}
+
+	// What the upstream sees: by default the redacted body, BUT when
+	// ForLogsOnly is set the original body goes upstream and the redacted
+	// copy is what the inspector + audit see.
+	upstreamBody := redactedBody
+	if cfg.Redaction != nil && cfg.Redaction.ForLogsOnly {
+		upstreamBody = body
+	}
+
+	// ---------------------------------------------------------------
+	// Step 5: guardrails — may refuse with 403/200-safe-refusal.
+	// ---------------------------------------------------------------
+	if cfg.Guardrails != nil && cfg.Guardrails.Enabled && c.Guardrails != nil && len(redactedBody) > 0 {
+		hit, pattern := c.Guardrails.Inspect(redactedBody)
+		if hit {
+			switch cfg.Guardrails.Action {
+			case guardrails.ActionRefuse403, "":
+				writeJSONError(w, http.StatusForbidden, "guardrail.refuse")
+				c.Log.Info("aigw: guardrail refuse",
+					slog.String("service_id", svc.ID),
+					slog.String("pattern", pattern),
+				)
+				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusForbidden, nil, 0, false, "MISS", fromReplay)
+				return
+			case guardrails.ActionRefuseSafe:
+				body, hdr := safeRefusalBody(kind)
+				for k, vs := range hdr {
+					for _, v := range vs {
+						w.Header().Add(k, v)
+					}
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				c.captureEntry(svc, r, []byte{}, []byte{}, redactHits, kind, http.StatusOK, body, 0, false, "MISS", fromReplay)
+				return
+			case guardrails.ActionLogOnly:
+				// Fall through; just record the hit in logs.
+				c.Log.Info("aigw: guardrail log_only",
+					slog.String("service_id", svc.ID),
+					slog.String("pattern", pattern),
+				)
+			}
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// Step 6: cache lookup — short-circuits with Burrow-Cache: HIT.
+	// Skipped when Burrow-Cache: bypass is set (Task 8 replay-compare).
+	// ---------------------------------------------------------------
+	cacheStatus := "SKIP"
+	bypass := strings.EqualFold(r.Header.Get("Burrow-Cache"), "bypass")
+	if cfg.Cache != nil && cfg.Cache.Enabled && c.Cache != nil && !bypass {
+		key := buildCacheKey(svc, r, redactedBody, *cfg.Cache)
+		entry, hit, err := c.Cache.Lookup(r.Context(), key)
+		if err != nil {
+			c.Log.Warn("aigw: cache lookup failed",
+				slog.String("service_id", svc.ID),
+				slog.String("err", err.Error()))
+		}
+		if hit {
+			cacheStatus = "HIT"
+			c.serveCacheHit(w, entry)
+			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, entry.Status, entry.Body, 0, false, cacheStatus, fromReplay)
+			c.recordMeter(r.Context(), svc, kind, 0, 0, int64(len(redactedBody)), int64(len(entry.Body)), false, true, entry.Status)
+			return
+		}
+		cacheStatus = "MISS"
+	}
+
+	// ---------------------------------------------------------------
+	// Step 7: inspector.pre — buffer request meta + body. Performed
+	// implicitly by capturing the entry on response completion below.
+	// ---------------------------------------------------------------
+
+	// ---------------------------------------------------------------
+	// Step 8: route — log-only seam for Task 10. Task 12 wires the
+	// actual upstream-pick into the proxy Director. For now we log
+	// the decision so operators can see the strategy firing.
+	// ---------------------------------------------------------------
+	if cfg.Routing != nil && c.Router != nil && len(cfg.Routing.Backends) > 0 {
+		rc := route.RouteContext{
+			Kind:           string(kind),
+			Model:          extractModelFromBody(redactedBody),
+			IdempotencyKey: r.Header.Get("Idempotency-Key"),
+			APIKeyID:       svc.APIKeyID,
+			HeaderValues:   firstValues(r.Header),
+		}
+		if pick, err := c.Router.Pick(r.Context(), *cfg.Routing, rc); err == nil {
+			c.Log.Debug("aigw: route picked",
+				slog.String("service_id", pick.ServiceID),
+				slog.String("model", pick.ConcreteModel),
+			)
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// Step 9: proxy + inspector.post + meter — wrap the visitor writer
+	// and call the downstream handler.
+	// ---------------------------------------------------------------
+
+	// Replace the request body with the (possibly redacted, possibly
+	// original) bytes the upstream should see. Reset Content-Length so
+	// the ReverseProxy doesn't keep the wrong size.
+	if len(upstreamBody) != len(body) {
+		r.ContentLength = int64(len(upstreamBody))
+		r.Header.Set("Content-Length", strconv.Itoa(len(upstreamBody)))
+	}
+	r.Body = io.NopCloser(bytes.NewReader(upstreamBody))
+
+	// Wrap the visitor-side writer in:
+	//  - an aimeter Stream (forwards immediately + flushes; tracks tokens)
+	//  - an inspector capture buffer (truncated at MaxRespBodyBytes)
+	capw := newCapture(w, inspector.MaxRespBodyBytes)
+	stream := aimeter.WrapResponse(capw, aimeter.Kind(kind))
+
+	wrapped := &chainResponseWriter{
+		ResponseWriter: w,
+		stream:         stream,
+		statusCode:     0,
+	}
+
+	proxyHandler.ServeHTTP(wrapped, r)
+	_ = stream.Close()
+
+	// Read counters before recording the meter row.
+	bytesIn, bytesOut := stream.Bytes()
+	tokens := stream.Tokens()
+
+	// Should we cache the response? Only when:
+	//  - cache feature is enabled for this service
+	//  - upstream returned 2xx
+	//  - response is not streamed (no SSE / chunked transfer encoding)
+	if cfg.Cache != nil && cfg.Cache.Enabled && c.Cache != nil && !bypass &&
+		wrapped.statusCode >= 200 && wrapped.statusCode < 300 &&
+		!isStreamedResponse(wrapped.Header()) {
+		key := buildCacheKey(svc, r, redactedBody, *cfg.Cache)
+		body := capw.bytes()
+		if int64(len(body)) <= int64(cfg.Cache.MaxPerEntryKB)*1024 {
+			entry := exact.Entry{
+				Body:       body,
+				Status:     wrapped.statusCode,
+				Headers:    cacheableHeaders(wrapped.Header()),
+				CreatedAt:  time.Now().UTC(),
+				TTLSeconds: cfg.Cache.TTLSeconds,
+			}
+			if err := c.Cache.Store(r.Context(), key, entry); err != nil {
+				c.Log.Warn("aigw: cache store failed",
+					slog.String("service_id", svc.ID),
+					slog.String("err", err.Error()))
+			}
+		}
+	}
+
+	// Inspector capture: only when this service has the feature enabled.
+	c.captureEntry(svc, r, body, redactedBody, redactHits, kind,
+		wrapped.statusCode, capw.bytes(), bytesIn, isStreamedResponse(wrapped.Header()), cacheStatus, fromReplay)
+
+	// Meter the request — always, even on non-2xx, so quota usage reflects
+	// reality. cache_hit is false on this MISS path; cacheStatus tells the
+	// inspector "MISS" while still recording the bytes/tokens.
+	c.recordMeter(r.Context(), svc, kind,
+		tokens.In, tokens.Out,
+		int64(len(redactedBody)), bytesOut,
+		isStreamedResponse(wrapped.Header()), false,
+		wrapped.statusCode,
+	)
+}
+
+// captureEntry records one inspector entry IF the per-service inspector
+// feature is enabled. The fromReplay flag is informational — the inspector
+// API exposes captured entries the same way regardless.
+func (c *Chain) captureEntry(svc Service, r *http.Request,
+	origBody, redactedBody []byte, redactHits []redact.RuleHit,
+	kind Kind, status int, respBody []byte, bytesIn int64, streamed bool, cacheStatus string, fromReplay bool) {
+	if c.Inspector == nil {
+		return
+	}
+	cfg := svc.AIConfig
+	if cfg.Inspector == nil || !cfg.Inspector.Enabled {
+		return
+	}
+	max := cfg.Inspector.MaxRequests
+	if max <= 0 {
+		max = inspector.DefaultMaxRequests
+	}
+	ring := c.Inspector.GetOrCreate(svc.ID, max)
+
+	reqBody, reqOmitted, reqTrunc := inspector.TruncateRequest(redactedBody)
+	respBodyT, respOmitted, respTrunc := inspector.TruncateResponse(respBody)
+
+	hits := make([]inspector.RedactionHit, 0, len(redactHits))
+	for _, h := range redactHits {
+		hits = append(hits, inspector.RedactionHit{Rule: h.Rule.Name, Count: h.Count})
+	}
+
+	entry := inspector.Entry{
+		ID:           inspector.NewID(),
+		ServiceID:    svc.ID,
+		APIKeyID:     svc.APIKeyID,
+		TS:           time.Now().UTC(),
+		Method:       r.Method,
+		Path:         r.URL.Path,
+		Status:       status,
+		BytesIn:      int64(len(origBody)),
+		BytesOut:     int64(len(respBody)),
+		ReqHeaders:   firstValues(r.Header),
+		ReqBody:      reqBody,
+		RespBody:     respBodyT,
+		Truncated:    reqTrunc || respTrunc,
+		BytesOmitted: reqOmitted + respOmitted,
+		Cache:        cacheStatus,
+		Redactions:   hits,
+	}
+	ring.Capture(entry)
+	_ = bytesIn // future: include in DurationMs / metering
+	_ = streamed
+	_ = fromReplay
+}
+
+// recordMeter writes one usage_events row when a Meter sink is configured.
+// Non-blocking: any error is logged + swallowed by the SQLSink.
+func (c *Chain) recordMeter(ctx context.Context, svc Service, kind Kind,
+	tokensIn, tokensOut int, bytesIn, bytesOut int64, streamed, cacheHit bool, status int) {
+	if c.Meter == nil {
+		return
+	}
+	_ = c.Meter.Record(ctx, aimeter.Sample{
+		ServiceID:      svc.ID,
+		APIKeyID:       svc.APIKeyID,
+		Model:          "", // Task 12 fills this once routing supplies the post-alias model
+		Kind:           aimeter.Kind(kind),
+		TokensIn:       tokensIn,
+		TokensOut:      tokensOut,
+		BytesIn:        bytesIn,
+		BytesOut:       bytesOut,
+		Streamed:       streamed,
+		CacheHit:       cacheHit,
+		UpstreamStatus: status,
+	})
+}
+
+// serveCacheHit writes a cache entry back to the visitor with the spec
+// Burrow-Cache: HIT + Burrow-Cache-Age headers. Streamed entries are
+// never stored (filter is in run() before Store), so the body is always
+// safe to write in one shot here.
+func (c *Chain) serveCacheHit(w http.ResponseWriter, e exact.Entry) {
+	for k, v := range e.Headers {
+		w.Header().Set(k, v)
+	}
+	w.Header().Set("Burrow-Cache", "HIT")
+	age := int(time.Since(e.CreatedAt) / time.Second)
+	if age < 0 {
+		age = 0
+	}
+	w.Header().Set("Burrow-Cache-Age", strconv.Itoa(age))
+	status := e.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(e.Body)
+}
+
+// --- helpers ---------------------------------------------------------------
+
+// DetectKind tags a request as openai|anthropic|mcp|unknown per the v0.4.0
+// spec heuristics:
+//
+//   - openai: POST + path ∈ {/v1/chat/completions, /v1/completions,
+//     /v1/embeddings, /v1/responses} OR JSON body with top-level "model".
+//   - anthropic: path matches /v1/messages AND anthropic-version header
+//     is present.
+//   - mcp: JSON-RPC tools/* or prompts/* body, OR SSE upgrade on MCP path.
+//     v0.4.0 detects-only — no other behaviour change.
+//   - else: unknown (proxy through, byte-only metering).
+func DetectKind(r *http.Request, body []byte) Kind {
+	// Anthropic first — /v1/messages is unambiguous when the header is set.
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/messages") &&
+		r.Header.Get("Anthropic-Version") != "" {
+		return KindAnthropic
+	}
+
+	// OpenAI by path.
+	if r.Method == http.MethodPost {
+		switch r.URL.Path {
+		case "/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/responses":
+			return KindOpenAI
+		}
+	}
+
+	// JSON body with a top-level "model" key → OpenAI-shaped.
+	ct := r.Header.Get("Content-Type")
+	if r.Method == http.MethodPost && strings.HasPrefix(strings.ToLower(ct), "application/json") && len(body) > 0 {
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(body, &top); err == nil {
+			if _, ok := top["model"]; ok {
+				return KindOpenAI
+			}
+			// MCP JSON-RPC: method=tools/* or prompts/*
+			if mraw, ok := top["method"]; ok {
+				var method string
+				if err := json.Unmarshal(mraw, &method); err == nil {
+					if strings.HasPrefix(method, "tools/") || strings.HasPrefix(method, "prompts/") {
+						return KindMCP
+					}
+				}
+			}
+		}
+	}
+
+	return KindUnknown
+}
+
+// readBody fully drains r.Body and replaces it with a fresh ReadCloser so
+// downstream handlers see the same bytes. Returns the empty slice when the
+// body is missing.
+func readBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	b, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return b, err
+}
+
+// buildCacheKey constructs the fully-prefixed cache key for a request. The
+// scope prefix matches the applies_per setting:
+//
+//	global       → "global"
+//	per_endpoint → "endpoint:<service_id>:<path>"
+//	per_api_key  → "apikey:<api_key_id>" (falls back to "global" when "")
+func buildCacheKey(svc Service, r *http.Request, body []byte, s exact.Settings) string {
+	canon := exact.Canonicalise(exact.CanonicaliseInput{
+		Method:       r.Method,
+		Scheme:       schemeOf(r),
+		Host:         r.Host,
+		Path:         r.URL.Path,
+		Headers:      r.Header,
+		Body:         body,
+		APIKeyHeader: svc.APIKeyHeader,
+	})
+	hash := exact.HashKey(canon)
+	var scope string
+	switch s.AppliesPer {
+	case "per_endpoint":
+		scope = "endpoint:" + svc.ID + ":" + r.URL.Path
+	case "per_api_key":
+		if svc.APIKeyID != "" {
+			scope = "apikey:" + svc.APIKeyID
+		} else {
+			scope = "global"
+		}
+	default:
+		scope = "global"
+	}
+	return scope + ":" + hash
+}
+
+// schemeOf returns the request's URL scheme, falling back to "https" when
+// the URL is host-relative (which is the case for vhost-proxied requests
+// where the scheme is implicit at the TLS edge).
+func schemeOf(r *http.Request) string {
+	if r.URL.Scheme != "" {
+		return r.URL.Scheme
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+// firstValues collapses a multi-valued http.Header into a single-value
+// map[string]string by taking the first value for each name. This is what
+// the inspector ring stores (its Entry.ReqHeaders is map[string]string).
+// Sensitive headers (Authorization, Cookie) are redacted to "[redacted]".
+func firstValues(h http.Header) map[string]string {
+	if h == nil {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		if len(vs) == 0 {
+			continue
+		}
+		lk := strings.ToLower(k)
+		if lk == "authorization" || lk == "cookie" || lk == "proxy-authorization" {
+			out[k] = "[redacted]"
+			continue
+		}
+		out[k] = vs[0]
+	}
+	return out
+}
+
+// extractModelFromBody returns the value of top-level "model" in a JSON
+// body, or "" when the body is non-JSON / has no model field. Used to
+// supply route.RouteContext.Model for the routing-strategy log seam.
+func extractModelFromBody(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var top struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &top); err != nil {
+		return ""
+	}
+	return top.Model
+}
+
+// isStreamedResponse returns true when the response headers indicate a
+// chunked / SSE stream. The cache MUST NOT Store these (spec invariant).
+func isStreamedResponse(h http.Header) bool {
+	if strings.EqualFold(h.Get("Transfer-Encoding"), "chunked") {
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(h.Get("Content-Type")), "text/event-stream") {
+		return true
+	}
+	return false
+}
+
+// cacheableHeaders selects the subset of response headers worth replaying
+// from a cache HIT. v0.4.0 keeps Content-Type at minimum + a handful of
+// metadata headers; everything else (Date, Set-Cookie, Server, …) is
+// recomputed on the way back out.
+func cacheableHeaders(h http.Header) map[string]string {
+	out := map[string]string{}
+	if ct := h.Get("Content-Type"); ct != "" {
+		out["Content-Type"] = ct
+	}
+	if cl := h.Get("Content-Length"); cl != "" {
+		out["Content-Length"] = cl
+	}
+	if cc := h.Get("Cache-Control"); cc != "" {
+		out["Cache-Control"] = cc
+	}
+	return out
+}
+
+// safeRefusalBody returns the upstream-shaped safe-refusal body the
+// guardrails ActionRefuseSafe path emits. The body shape mirrors the
+// upstream API family; for unknown we fall back to a generic JSON envelope.
+func safeRefusalBody(kind Kind) ([]byte, http.Header) {
+	hdr := http.Header{"Content-Type": []string{"application/json; charset=utf-8"}}
+	switch kind {
+	case KindAnthropic:
+		body := `{"id":"msg_burrow_refusal","type":"message","role":"assistant","content":[{"type":"text","text":"I can't help with that."}],"model":"burrow-guardrail","stop_reason":"end_turn"}`
+		return []byte(body), hdr
+	case KindOpenAI:
+		body := `{"id":"chatcmpl-burrow-refusal","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"I can't help with that."},"finish_reason":"stop"}]}`
+		return []byte(body), hdr
+	default:
+		body := `{"error":"guardrail.refuse_safe"}`
+		return []byte(body), hdr
+	}
+}
+
+// writeJSONError writes a JSON error envelope with the given status code.
+func writeJSONError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `{"error":%q}`, code)
+}
+
+// --- response writer wrappers ---------------------------------------------
+
+// chainResponseWriter intercepts the upstream response to (a) capture the
+// status code for cache + meter, and (b) feed every byte through the
+// aimeter Stream so tokens are accumulated and the visitor sees every
+// frame immediately (the Stream forwards + flushes per frame).
+type chainResponseWriter struct {
+	http.ResponseWriter
+	stream     *aimeter.Stream
+	statusCode int
+	headerSent bool
+}
+
+func (w *chainResponseWriter) WriteHeader(code int) {
+	if w.headerSent {
+		return
+	}
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+	w.headerSent = true
+}
+
+func (w *chainResponseWriter) Write(p []byte) (int, error) {
+	if !w.headerSent {
+		w.statusCode = http.StatusOK
+		w.headerSent = true
+	}
+	// Route through the aimeter Stream — it forwards + flushes per frame.
+	return w.stream.Write(p)
+}
+
+// Flush forwards through the wrapped writer + the underlying ResponseWriter
+// (the aimeter Stream also flushes after every forwarded frame, but the
+// reverse-proxy copy loop may invoke Flush directly on the writer).
+func (w *chainResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack forwards to the underlying ResponseWriter when supported. The
+// Stream layer doesn't observe hijacked bytes — by design, websocket /
+// h2-bidi flows are not metered.
+func (w *chainResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("aigw: underlying ResponseWriter does not implement Hijacker")
+}
+
+// capture is an io.Writer that splits writes: every byte goes to the
+// downstream writer immediately (preserving the SSE flush invariant) AND
+// is appended to an internal buffer up to a cap so the inspector + cache
+// can see what was sent. Bytes beyond the cap are forwarded but dropped
+// from the capture.
+type capture struct {
+	dst    io.Writer
+	buf    bytes.Buffer
+	maxBuf int
+}
+
+func newCapture(dst io.Writer, maxBuf int) *capture {
+	return &capture{dst: dst, maxBuf: maxBuf}
+}
+
+func (c *capture) Write(p []byte) (int, error) {
+	// Forward first so the visitor sees the bytes ASAP.
+	n, err := c.dst.Write(p)
+	if n > 0 {
+		remaining := c.maxBuf - c.buf.Len()
+		if remaining > 0 {
+			take := n
+			if take > remaining {
+				take = remaining
+			}
+			c.buf.Write(p[:take])
+		}
+	}
+	return n, err
+}
+
+func (c *capture) bytes() []byte { return c.buf.Bytes() }
+
+// replayRecorder is the http.ResponseWriter the Replay path writes into.
+// We don't actually ship the response anywhere — the Replayer caller just
+// wants the resulting inspector entry — so the recorder is mostly a sink.
+type replayRecorder struct {
+	header     http.Header
+	statusCode int
+	body       *bytes.Buffer
+}
+
+func (r *replayRecorder) Header() http.Header { return r.header }
+func (r *replayRecorder) WriteHeader(code int) {
+	if r.statusCode == 0 {
+		r.statusCode = code
+	}
+}
+func (r *replayRecorder) Write(p []byte) (int, error) {
+	if r.statusCode == 0 {
+		r.statusCode = http.StatusOK
+	}
+	return r.body.Write(p)
+}
+func (r *replayRecorder) Flush() {}

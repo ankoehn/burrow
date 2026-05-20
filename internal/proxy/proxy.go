@@ -26,6 +26,33 @@ type AccessChecker interface {
 	Allow(ctx context.Context, res *Resolved, r *http.Request) (ok bool, status int, body string, hdr http.Header)
 }
 
+// AIChain is the v0.4.0 middleware chain (internal/aigw.Chain) the proxy
+// dispatches into between Access.Allow and ReverseProxy.ServeHTTP, but ONLY
+// for services with a non-default service_ai_config blob. When AIChain is
+// nil (the default, and the v0.3.0 build), the proxy serves every request
+// through the v0.3.0 pass-through path.
+//
+// Interface — rather than a direct dependency on *aigw.Chain — to keep the
+// proxy → aigw direction one-way (aigw never imports proxy). The proxy
+// hands the chain its own Resolved metadata plus the downstream
+// ReverseProxy handler; the chain calls back into the proxy via that
+// handler when it decides to forward upstream.
+//
+// The chain itself is responsible for resolving + decoding the AI config
+// blob (so the proxy never needs to depend on JSON shape). A nil-zero
+// config means: pass through to proxyHandler unchanged.
+type AIChain interface {
+	// Dispatch runs the chain for one request. serviceID is the resolved
+	// service identity; localHost / apiKeyHeader come from the Resolved
+	// metadata. proxyHandler is the v0.3.0 ReverseProxy handler the chain
+	// delegates to on a cache MISS / no short-circuit. The chain MUST
+	// either short-circuit (writing status + body to w) OR forward via
+	// proxyHandler — never both.
+	Dispatch(w http.ResponseWriter, r *http.Request,
+		serviceID, localHost, apiKeyHeader string,
+		proxyHandler http.Handler)
+}
+
 // Proxy is the vhost reverse proxy. It satisfies http.Handler and must be
 // registered on the ingress listener (the TLS front-door, not the API port).
 type Proxy struct {
@@ -36,6 +63,11 @@ type Proxy struct {
 	log            *slog.Logger
 	trustedProxies []*net.IPNet
 	ingressPort    string // optional; included in X-Forwarded-Port when non-empty
+
+	// v0.4.0 AI middleware chain; nil → v0.3.0 pass-through for every request.
+	// Wired via WithAIChain. The chain itself resolves whether a given
+	// service has an AI config blob — proxy never decodes JSON.
+	aiChain AIChain
 }
 
 // New constructs a Proxy.
@@ -83,6 +115,18 @@ func WithTrustedProxies(cidrs []*net.IPNet) Option {
 // upstream. When empty (the default) the header is omitted.
 func WithIngressPort(port string) Option {
 	return func(p *Proxy) { p.ingressPort = port }
+}
+
+// WithAIChain registers the v0.4.0 middleware chain. When set, the proxy
+// dispatches every successful request (post-access-check) through the chain
+// before invoking the ReverseProxy. The chain itself decides whether a
+// service has an AI config and, if not, calls back into the supplied
+// proxyHandler unchanged — byte-for-byte preserving v0.3.0 behaviour.
+//
+// When nil (the default), the proxy serves every request via the v0.3.0
+// pass-through path with no chain overhead.
+func WithAIChain(c AIChain) Option {
+	return func(p *Proxy) { p.aiChain = c }
 }
 
 // ServeHTTP implements http.Handler.
@@ -243,6 +287,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.log.Debug("proxy request", "subdomain", label, "method", r.Method, "path", r.URL.Path)
+
+	// v0.4.0: if an AI chain is wired, dispatch through it. The chain itself
+	// short-circuits to the v0.3.0 pass-through path (i.e. calls
+	// rp.ServeHTTP unchanged) when no AI config exists for this service —
+	// so a wired-but-unconfigured chain is byte-for-byte identical to
+	// v0.3.0.
+	if p.aiChain != nil {
+		p.aiChain.Dispatch(w, r,
+			res.ServiceID, res.LocalHost, res.APIKeyHeader, rp)
+		return
+	}
+
 	rp.ServeHTTP(w, r)
 }
 
