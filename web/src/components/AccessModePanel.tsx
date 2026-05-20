@@ -9,11 +9,13 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
 // Mode explainers — kept verbatim from the v0.2.0 component (UI_DESIGN §4.15);
-// v0.3.0 only removes the disabled gating, it does not reword these.
+// v0.3.0 only removes the disabled gating, it does not reword these. The mtls
+// entry is a placeholder; Task 6 mounts the dedicated MtlsPanel here.
 const META: Record<AccessMode, { title: string; help: string }> = {
   open: { title: "Open — raw passthrough", help: "Burrow adds nothing. The only mode available in v0.2.0; safe default for TCP tunnels." },
   api_key: { title: "API key — header check", help: "Burrow verifies an API key header before proxying." },
   burrow_login: { title: "Burrow login — role-based", help: "Visitors sign in with their Burrow account at a hosted gate." },
+  mtls: { title: "mTLS — client certificate", help: "Burrow terminates TLS and requires a client certificate chained to a CA you upload." },
 };
 
 export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { serviceId: string; serviceName: string; mode: AccessMode; clientId?: string }) {

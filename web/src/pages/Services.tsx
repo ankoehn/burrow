@@ -10,6 +10,7 @@ const ACCESS_LABEL: Record<AccessMode, string> = {
   open: "Open",
   api_key: "API key",
   burrow_login: "Burrow login",
+  mtls: "mTLS",
 };
 
 function copy(text: string) {

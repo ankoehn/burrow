@@ -6,11 +6,12 @@ import { db } from "@/mocks/db";
 import { AccessModePanel } from "@/components/AccessModePanel";
 
 describe("AccessModePanel (v0.3.0)", () => {
-  it("drops the v0.2.0 disabled gating — all three modes are selectable", async () => {
+  it("drops the v0.2.0 disabled gating — every mode is selectable", async () => {
     renderApp(<AccessModePanel serviceId="svc_web01" serviceName="web" mode="open" />);
     expect(screen.queryByText(/needs http tunnels/i)).toBeNull();
     const radios = screen.getAllByRole("radio");
-    expect(radios).toHaveLength(3);
+    // v0.4.0: mtls is the 4th mode (Task 6 mounts its dedicated panel).
+    expect(radios).toHaveLength(4);
     for (const r of radios) expect(r).not.toHaveAttribute("aria-disabled", "true");
     await userEvent.click(screen.getByRole("radio", { name: /api key/i }));
     expect(screen.getByRole("radio", { name: /api key/i })).toHaveAttribute("aria-checked", "true");
