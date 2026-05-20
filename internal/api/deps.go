@@ -318,6 +318,16 @@ type Deps struct {
 	// degraded mode for early wiring stages).
 	WebhookSecrets WebhookSecretRegistry
 
+	// v0.4.0 Task 18: automation token API + bearer middleware.
+	// Automation is the mint/list/revoke surface (*store.Store satisfies it).
+	// Bearer is the lookup + touch surface used by RequireBearerOrSession
+	// (NewStoreBearerStore adapts *store.Store). When either is nil the
+	// JSON routes return 500 "automation store unavailable" and the bearer
+	// middleware (if registered) treats any "Authorization: Bearer …"
+	// request as invalid.
+	Automation AutomationStore
+	Bearer     BearerStore
+
 	// v0.4.0 Task 16: per-service IP/Geo CRUD + the global geo status
 	// surface. IPGeo is the CRUD surface (db.DB satisfies it).
 	// IPGeoServices is the service-ownership lookup used by the :own gate
@@ -343,12 +353,58 @@ type GeoLookupSurface interface {
 
 type ctxKey int
 
-const userIDKey ctxKey = 0
+const (
+	userIDKey ctxKey = iota
+	// bearerTokenIDKey carries the automation_tokens.id of an authenticated
+	// bearer token (set by RequireBearerOrSession). Its presence in the
+	// context is the canonical signal that a request was bearer-authed:
+	//   - RequireSession sees the userID already set and skips the cookie check.
+	//   - RequireCSRF sees the token id and skips double-submit validation
+	//     (the bearer secret IS the CSRF defense — it lives in a header).
+	//   - Per-endpoint permission gates AND the bearer's declared permission
+	//     set with the user's current role (effectivePerms helper).
+	bearerTokenIDKey
+	// bearerPermsKey carries the []string permission set declared at mint
+	// time. The intersection with the user's current role is checked by
+	// effectivePerms — role demotion immediately narrows reach.
+	bearerPermsKey
+	// callerRoleKey carries the user's CURRENT role (not role_at_mint).
+	// Set by RequireBearerOrSession so the request hot path does not need
+	// a second GetUserByID; the bearer middleware already did one.
+	callerRoleKey
+)
 
-// userID returns the authenticated user id stored by RequireSession, or "" if
-// the context has none (safe default; every authenticated route MUST be guarded
-// by RequireSession — public handlers calling this get "").
+// userID returns the authenticated user id stored by RequireSession (or
+// RequireBearerOrSession on bearer-authed requests), or "" if the context
+// has none (safe default; every authenticated route MUST be guarded by
+// RequireSession — public handlers calling this get "").
 func userID(ctx context.Context) string {
 	v, _ := ctx.Value(userIDKey).(string)
+	return v
+}
+
+// bearerTokenID returns the automation_tokens.id of the authenticated
+// bearer token for this request, or "" if the request was cookie-authed.
+// Used by the CSRF middleware to skip its check on bearer-authed calls,
+// and by future audit hookups to record the source token of a mutation.
+func bearerTokenID(ctx context.Context) string {
+	v, _ := ctx.Value(bearerTokenIDKey).(string)
+	return v
+}
+
+// bearerPerms returns the closed permission set declared at mint time for
+// the current bearer token, or nil for cookie-authed requests. Permission
+// gates AND this slice with the user's current role.
+func bearerPerms(ctx context.Context) []string {
+	v, _ := ctx.Value(bearerPermsKey).([]string)
+	return v
+}
+
+// callerRole returns the role attached to the request context by the
+// bearer middleware. Empty when the request is cookie-authed (the existing
+// callerRole(r) helper in service_handlers.go does a fresh GetUserByID for
+// that path).
+func callerRoleFromCtx(ctx context.Context) string {
+	v, _ := ctx.Value(callerRoleKey).(string)
 	return v
 }

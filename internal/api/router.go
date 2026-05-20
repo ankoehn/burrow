@@ -83,7 +83,16 @@ func NewRouter(d Deps) http.Handler {
 		// get 401 before CSRF validation runs. Safe methods (GET/HEAD/OPTIONS)
 		// pass through CSRF unconditionally — future state-changing routes added
 		// to this group are automatically protected.
+		//
+		// v0.4.0 Task 18: RequireBearerOrSession runs FIRST in this group.
+		// When the request carries Authorization: Bearer bua_<token> it ctx-
+		// injects userID + bearerTokenID + bearerPerms + role; RequireSession
+		// then short-circuits (sees the userID already set) and RequireCSRF
+		// skips the double-submit check (bearer secret IS the CSRF defense).
+		// When the header is absent, RequireBearerOrSession is a no-op and
+		// the cookie flow proceeds unchanged.
 		r.Group(func(r chi.Router) {
+			r.Use(RequireBearerOrSession(d.Bearer, d.Users))
 			r.Use(d.RequireSession)
 			r.Use(RequireCSRF)
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
@@ -206,6 +215,14 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/pause", d.PostWebhookPause)
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/resume", d.PostWebhookResume)
 			r.With(d.requireWebhooksManage).Get("/webhooks/deliveries", d.GetWebhookDeliveries)
+			// v0.4.0 Task 18: automation API + bearer-tokens (spec Part M).
+			// Every route gates on admin OR
+			// automation:tokens:manage:own / :any (the store narrows what
+			// :own callers may list/revoke). The POST response carries the
+			// plaintext bearer secret EXACTLY ONCE; GET responses redact it.
+			r.With(d.requireAutomationTokensManage).Get("/automation/tokens", d.GetAutomationTokens)
+			r.With(d.requireAutomationTokensManage).Post("/automation/tokens", d.PostAutomationToken)
+			r.With(d.requireAutomationTokensManage).Delete("/automation/tokens/{id}", d.DeleteAutomationToken)
 			// v0.4.0 Task 16: per-service IP/Geo CRUD + global geo status
 			// (spec Part J). The per-service routes gate on owner OR
 			// ipgeo:manage:any (admin always passes via the role check

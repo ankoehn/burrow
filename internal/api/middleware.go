@@ -25,8 +25,19 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 // RequireSession authenticates via the burrow_session cookie and injects the user id.
+//
+// When RequireBearerOrSession ran earlier in the chain and successfully
+// authenticated a bearer token, the request context already carries a
+// userID — this middleware then short-circuits, leaving the bearer-set
+// userID untouched. For cookie-authed requests it enforces the burrow_session
+// cookie + session-store validation as before.
 func (d Deps) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Already bearer-authed earlier in the chain → keep the ctx as-is.
+		if bearerTokenID(r.Context()) != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		c, err := r.Cookie(sessionCookieName)
 		if err != nil || c.Value == "" {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
@@ -70,6 +81,14 @@ var csrfSafeMethods = map[string]bool{
 func RequireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if csrfSafeMethods[r.Method] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Bearer-authed requests skip CSRF: the secret itself lives in
+		// the Authorization header (not a cookie a third-party origin
+		// can replay), so the double-submit defense is unnecessary and
+		// the X-CSRF-Token header is not available to CLI automation.
+		if bearerTokenID(r.Context()) != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
