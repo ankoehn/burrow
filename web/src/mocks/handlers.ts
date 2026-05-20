@@ -429,4 +429,33 @@ export const handlers = [
   }),
   http.get("/api/v1/geo/status", ({ request }) =>
     gate(request) ?? json({ enabled: true, db_path: "/var/burrow/geoip.mmdb", db_age_seconds: 3600 })),
+
+  // ---- v0.4.0 guardrails & redaction (spec §4.22) ----
+  http.get("/api/v1/redaction/rules", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.redactionRules)),
+  http.get("/api/v1/redaction/settings", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.redactionSettings)),
+  http.put("/api/v1/redaction/settings", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<MockDb["redactionSettings"]>(request);
+    if (!b) return err(400, "invalid redaction settings");
+    db.redactionSettings = b;
+    return noContent();
+  }),
+  http.post("/api/v1/redaction/preview", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ sample?: string }>(request);
+    return json({ matches: [{ rule: "email", count: b?.sample?.includes("@") ? 1 : 0 }] });
+  }),
+  http.get("/api/v1/guardrails/settings", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.guardrailSettings)),
+  http.put("/api/v1/guardrails/settings", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<MockDb["guardrailSettings"]>(request);
+    if (!b) return err(400, "invalid guardrail settings");
+    db.guardrailSettings = b;
+    return noContent();
+  }),
+  http.get("/api/v1/guardrails/patterns", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.guardrailPatterns)),
 ];

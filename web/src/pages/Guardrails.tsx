@@ -1,0 +1,251 @@
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { apiFetch, ApiError } from "@/lib/api";
+import {
+  Button, Input, Select, SkeletonRows, Switch,
+} from "@/components/ds";
+import type {
+  GuardrailSettings, RedactionRule, RedactionSettings,
+} from "@/lib/contract";
+
+interface RulesResponse {
+  built_in: RedactionRule[];
+  custom: RedactionRule[];
+}
+
+function Accordion({ id, title, children, defaultOpen = false }: {
+  id: string; title: string; children: ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="accordion-section">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`${id}-body`}
+        onClick={() => setOpen((o) => !o)}
+        className="accordion-trigger"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span>{title}</span>
+      </button>
+      {open && (
+        <div id={`${id}-body`} role="region" className="accordion-body">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RulesTable({ name, rules }: { name: string; rules: RedactionRule[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data" aria-label={name}>
+        <thead><tr><th>Name</th><th>Pattern</th><th>Action</th><th>Scope</th></tr></thead>
+        <tbody>
+          {rules.length === 0
+            ? <tr><td colSpan={4} className="muted">No rules yet.</td></tr>
+            : rules.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.name}</td>
+                  <td className="mono small">{r.pattern}</td>
+                  <td>{r.action}</td>
+                  <td>{r.scope}</td>
+                </tr>
+              ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PatternList({ patterns }: { patterns: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        className="link"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? "Hide pattern list" : "View pattern list"}
+      </button>
+      {open && (
+        <ul className="mono small">
+          {patterns.map((p) => <li key={p}>{p}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+const ACTION_OPTIONS = [
+  { value: "log_only", label: "Log only" },
+  { value: "refuse_403", label: "Refuse (HTTP 403)" },
+  { value: "refuse_safe", label: "Refuse with safe response" },
+];
+
+export default function Guardrails() {
+  const qc = useQueryClient();
+  const rules = useQuery({
+    queryKey: ["redaction", "rules"],
+    queryFn: () => apiFetch<RulesResponse>("/redaction/rules"),
+    retry: false,
+  });
+  const redactSettings = useQuery({
+    queryKey: ["redaction", "settings"],
+    queryFn: () => apiFetch<RedactionSettings>("/redaction/settings"),
+    retry: false,
+  });
+  const guardSettings = useQuery({
+    queryKey: ["guardrails", "settings"],
+    queryFn: () => apiFetch<GuardrailSettings>("/guardrails/settings"),
+    retry: false,
+  });
+  const patterns = useQuery({
+    queryKey: ["guardrails", "patterns"],
+    queryFn: () => apiFetch<string[]>("/guardrails/patterns"),
+    retry: false,
+  });
+
+  const [redactDraft, setRedactDraft] = useState<RedactionSettings | null>(null);
+  const [guardDraft, setGuardDraft] = useState<GuardrailSettings | null>(null);
+  const [presidioUrl, setPresidioUrl] = useState("");
+
+  useEffect(() => {
+    if (redactSettings.data && !redactDraft) {
+      setRedactDraft(redactSettings.data);
+      setPresidioUrl(redactSettings.data.presidio_url ?? "");
+    }
+  }, [redactSettings.data, redactDraft]);
+  useEffect(() => {
+    if (guardSettings.data && !guardDraft) setGuardDraft(guardSettings.data);
+  }, [guardSettings.data, guardDraft]);
+
+  const saveRedact = useMutation({
+    mutationFn: (next: RedactionSettings) =>
+      apiFetch<void>("/redaction/settings", { method: "PUT", body: JSON.stringify(next) }),
+    onSuccess: () => {
+      toast.success("Regex redaction saved.");
+      qc.invalidateQueries({ queryKey: ["redaction", "settings"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof ApiError ? e.message : "Couldn't save redaction settings."),
+  });
+  const saveGuard = useMutation({
+    mutationFn: (next: GuardrailSettings) =>
+      apiFetch<void>("/guardrails/settings", { method: "PUT", body: JSON.stringify(next) }),
+    onSuccess: () => {
+      toast.success("Prompt-injection settings saved.");
+      qc.invalidateQueries({ queryKey: ["guardrails", "settings"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof ApiError ? e.message : "Couldn't save guardrails."),
+  });
+  const testPresidio = useMutation({
+    mutationFn: (url: string) =>
+      apiFetch<{ matches: { rule: string; count: number }[] }>(
+        "/redaction/preview",
+        { method: "POST", body: JSON.stringify({ presidio_url: url, sample: "email@example.com" }) },
+      ),
+    onSuccess: (res) => toast.message(`Presidio responded: ${JSON.stringify(res)}`),
+    onError: (e: unknown) =>
+      toast.error(e instanceof ApiError ? e.message : "Couldn't reach Presidio."),
+  });
+
+  if (!redactDraft || !guardDraft || !rules.data) {
+    return (
+      <div className="guardrails-page">
+        <div className="page-head"><div><h1>Guardrails &amp; redaction</h1></div></div>
+        <SkeletonRows n={4} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="guardrails-page">
+      <div className="page-head">
+        <div>
+          <h1>Guardrails &amp; redaction</h1>
+          <p className="sub">Filter outbound prompts, redact PII, and block prompt-injection attempts.</p>
+        </div>
+      </div>
+
+      <Accordion id="regex" title="Regex redaction">
+        <div className="row gap-2" style={{ alignItems: "center" }}>
+          <Switch
+            aria-label="Enable redaction"
+            checked={redactDraft.enabled}
+            onChange={(v) => setRedactDraft({ ...redactDraft, enabled: v })}
+          />
+          <span>Enable redaction on request/response bodies</span>
+        </div>
+        <h3>Built-in rules</h3>
+        <RulesTable name="Built-in rules" rules={rules.data.built_in} />
+        <h3>Custom rules</h3>
+        <RulesTable name="Custom rules" rules={rules.data.custom} />
+        <div className="actions">
+          <Button variant="primary" size="sm" disabled={saveRedact.isPending} onClick={() => saveRedact.mutate(redactDraft)}>
+            {saveRedact.isPending ? "Saving…" : "Save regex settings"}
+          </Button>
+        </div>
+      </Accordion>
+
+      <Accordion id="presidio" title="Presidio (Microsoft sidecar)">
+        <p className="muted">
+          Runs Microsoft Presidio (Apache-2.0) as a sidecar process Burrow shells out to. Off by
+          default — you install Presidio yourself.
+        </p>
+        <div className="field">
+          <label htmlFor="presidio-url">Presidio URL</label>
+          <Input
+            id="presidio-url"
+            className="mono"
+            placeholder="http://localhost:5000"
+            value={presidioUrl}
+            onChange={(e) => setPresidioUrl(e.target.value)}
+          />
+        </div>
+        <div className="actions">
+          <Button variant="secondary" size="sm" onClick={() => testPresidio.mutate(presidioUrl)}>
+            Test connection
+          </Button>
+        </div>
+      </Accordion>
+
+      <Accordion id="injection" title="Prompt-injection guardrails">
+        <div className="row gap-2" style={{ alignItems: "center" }}>
+          <Switch
+            aria-label="Enable injection guardrails"
+            checked={guardDraft.enabled}
+            onChange={(v) => setGuardDraft({ ...guardDraft, enabled: v })}
+          />
+          <span>Inspect prompts for injection patterns</span>
+        </div>
+        <div className="field">
+          <label htmlFor="injection-action">On detection</label>
+          <Select
+            id="injection-action"
+            value={guardDraft.action}
+            onChange={(v) => setGuardDraft({ ...guardDraft, action: v as GuardrailSettings["action"] })}
+            options={ACTION_OPTIONS}
+          />
+        </div>
+        <PatternList patterns={patterns.data ?? []} />
+        <div className="actions">
+          <Button variant="primary" size="sm" disabled={saveGuard.isPending} onClick={() => saveGuard.mutate(guardDraft)}>
+            {saveGuard.isPending ? "Saving…" : "Save guardrails"}
+          </Button>
+        </div>
+      </Accordion>
+
+      <Toaster />
+    </div>
+  );
+}

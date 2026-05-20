@@ -15,6 +15,7 @@ import ConnectClient from "@/pages/ConnectClient";
 import AiEndpoints from "@/pages/AiEndpoints";
 import AiEndpointDetail from "@/pages/AiEndpointDetail";
 import PromptCache from "@/pages/PromptCache";
+import Guardrails from "@/pages/Guardrails";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/ai/endpoints" element={<AiEndpoints />} />
         <Route path="/ai/endpoints/:id" element={<AiEndpointDetail />} />
         <Route path="/cache" element={<PromptCache />} />
+        <Route path="/guardrails" element={<Guardrails />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />

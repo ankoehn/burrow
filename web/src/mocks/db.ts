@@ -1,7 +1,8 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
-  InspectorEntry, CacheSettings,
+  InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
+  GuardrailSettings,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -46,6 +47,10 @@ export interface MockDb {
   aiConfigs: Record<string, ServiceAIConfig>;
   inspectorEntries: Record<string, InspectorEntry[]>;
   cacheSettings: CacheSettingsPayload;
+  redactionRules: { built_in: RedactionRule[]; custom: RedactionRule[] };
+  redactionSettings: RedactionSettings;
+  guardrailSettings: GuardrailSettings;
+  guardrailPatterns: string[];
 }
 
 function seed(): MockDb {
@@ -129,6 +134,23 @@ function seed(): MockDb {
       global: { enabled: true, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64 },
       per_service: {},
     },
+    redactionRules: {
+      built_in: [
+        { id: "email", name: "Email address", pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", action: "mask", scope: "both", builtin: true },
+        { id: "phone", name: "E.164 phone", pattern: "\\+?[0-9 ()-]{7,}", action: "mask", scope: "both", builtin: true },
+        { id: "ssn", name: "US SSN", pattern: "\\d{3}-\\d{2}-\\d{4}", action: "mask", scope: "both", builtin: true },
+      ],
+      custom: [],
+    },
+    redactionSettings: { enabled: true, redact_for_logs_only: false, rule_ids: ["email"], presidio_enabled: false, presidio_url: "http://localhost:5000" },
+    guardrailSettings: { enabled: false, action: "log_only" },
+    guardrailPatterns: [
+      "ignore previous instructions",
+      "you are now",
+      "system prompt",
+      "jailbreak",
+      "developer mode",
+    ],
   };
 }
 
