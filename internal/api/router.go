@@ -73,6 +73,19 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/healthz", d.Healthz)
 	r.Get("/readyz", d.Readyz)
 
+	// v0.4.0 Task 21: Prometheus /metrics endpoint (spec Part O). Lives
+	// OUTSIDE /api/v1 (k8s/prometheus convention) but is NOT public —
+	// gated by RequireBearerOrSession + RequireSession + requireMetricsRead
+	// (admin OR authz.PermMetricsRead). The handler emits the closed metric
+	// set in 0.0.4 text format; CSRF does not apply (GET is a safe method).
+	// Registered before the SPA catch-all so /metrics is not shadowed.
+	r.Group(func(r chi.Router) {
+		r.Use(RequireBearerOrSession(d.Bearer, d.Users))
+		r.Use(d.RequireSession)
+		r.Use(d.requireMetricsRead)
+		r.Get("/metrics", d.GetMetrics)
+	})
+
 	loginPerIP, loginGlobal := d.loginRateLimiters()
 
 	r.Route("/api/v1", func(r chi.Router) {

@@ -373,6 +373,15 @@ type Deps struct {
 	// audit append (the JSON route still succeeds; the chain just doesn't
 	// reflect the API-driven mutation).
 	AuditAppender AuditAppender
+
+	// v0.4.0 Task 21: Prometheus /metrics endpoint.
+	// Metrics is the closed-set metric recorder (spec Part O). cmd/server
+	// (Task 25) constructs *metrics.Recorder, wraps it via
+	// NewMetricsRecorderAdapter and assigns it here. Nil disables /metrics
+	// (the handler returns 500 "metrics recorder unavailable"); the gate
+	// (admin OR metrics:read) still runs first so unauthenticated callers
+	// still get 401 / 403 — never a leak of internal state.
+	Metrics MetricsRecorder
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup
