@@ -271,6 +271,14 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAutomationTokensManage).Get("/automation/tokens", d.GetAutomationTokens)
 			r.With(d.requireAutomationTokensManage).Post("/automation/tokens", d.PostAutomationToken)
 			r.With(d.requireAutomationTokensManage).Delete("/automation/tokens/{id}", d.DeleteAutomationToken)
+			// v0.4.0 Task 23: `burrowd mcp` dashboard surface (spec Part P).
+			// Two read-only endpoints expose the listener config + closed
+			// tool inventory. Both are gated by admin OR mcp:tools:read so
+			// non-admin operators with the perm can render the page. The
+			// actual MCP listener (port :7800) is wired by cmd/server in
+			// Task 25; these endpoints have zero behavioural coupling to it.
+			r.With(d.requireMCPRead).Get("/mcp/status", d.GetMCPStatus)
+			r.With(d.requireMCPRead).Get("/mcp/tools", d.GetMCPTools)
 			// v0.4.0 Task 16: per-service IP/Geo CRUD + global geo status
 			// (spec Part J). The per-service routes gate on owner OR
 			// ipgeo:manage:any (admin always passes via the role check

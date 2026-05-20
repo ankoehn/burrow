@@ -1820,6 +1820,48 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ────────────────────────────────────────────────────────────────────────
+  # MCP (burrowd mcp — JSON-RPC 2.0 tool server, spec Part P)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/mcp/status:
+    get:
+      tags: [mcp]
+      summary: burrowd mcp listener status (enabled, listen, token_id)
+      responses:
+        '200':
+          description: Status envelope (plaintext bearer is never returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  listen: { type: string }
+                  token_id: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/mcp/tools:
+    get:
+      tags: [mcp]
+      summary: Closed inventory of MCP tools (name, description, parameters_schema, permission)
+      responses:
+        '200':
+          description: Tool inventory.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    description: { type: string }
+                    parameters_schema: { type: object }
+                    permission: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
   # Events (SSE)
   # ────────────────────────────────────────────────────────────────────────
   /api/v1/events:

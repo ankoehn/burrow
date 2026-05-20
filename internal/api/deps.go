@@ -382,6 +382,14 @@ type Deps struct {
 	// (admin OR metrics:read) still runs first so unauthenticated callers
 	// still get 401 / 403 — never a leak of internal state.
 	Metrics MetricsRecorder
+
+	// v0.4.0 Task 23: `burrowd mcp` configuration + tool registry surface.
+	// The actual MCP listener (default :7800) is wired by cmd/server (Task
+	// 25); the Deps surface only carries the metadata GET /api/v1/mcp/*
+	// reads. Zero value (Enabled=false, Server=nil) is safe: status renders
+	// {enabled:false,…} and tools/inventory renders []. Operators NEVER see
+	// the BURROW_MCP_TOKEN plaintext via the API — only the row id.
+	MCP MCPInfo
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup
