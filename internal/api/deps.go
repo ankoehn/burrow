@@ -239,6 +239,21 @@ type Deps struct {
 	// it; nil disables the four routes (handlers return 500 with a clear
 	// "alias store unavailable" body).
 	ModelAliases ModelAliasStore
+	// InspectorRings is the per-service in-memory ring-buffer manager
+	// (spec Part E). *inspector.Manager satisfies it. When nil, the
+	// list/get routes degrade to empty / 404 and the stream returns 500.
+	InspectorRings InspectorRings
+	// InspectorServices is the narrow service-ownership lookup used by the
+	// inspector handlers' :own permission gate. *store.Store satisfies it
+	// via GetServiceOwner; *db.DB exposes the same name. Nil disables :own
+	// checks (handlers return 500 "service lookup unavailable" for :own
+	// callers; :any callers still pass).
+	InspectorServices InspectorOwnerLookup
+	// InspectorReplayer re-fires an inspector entry's request through the
+	// proxy chain. Wired in Task 10/25; nil keeps the routes registered
+	// but the POST .../replay and POST .../replay-compare handlers return
+	// 503 "replay engine unavailable".
+	InspectorReplayer InspectorReplayer
 }
 
 type ctxKey int

@@ -146,6 +146,16 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAdminOrAIConfigureAny).Post("/models/aliases", d.PostModelAlias)
 			r.With(d.requireAdminOrAIConfigureAny).Put("/models/aliases/{alias}", d.PutModelAlias)
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/models/aliases/{alias}", d.DeleteModelAlias)
+			// v0.4.0 Task 8: request inspector ring buffer (spec Part E).
+			// Read endpoints (list, get) are gated by inspector:read:own
+			// (owner) or inspector:read:any (admin) — enforced inside the
+			// handler. Replay + replay-compare are gated by
+			// inspector:replay:own / :any. The SSE stream is registered
+			// outside this group (no CSRF, no timeout).
+			r.Get("/services/{serviceID}/inspector/requests", d.ListInspectorRequests)
+			r.Get("/services/{serviceID}/inspector/requests/{rid}", d.GetInspectorRequest)
+			r.Post("/services/{serviceID}/inspector/requests/{rid}/replay", d.ReplayInspectorRequest)
+			r.Post("/services/{serviceID}/inspector/requests/{rid}/replay-compare", d.ReplayCompareInspectorRequest)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
@@ -171,6 +181,10 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(d.RequireSession)
 			r.Get("/events", d.EventsStream)
+			// v0.4.0 Task 8: per-service inspector SSE stream. Permission
+			// gating (inspector:read:own/:any + ownership) is enforced
+			// inside the handler before headers are written.
+			r.Get("/services/{serviceID}/inspector/stream", d.InspectorStream)
 		})
 	})
 
