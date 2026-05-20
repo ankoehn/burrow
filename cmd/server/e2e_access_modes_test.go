@@ -31,7 +31,7 @@ func TestE2EAccessModes_APIKey_DefaultBearer(t *testing.T) {
 
 	// Flip the service to api_key mode via the real store (admin caller).
 	must(t, s.store.SetServiceAccessMode(
-		context.Background(), s.userID, "admin", s.serviceID, "api_key", "Authorization"),
+		context.Background(), s.userID, "admin", s.serviceID, "api_key", "Authorization", nil),
 		"SetServiceAccessMode(api_key)")
 	// Mint a key, retain plaintext.
 	_, plaintext, err := s.store.CreateAPIKey(
@@ -97,7 +97,7 @@ func TestE2EAccessModes_APIKey_CustomHeaderOverride(t *testing.T) {
 
 	// Switch service to api_key with a custom header.
 	must(t, s.store.SetServiceAccessMode(
-		context.Background(), s.userID, "admin", s.serviceID, "api_key", "X-Api-Key"),
+		context.Background(), s.userID, "admin", s.serviceID, "api_key", "X-Api-Key", nil),
 		"SetServiceAccessMode(api_key, X-Api-Key)")
 	_, plaintext, err := s.store.CreateAPIKey(
 		context.Background(), s.userID, "admin", s.serviceID, "ci")
@@ -147,7 +147,7 @@ func TestE2EAccessModes_BurrowLogin_FullFlow(t *testing.T) {
 
 	// Configure service: burrow_login, policy = ["admin"].
 	must(t, s.store.SetServiceAccessMode(
-		context.Background(), s.userID, "admin", s.serviceID, "burrow_login", ""),
+		context.Background(), s.userID, "admin", s.serviceID, "burrow_login", "", nil),
 		"SetServiceAccessMode(burrow_login)")
 	must(t, s.store.SetAccessPolicy(
 		context.Background(), s.userID, "admin", s.serviceID, []string{"admin"}),

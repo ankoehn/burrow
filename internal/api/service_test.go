@@ -53,6 +53,7 @@ type fakeServiceStore struct {
 	// last args captured for inspection
 	lastMode   string
 	lastHeader string
+	lastCAPEM  []byte
 	lastRoles  []string
 }
 
@@ -62,9 +63,10 @@ func (f *fakeServiceStore) ListServices(_ context.Context, _, _ string) ([]store
 func (f *fakeServiceStore) GetService(_ context.Context, _, _, _ string) (store.ServiceDetail, error) {
 	return f.getSvc, f.getSvcErr
 }
-func (f *fakeServiceStore) SetServiceAccessMode(_ context.Context, _, _, _, mode, header string) error {
+func (f *fakeServiceStore) SetServiceAccessMode(_ context.Context, _, _, _, mode, header string, caPEM []byte) error {
 	f.lastMode = mode
 	f.lastHeader = header
+	f.lastCAPEM = append([]byte(nil), caPEM...)
 	return f.setModeErr
 }
 func (f *fakeServiceStore) ListAPIKeys(_ context.Context, _, _, _ string) ([]db.ServiceAPIKey, error) {
@@ -862,7 +864,7 @@ type fakeServiceStoreV3 struct {
 	capturedMode      string
 }
 
-func (f *fakeServiceStoreV3) SetServiceAccessMode(_ context.Context, _, _, serviceID, mode, _ string) error {
+func (f *fakeServiceStoreV3) SetServiceAccessMode(_ context.Context, _, _, serviceID, mode, _ string, _ []byte) error {
 	f.capturedServiceID = serviceID
 	f.capturedMode = mode
 	return nil

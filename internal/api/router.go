@@ -206,6 +206,14 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/pause", d.PostWebhookPause)
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/resume", d.PostWebhookResume)
 			r.With(d.requireWebhooksManage).Get("/webhooks/deliveries", d.GetWebhookDeliveries)
+			// v0.4.0 Task 16: per-service IP/Geo CRUD + global geo status
+			// (spec Part J). The per-service routes gate on owner OR
+			// ipgeo:manage:any (admin always passes via the role check
+			// inside ensureIPGeoServiceAccess); /geo/status is session-
+			// authed only (any signed-in user may read the global flag).
+			r.Get("/services/{serviceID}/ip-geo", d.GetServiceIPGeo)
+			r.Put("/services/{serviceID}/ip-geo", d.PutServiceIPGeo)
+			r.Get("/geo/status", d.GetGeoStatus)
 			// v0.4.0 Task 15: editable custom roles + permission matrix
 			// (spec Part I). The permission catalog read is session-authed
 			// (every signed-in user may see the list of capabilities); the

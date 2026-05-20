@@ -37,8 +37,16 @@ var ErrInvalidRole = errors.New("store: role must be 'admin' or 'user'")
 var ErrInvalidStatus = errors.New("store: status must be 'active' or 'suspended'")
 
 // ErrInvalidAccessMode is returned by SetTunnelAccessMode for a value other
-// than 'open', 'api_key', or 'burrow_login'.
-var ErrInvalidAccessMode = errors.New("store: access_mode must be 'open', 'api_key', or 'burrow_login'")
+// than 'open', 'api_key', 'burrow_login', or 'mtls'.
+var ErrInvalidAccessMode = errors.New("store: access_mode must be 'open', 'api_key', 'burrow_login', or 'mtls'")
+
+// ErrMTLSCARequired is returned by SetServiceAccessMode when the caller asks
+// for access_mode='mtls' but does not supply a non-empty CA PEM. Maps to 400.
+var ErrMTLSCARequired = errors.New("store: mtls access mode requires a non-empty mtls_ca_pem")
+
+// ErrInvalidMTLSCAPEM is returned when the supplied mtls_ca_pem does not
+// contain at least one parseable CERTIFICATE block. Maps to 400.
+var ErrInvalidMTLSCAPEM = errors.New("store: invalid CA PEM")
 
 // ErrSMTPUnconfigured is returned by SendTestEmail when no smtp.host is set.
 var ErrSMTPUnconfigured = errors.New("store: smtp is not configured")

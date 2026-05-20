@@ -281,7 +281,8 @@ func TestContractV3_SetAccessMode_InvalidMode_400Body(t *testing.T) {
 		t.Fatalf("want 400, got %d", r.StatusCode)
 	}
 	obj := decodeObj(t, r)
-	if obj["error"] != "access_mode must be 'open', 'api_key', or 'burrow_login'" {
+	// v0.4.0 Task 16: enum now includes "mtls".
+	if obj["error"] != "access_mode must be 'open', 'api_key', 'burrow_login', or 'mtls'" {
 		t.Errorf(`error body: got %v`, obj)
 	}
 }
@@ -299,7 +300,8 @@ func TestContractV3_SetAccessMode_TCPService_409Body(t *testing.T) {
 		t.Fatalf("want 409, got %d", r.StatusCode)
 	}
 	obj := decodeObj(t, r)
-	if obj["error"] != "api_key and burrow_login require an http service" {
+	// v0.4.0 Task 16: enum now includes "mtls" (also http-only).
+	if obj["error"] != "api_key, burrow_login, and mtls require an http service" {
 		t.Errorf(`error body: got %v`, obj)
 	}
 }

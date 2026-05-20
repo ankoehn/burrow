@@ -76,7 +76,7 @@ func (d Deps) SetAccessMode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			uid := userID(r.Context())
-			if err := d.Services.SetServiceAccessMode(r.Context(), uid, callerRole, loc.ServiceID, in.AccessMode, ""); err != nil {
+			if err := d.Services.SetServiceAccessMode(r.Context(), uid, callerRole, loc.ServiceID, in.AccessMode, "", nil); err != nil {
 				if !mapServiceErr(w, err, "service not found") {
 					writeErr(w, http.StatusInternalServerError, "set access mode failed")
 				}

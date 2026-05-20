@@ -19,6 +19,8 @@ package store
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,33 +124,79 @@ func (s *Store) GetService(ctx context.Context, callerID, callerRole, serviceID 
 
 // SetServiceAccessMode validates and applies a new access mode to the given
 // service. Gate: configure:own (owner) or configure:any (admin).
-// Validation order: gate → mode enum → http-only constraint.
+// Validation order: gate → mode enum → http-only constraint → mtls_ca_pem.
 //   - ErrForbidden if not authorized
 //   - db.ErrNotFound if the service does not exist
-//   - ErrInvalidAccessMode if mode ∉ {open,api_key,burrow_login}
+//   - ErrInvalidAccessMode if mode ∉ {open,api_key,burrow_login,mtls}
 //   - ErrServiceNotHTTP if mode ≠ "open" and service.Type ≠ "http"
+//   - ErrMTLSCARequired if mode == "mtls" and caPEM is empty
+//   - ErrInvalidMTLSCAPEM if mode == "mtls" and caPEM has no valid block
 //
 // An empty header defaults to "Authorization" for api_key mode (stored in DB).
 // For non-api_key modes the header is written as "Authorization" as well,
-// keeping the DB column consistent; the column has no effect when mode is open
-// or burrow_login.
-func (s *Store) SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string) error {
+// keeping the DB column consistent.
+//
+// caPEM is the operator-supplied trust anchor for mtls mode. When mode is
+// "mtls" the store validates it contains at least one CERTIFICATE block and
+// persists it via SetServiceMTLSCAPEM; for any other mode caPEM is ignored.
+// Switching AWAY from mtls does NOT clear the existing CA blob — that lets
+// operators flip back to mtls later without re-pasting the CA. To explicitly
+// clear, set access_mode to mtls then immediately switch back, or call the
+// dedicated DB method.
+func (s *Store) SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string, caPEM []byte) error {
 	svc, err := s.canConfigure(ctx, callerID, callerRole, serviceID)
 	if err != nil {
 		return err
 	}
 	switch mode {
-	case "open", "api_key", "burrow_login":
+	case "open", "api_key", "burrow_login", "mtls":
 	default:
 		return ErrInvalidAccessMode
 	}
 	if mode != "open" && svc.Type != "http" {
 		return ErrServiceNotHTTP
 	}
+	if mode == "mtls" {
+		if len(caPEM) == 0 {
+			return ErrMTLSCARequired
+		}
+		if !validateCAPEM(caPEM) {
+			return ErrInvalidMTLSCAPEM
+		}
+	}
 	if header == "" {
 		header = "Authorization"
 	}
-	return s.q.SetServiceAccessMode(ctx, serviceID, mode, header)
+	if err := s.q.SetServiceAccessMode(ctx, serviceID, mode, header); err != nil {
+		return err
+	}
+	if mode == "mtls" {
+		if err := s.q.SetServiceMTLSCAPEM(ctx, serviceID, string(caPEM)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCAPEM reports whether pem contains at least one parseable
+// CERTIFICATE block.
+func validateCAPEM(in []byte) bool {
+	rest := in
+	for {
+		block, next := pem.Decode(rest)
+		if block == nil {
+			return false
+		}
+		if block.Type == "CERTIFICATE" {
+			if _, err := x509.ParseCertificate(block.Bytes); err == nil {
+				return true
+			}
+		}
+		if len(next) == 0 {
+			return false
+		}
+		rest = next
+	}
 }
 
 // ListAPIKeys returns all API keys for the given service.

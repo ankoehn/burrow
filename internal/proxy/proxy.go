@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -68,6 +70,14 @@ type Proxy struct {
 	// Wired via WithAIChain. The chain itself resolves whether a given
 	// service has an AI config blob — proxy never decodes JSON.
 	aiChain AIChain
+
+	// v0.4.0 Task 16: base TLS config the SNI router clones into a per-vhost
+	// config when an mtls service matches. cmd/server sets this to the
+	// listener's own *tls.Config (with the server certificates). When nil,
+	// GetConfigForClient still works — it constructs a minimal config that
+	// requires + verifies the client cert, and the standard library uses
+	// the listener's own certificates for the server side.
+	tlsBase *tls.Config
 }
 
 // New constructs a Proxy.
@@ -127,6 +137,20 @@ func WithIngressPort(port string) Option {
 // pass-through path with no chain overhead.
 func WithAIChain(c AIChain) Option {
 	return func(p *Proxy) { p.aiChain = c }
+}
+
+// WithTLSBase registers the listener's base *tls.Config so the per-vhost
+// GetConfigForClient hook can clone it (preserving Certificates / NextProtos
+// / GetCertificate / etc.) before overlaying mtls-specific ClientCAs +
+// ClientAuth. cmd/server passes its own *tls.Config here; tests using
+// httptest.NewUnstartedServer can set this via their own server.TLS.
+//
+// When nil (the default), GetConfigForClient constructs a minimal config
+// from scratch — the stdlib then falls back to the listener's own
+// Certificates for the server side, which works when the listener itself
+// has Certificates set (the common case).
+func WithTLSBase(c *tls.Config) Option {
+	return func(p *Proxy) { p.tlsBase = c }
 }
 
 // ServeHTTP implements http.Handler.
@@ -308,4 +332,93 @@ func (p *Proxy) notFound(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = fmt.Fprint(w, "tunnel not found")
+}
+
+// GetConfigForClient is the SNI-driven per-vhost TLS config seam. cmd/server
+// wires it on the ingress *tls.Config so the TLS layer can require + verify a
+// client cert ONLY for services whose access_mode == "mtls" with a configured
+// mtls_ca_pem.
+//
+// Behaviour:
+//   - SNI label matches an mtls service with a non-empty CA → return a clone
+//     with ClientCAs set to that CA + ClientAuth = RequireAndVerifyClientCert.
+//   - SNI label matches a non-mtls service, or no service at all, or the CA
+//     is empty/invalid → return nil to let the listener use the default
+//     (no client cert required).
+//
+// Returning nil error + nil config means: use the default config. We never
+// return a non-nil error here — a lookup miss must not break TLS handshakes
+// for unrelated vhosts.
+//
+// This method is safe to call from many goroutines (one TLS handshake per
+// new connection).
+func (p *Proxy) GetConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+	if hello == nil {
+		return nil, nil
+	}
+	sni := hello.ServerName
+	if sni == "" {
+		return nil, nil
+	}
+	// Strip optional port (rare for SNI but be defensive).
+	if h, _, err := net.SplitHostPort(sni); err == nil {
+		sni = h
+	}
+	// Expect <label>.<authDomain>.
+	suffix := "." + p.authDomain
+	if !strings.HasSuffix(sni, suffix) {
+		return nil, nil
+	}
+	label := strings.TrimSuffix(sni, suffix)
+	if label == "" || strings.Contains(label, ".") {
+		return nil, nil
+	}
+
+	// Use the connection's context so lookups inherit handshake cancellation.
+	ctx := hello.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := p.dialer.Lookup(ctx, label)
+	if err != nil {
+		// Unknown vhost during handshake → default config; ServeHTTP will
+		// 404 on the request itself.
+		return nil, nil
+	}
+	if res == nil || res.AccessMode != AccessModeMTLS || len(res.MTLSCAPEM) == 0 {
+		return nil, nil
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(res.MTLSCAPEM) {
+		p.log.Warn("proxy GetConfigForClient: ca pem appended no certs",
+			"service_id", res.ServiceID,
+			"sni", sni)
+		// Misconfigured CA: keep the default config rather than break TLS.
+		// The access checker's checkMTLS will still refuse with 500 when
+		// it sees the unusable CA on the request path.
+		return nil, nil
+	}
+
+	// Clone the base config (when registered via WithTLSBase) so the
+	// per-vhost overlay inherits Certificates / NextProtos / GetCertificate.
+	// Without WithTLSBase we return a minimal config; the stdlib then keeps
+	// using the listener's own Certificates for the server-half of the
+	// handshake.
+	var cfg *tls.Config
+	if p.tlsBase != nil {
+		cfg = p.tlsBase.Clone()
+	} else {
+		cfg = &tls.Config{}
+	}
+	cfg.ClientCAs = pool
+	cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	if cfg.MinVersion == 0 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	// Avoid recursion: a cloned base config carrying GetConfigForClient
+	// would re-enter here on every handshake. The returned config is
+	// already the "final" one for this vhost.
+	cfg.GetConfigForClient = nil
+	return cfg, nil
 }

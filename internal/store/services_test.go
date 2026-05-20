@@ -2,12 +2,44 @@ package store
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ankoehn/burrow/internal/db"
 )
+
+// genTestCAPEM produces a self-signed CA PEM block useful only for store-layer
+// PEM-parse validation (the cert chain is never actually used to verify).
+func genTestCAPEM(t *testing.T) []byte {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ca key: %v", err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "burrow-test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatalf("ca cert: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
 
 // mustCreateUser is a test helper that creates a user with the given email and
 // role, fatally failing the test if creation fails.
@@ -43,21 +75,21 @@ func TestServiceConfigPermissionGate(t *testing.T) {
 	svc := mustGetOrCreateService(t, st, owner.ID, "web", "http")
 
 	// owner (services:configure:own) may set mode
-	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "api_key", ""); err != nil {
+	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "api_key", "", nil); err != nil {
 		t.Fatalf("owner should be allowed: %v", err)
 	}
 	// a different non-admin user → forbidden
-	err := st.SetServiceAccessMode(ctx, other.ID, "user", svc.ID, "open", "")
+	err := st.SetServiceAccessMode(ctx, other.ID, "user", svc.ID, "open", "", nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("want ErrForbidden, got %v", err)
 	}
 	// admin (services:configure:any) may configure anyone's
-	if err := st.SetServiceAccessMode(ctx, admin.ID, "admin", svc.ID, "open", ""); err != nil {
+	if err := st.SetServiceAccessMode(ctx, admin.ID, "admin", svc.ID, "open", "", nil); err != nil {
 		t.Fatalf("admin should be allowed: %v", err)
 	}
 	// non-open on a tcp service → ErrServiceNotHTTP
 	tcp := mustGetOrCreateService(t, st, owner.ID, "db", "tcp")
-	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", tcp.ID, "api_key", ""); !errors.Is(err, ErrServiceNotHTTP) {
+	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", tcp.ID, "api_key", "", nil); !errors.Is(err, ErrServiceNotHTTP) {
 		t.Fatalf("want ErrServiceNotHTTP, got %v", err)
 	}
 }
@@ -69,7 +101,7 @@ func TestSetServiceAccessModeInvalidMode(t *testing.T) {
 	owner := mustCreateUser(t, st, "owner@x", "user")
 	svc := mustGetOrCreateService(t, st, owner.ID, "web", "http")
 
-	err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "invalid_mode", "")
+	err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "invalid_mode", "", nil)
 	if !errors.Is(err, ErrInvalidAccessMode) {
 		t.Fatalf("want ErrInvalidAccessMode, got %v", err)
 	}
@@ -81,7 +113,7 @@ func TestSetServiceAccessModeNotFound(t *testing.T) {
 	ctx := context.Background()
 	admin := mustCreateUser(t, st, "admin@x", "admin")
 
-	err := st.SetServiceAccessMode(ctx, admin.ID, "admin", "does-not-exist", "open", "")
+	err := st.SetServiceAccessMode(ctx, admin.ID, "admin", "does-not-exist", "open", "", nil)
 	if !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("want db.ErrNotFound, got %v", err)
 	}
@@ -95,7 +127,7 @@ func TestSetServiceAccessModeHeaderDefault(t *testing.T) {
 	owner := mustCreateUser(t, st, "owner@x", "user")
 	svc := mustGetOrCreateService(t, st, owner.ID, "web", "http")
 
-	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "api_key", ""); err != nil {
+	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "api_key", "", nil); err != nil {
 		t.Fatalf("SetServiceAccessMode: %v", err)
 	}
 	// The db row should have "Authorization" stored.
@@ -105,6 +137,41 @@ func TestSetServiceAccessModeHeaderDefault(t *testing.T) {
 	}
 	if updated.APIKeyHeader != "Authorization" {
 		t.Fatalf("want APIKeyHeader=Authorization, got %q", updated.APIKeyHeader)
+	}
+}
+
+// TestSetServiceAccessModeMTLS verifies that the mtls path requires a
+// non-empty + parseable CA PEM and that the CA is persisted via
+// db.SetServiceMTLSCAPEM.
+func TestSetServiceAccessModeMTLS(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	owner := mustCreateUser(t, st, "owner@x", "user")
+	svc := mustGetOrCreateService(t, st, owner.ID, "web", "http")
+
+	// 1. Empty CA PEM → ErrMTLSCARequired.
+	err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "mtls", "", nil)
+	if !errors.Is(err, ErrMTLSCARequired) {
+		t.Fatalf("want ErrMTLSCARequired, got %v", err)
+	}
+
+	// 2. Junk PEM → ErrInvalidMTLSCAPEM.
+	err = st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "mtls", "", []byte("not a pem"))
+	if !errors.Is(err, ErrInvalidMTLSCAPEM) {
+		t.Fatalf("want ErrInvalidMTLSCAPEM, got %v", err)
+	}
+
+	// 3. Valid CA PEM → success + CA persisted.
+	caPEM := genTestCAPEM(t)
+	if err := st.SetServiceAccessMode(ctx, owner.ID, "user", svc.ID, "mtls", "", caPEM); err != nil {
+		t.Fatalf("mtls happy-path PEM did not parse: %v", err)
+	}
+	gotPEM, err := st.q.GetServiceMTLSCAPEM(ctx, svc.ID)
+	if err != nil {
+		t.Fatalf("GetServiceMTLSCAPEM: %v", err)
+	}
+	if !strings.Contains(gotPEM, "BEGIN CERTIFICATE") {
+		t.Errorf("CA PEM not persisted: got %q", gotPEM)
 	}
 }
 

@@ -9,7 +9,10 @@ import (
 )
 
 // selectServiceRow is the shared SELECT column list for service rows.
-const selectServiceCols = `id, user_id, name, type, COALESCE(subdomain,''), access_mode, api_key_header, created_at`
+// mtls_ca_pem (migration 0009) is included so the proxy layer can populate
+// proxy.Resolved.MTLSCAPEM without a second round-trip; non-mtls services
+// store it as NULL, which COALESCE rewrites to ''.
+const selectServiceCols = `id, user_id, name, type, COALESCE(subdomain,''), access_mode, api_key_header, created_at, COALESCE(mtls_ca_pem,'')`
 
 // GetOrCreateService returns the service row for (userID, name), creating it
 // with the given type and default access_mode/api_key_header if it does not
@@ -30,7 +33,7 @@ func (x *DB) GetOrCreateService(ctx context.Context, userID, name, typ string) (
 	err = x.sqlDB.QueryRowContext(ctx,
 		`SELECT `+selectServiceCols+` FROM services WHERE user_id=? AND name=?`,
 		userID, name,
-	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt)
+	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt, &s.MTLSCAPEM)
 	if err == sql.ErrNoRows {
 		return Service{}, ErrNotFound
 	}
@@ -45,7 +48,7 @@ func (x *DB) GetServiceByID(ctx context.Context, id string) (Service, error) {
 	var s Service
 	err := x.sqlDB.QueryRowContext(ctx,
 		`SELECT `+selectServiceCols+` FROM services WHERE id=?`, id,
-	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt)
+	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt, &s.MTLSCAPEM)
 	if err == sql.ErrNoRows {
 		return Service{}, ErrNotFound
 	}
@@ -64,7 +67,7 @@ func (x *DB) GetServiceBySubdomain(ctx context.Context, sub string) (Service, er
 	var s Service
 	err := x.sqlDB.QueryRowContext(ctx,
 		`SELECT `+selectServiceCols+` FROM services WHERE subdomain=?`, sub,
-	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt)
+	).Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt, &s.MTLSCAPEM)
 	if err == sql.ErrNoRows {
 		return Service{}, ErrNotFound
 	}
@@ -88,7 +91,7 @@ func (x *DB) ListServicesByUser(ctx context.Context, userID string) ([]Service, 
 	var out []Service
 	for rows.Next() {
 		var s Service
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt, &s.MTLSCAPEM); err != nil {
 			return nil, fmt.Errorf("scan service: %w", err)
 		}
 		out = append(out, s)
@@ -111,7 +114,7 @@ func (x *DB) ListAllServices(ctx context.Context) ([]Service, error) {
 	var out []Service
 	for rows.Next() {
 		var s Service
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Type, &s.Subdomain, &s.AccessMode, &s.APIKeyHeader, &s.CreatedAt, &s.MTLSCAPEM); err != nil {
 			return nil, fmt.Errorf("scan service: %w", err)
 		}
 		out = append(out, s)

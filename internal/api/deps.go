@@ -15,7 +15,12 @@ import (
 type ServiceStore interface {
 	ListServices(ctx context.Context, callerID, callerRole string) ([]store.ServiceView, error)
 	GetService(ctx context.Context, callerID, callerRole, serviceID string) (store.ServiceDetail, error)
-	SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string) error
+	// SetServiceAccessMode applies the new (mode, header) pair to the
+	// service. mtlsCAPEM is meaningful only when mode == "mtls"; it carries
+	// the operator-supplied PEM-encoded trust anchor for client cert
+	// verification (Burrow does NOT sign certs). For any other mode the
+	// argument is ignored.
+	SetServiceAccessMode(ctx context.Context, callerID, callerRole, serviceID, mode, header string, mtlsCAPEM []byte) error
 	ListAPIKeys(ctx context.Context, callerID, callerRole, serviceID string) ([]db.ServiceAPIKey, error)
 	CreateAPIKey(ctx context.Context, callerID, callerRole, serviceID, name string) (id, plaintext string, err error)
 	DeleteAPIKey(ctx context.Context, callerID, callerRole, serviceID, keyID string) error
@@ -312,6 +317,28 @@ type Deps struct {
 	// will then fail signature checks for that webhook — acceptable
 	// degraded mode for early wiring stages).
 	WebhookSecrets WebhookSecretRegistry
+
+	// v0.4.0 Task 16: per-service IP/Geo CRUD + the global geo status
+	// surface. IPGeo is the CRUD surface (db.DB satisfies it).
+	// IPGeoServices is the service-ownership lookup used by the :own gate
+	// (db.DB satisfies it via GetServiceByID). GeoLookup is the runtime
+	// geo-resolver — proxy.NoopGeoLookup() in the default build, the
+	// MMDB-backed lookup in the geo-tag-ON build (Task 17). All three may
+	// be nil; the handlers degrade to 500 / enabled:false accordingly.
+	IPGeo         IPGeoStore
+	IPGeoServices ServiceOwnerLookup
+	GeoLookup     GeoLookupSurface
+}
+
+// GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup
+// satisfies — it's a structural subset of proxy.GeoLookup (no Country method)
+// so the handler can render /geo/status without importing crypto/net. The
+// concrete proxy.NoopGeoLookup() and (in Task 17) MMDBGeoLookup both
+// satisfy this implicitly.
+type GeoLookupSurface interface {
+	Enabled() bool
+	DBPath() string
+	DBAgeSeconds() int64
 }
 
 type ctxKey int

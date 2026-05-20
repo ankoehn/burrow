@@ -64,9 +64,15 @@ type Service struct {
 	Name         string
 	Type         string // 'http' or 'tcp'
 	Subdomain    string // "" for tcp
-	AccessMode   string // 'open'|'api_key'|'burrow_login'
+	AccessMode   string // 'open'|'api_key'|'burrow_login'|'mtls'
 	APIKeyHeader string // default "Authorization"
 	CreatedAt    time.Time
+	// MTLSCAPEM is the operator-supplied PEM-encoded trust anchor used to
+	// verify visitor client certs when AccessMode == "mtls". Empty for any
+	// other mode (or even mtls services that haven't been configured yet —
+	// the API rejects switching to mtls without one). Burrow does NOT sign
+	// client certs in v0.4.0.
+	MTLSCAPEM string
 }
 
 // ServiceAPIKey is a row of the service_api_keys table.

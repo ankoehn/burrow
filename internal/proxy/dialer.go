@@ -39,18 +39,24 @@ var ErrNotFound = errors.New("proxy: tunnel not found")
 //
 // Fields:
 //   - ServiceID: stable service identity (matches store.Service.ID).
-//   - AccessMode: one of "open", "api_key", or "burrow_login".
+//   - AccessMode: one of "open", "api_key", "burrow_login", or "mtls".
 //   - APIKeyHeader: name of the HTTP header the upstream uses for its API key
 //     (only meaningful when AccessMode == "api_key").
 //   - LocalHost: the Host header and URL host to use when forwarding to the
 //     upstream. Typically the host part of the tunnel's LocalAddr
 //     (e.g. "127.0.0.1" for "127.0.0.1:3000"). When empty the proxy falls
 //     back to the tunnel's full LocalAddr string.
+//   - MTLSCAPEM: operator-supplied PEM-encoded CA bundle used to verify the
+//     visitor's client certificate. Required when AccessMode == "mtls"; the
+//     PUT /access-mode handler refuses an mtls switch without a non-empty
+//     CA. Burrow does NOT sign client certs — the operator brings their
+//     own PKI.
 type Resolved struct {
 	ServiceID    string
 	AccessMode   string
 	APIKeyHeader string
 	LocalHost    string
+	MTLSCAPEM    []byte
 }
 
 // StreamDialer is the interface that the proxy uses to:

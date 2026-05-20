@@ -2,12 +2,36 @@ package proxy
 
 import (
 	"context"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/ankoehn/burrow/internal/db"
+)
+
+// AccessMode is the string enum carried in Resolved.AccessMode. The four
+// supported values are exported so other packages (the store layer, the API
+// handlers, tests) can refer to the canonical names without copying strings.
+type AccessMode = string
+
+const (
+	// AccessModeOpen — no per-request authentication; every request reaches
+	// the upstream.
+	AccessModeOpen AccessMode = "open"
+	// AccessModeAPIKey — visitor must present a valid service API key in
+	// the configured header (default Authorization: Bearer ...).
+	AccessModeAPIKey AccessMode = "api_key"
+	// AccessModeBurrowLogin — visitor is bounced to the Burrow gate to log
+	// in; gate sets burrow_session cookie + role.
+	AccessModeBurrowLogin AccessMode = "burrow_login"
+	// AccessModeMTLS — visitor must present a TLS client certificate signed
+	// by the per-service mTLS CA. Verification is performed during the TLS
+	// handshake (proxy.GetConfigForClient sets ClientCAs +
+	// RequireAndVerifyClientCert); the access checker re-confirms the cert
+	// is present and may perform a defense-in-depth chain re-verify.
+	AccessModeMTLS AccessMode = "mtls"
 )
 
 // APIKeyValidator is the narrow interface the accessChecker uses to validate
@@ -96,20 +120,81 @@ func NewAccessCheckerWithSessionsAndLogger(v APIKeyValidator, sv SessionValidato
 //   - ok=false: write (status, body, hdr) and return; do not proxy.
 func (ac *accessChecker) Allow(ctx context.Context, res *Resolved, r *http.Request) (ok bool, status int, body string, hdr http.Header) {
 	switch res.AccessMode {
-	case "open":
+	case AccessModeOpen:
 		return true, 0, "", nil
 
-	case "api_key":
+	case AccessModeAPIKey:
 		return ac.checkAPIKey(ctx, res, r)
 
-	case "burrow_login":
+	case AccessModeBurrowLogin:
 		return ac.checkBurrowLogin(ctx, res, r)
+
+	case AccessModeMTLS:
+		return ac.checkMTLS(ctx, res, r)
 
 	default:
 		h := make(http.Header)
 		h.Set("Content-Type", "application/json")
 		return false, http.StatusInternalServerError, `{"error":"unknown access mode"}`, h
 	}
+}
+
+// checkMTLS enforces mtls mode.
+//
+// The TLS handshake is the primary authentication boundary — proxy.go's
+// GetConfigForClient already sets ClientAuth = RequireAndVerifyClientCert
+// with the per-service CA, so a request reaching this checker should
+// already have r.TLS.PeerCertificates populated. We re-check here as
+// defense-in-depth: if the TLS layer somehow let the request through
+// without a client cert (e.g. unit-test construction, h2c-spoofing, future
+// non-TLS path), we refuse with 401.
+//
+// When the service carries a CA PEM, we ALSO re-verify the leaf cert
+// against the CA pool here. This is paranoid: tls.RequireAndVerifyClientCert
+// already verifies the chain at handshake time. But the re-verify catches
+// the case where a test or future caller hands us a Resolved with mtls but
+// invokes Allow with an r.TLS populated by a different (lax) config — and
+// it makes the invariant explicit at the access-checker boundary, not just
+// at TLS-handshake time.
+func (ac *accessChecker) checkMTLS(_ context.Context, res *Resolved, r *http.Request) (bool, int, string, http.Header) {
+	h := make(http.Header)
+	h.Set("Content-Type", "application/json")
+
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return false, http.StatusUnauthorized, `{"error":"client cert required"}`, h
+	}
+
+	// Defense-in-depth: when the service's CA PEM is set, re-verify the
+	// leaf against the CA pool. tls.RequireAndVerifyClientCert already did
+	// this during the handshake; the re-check here makes the invariant
+	// explicit at the access-checker boundary and protects against future
+	// callers that wire mtls without GetConfigForClient.
+	if len(res.MTLSCAPEM) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(res.MTLSCAPEM) {
+			ac.log.Warn("mtls: ca pem appended no certs", "service_id", res.ServiceID)
+			return false, http.StatusInternalServerError, `{"error":"invalid CA configuration"}`, h
+		}
+		leaf := r.TLS.PeerCertificates[0]
+		intermediates := x509.NewCertPool()
+		for _, c := range r.TLS.PeerCertificates[1:] {
+			intermediates.AddCert(c)
+		}
+		opts := x509.VerifyOptions{
+			Roots:         pool,
+			Intermediates: intermediates,
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		}
+		if _, err := leaf.Verify(opts); err != nil {
+			ac.log.Warn("mtls: leaf cert failed verify",
+				"service_id", res.ServiceID,
+				"subject", leaf.Subject.CommonName,
+				"err", err)
+			return false, http.StatusUnauthorized, `{"error":"client cert required"}`, h
+		}
+	}
+
+	return true, 0, "", nil
 }
 
 // checkAPIKey enforces api_key mode. It reads the API key from the configured

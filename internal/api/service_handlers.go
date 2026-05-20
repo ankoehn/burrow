@@ -96,10 +96,16 @@ func mapServiceErr(w http.ResponseWriter, err error, notFoundMsg string) bool {
 		writeErr(w, http.StatusNotFound, notFoundMsg)
 		return true
 	case errors.Is(err, store.ErrInvalidAccessMode):
-		writeErr(w, http.StatusBadRequest, "access_mode must be 'open', 'api_key', or 'burrow_login'")
+		writeErr(w, http.StatusBadRequest, "access_mode must be 'open', 'api_key', 'burrow_login', or 'mtls'")
 		return true
 	case errors.Is(err, store.ErrServiceNotHTTP):
-		writeErr(w, http.StatusConflict, "api_key and burrow_login require an http service")
+		writeErr(w, http.StatusConflict, "api_key, burrow_login, and mtls require an http service")
+		return true
+	case errors.Is(err, store.ErrMTLSCARequired):
+		writeErr(w, http.StatusBadRequest, "mtls access mode requires mtls_ca_pem")
+		return true
+	case errors.Is(err, store.ErrInvalidMTLSCAPEM):
+		writeErr(w, http.StatusBadRequest, "invalid CA PEM")
 		return true
 	case errors.Is(err, store.ErrNameRequired):
 		writeErr(w, http.StatusBadRequest, "name is required")
@@ -186,12 +192,24 @@ func (d Deps) GetService(w http.ResponseWriter, r *http.Request) {
 type setAccessModeReq struct {
 	AccessMode   string `json:"access_mode"`
 	APIKeyHeader string `json:"api_key_header"`
+	// MTLSCAPEM is the operator-supplied PEM-encoded trust anchor used to
+	// verify visitor client certs in mtls mode. Required when AccessMode
+	// is "mtls"; ignored for any other mode. Burrow does NOT sign client
+	// certs in v0.4.0.
+	MTLSCAPEM string `json:"mtls_ca_pem"`
 }
 
 // SetServiceAccessMode handles PUT /api/v1/services/{serviceID}/access-mode.
+//
+// Accepts {access_mode: "open"|"api_key"|"burrow_login"|"mtls"}. For mtls
+// the request body MUST carry a non-empty mtls_ca_pem with at least one
+// CERTIFICATE block; the store layer validates the PEM and returns 400 on
+// bad input.
 func (d Deps) SetServiceAccessMode(w http.ResponseWriter, r *http.Request) {
 	serviceID := chi.URLParam(r, "serviceID")
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	// 16 KiB accommodates a multi-cert PEM bundle while still bounding
+	// memory growth (a CA + a few intermediates fit easily).
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var in setAccessModeReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.AccessMode == "" {
 		writeErr(w, http.StatusBadRequest, "access_mode is required")
@@ -207,13 +225,18 @@ func (d Deps) SetServiceAccessMode(w http.ResponseWriter, r *http.Request) {
 	if in.AccessMode == "api_key" {
 		header = in.APIKeyHeader
 	}
+	// mtls_ca_pem is only honored for mtls mode.
+	var caPEM []byte
+	if in.AccessMode == "mtls" {
+		caPEM = []byte(in.MTLSCAPEM)
+	}
 	role, err := d.callerRole(r)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	uid := userID(r.Context())
-	if err := d.Services.SetServiceAccessMode(r.Context(), uid, role, serviceID, in.AccessMode, header); err != nil {
+	if err := d.Services.SetServiceAccessMode(r.Context(), uid, role, serviceID, in.AccessMode, header, caPEM); err != nil {
 		if !mapServiceErr(w, err, "service not found") {
 			writeErr(w, http.StatusInternalServerError, "internal error")
 		}

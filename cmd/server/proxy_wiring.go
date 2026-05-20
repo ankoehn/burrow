@@ -134,12 +134,16 @@ func (a proxyDialerAdapter) Lookup(ctx context.Context, sub string) (*proxy.Reso
 		// (the client may have disconnected after registering the subdomain).
 		return nil, proxy.ErrNotFound
 	}
-	return &proxy.Resolved{
+	r := &proxy.Resolved{
 		ServiceID:    svc.ID,
 		AccessMode:   svc.AccessMode,
 		APIKeyHeader: svc.APIKeyHeader,
 		LocalHost:    tn.LocalAddr,
-	}, nil
+	}
+	if svc.MTLSCAPEM != "" {
+		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
+	}
+	return r, nil
 }
 
 // DialTunnelStream implements proxy.StreamDialer.DialTunnelStream.
