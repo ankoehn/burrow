@@ -228,18 +228,18 @@ export const handlers = [
     return noContent();
   }),
 
-  // ---- v0.3.0 per-service access mode (canonical, service-scoped) ----
+  // ---- v0.3.0 per-service access mode (v0.4.0 adds mtls + ca_pem) ----
   http.put("/api/v1/services/:id/access-mode", async ({ request, params }) => {
     const g = gate(request); if (g) return g;
     const svc = db.services.find((s) => s.id === params.id);
     if (!svc) return err(404, "service not found");
     if (!canConfigure(svc)) return err(403, "forbidden");
-    const b = await body<{ access_mode?: string; api_key_header?: string }>(request);
+    const b = await body<{ access_mode?: string; api_key_header?: string; ca_pem?: string }>(request);
     if (!b?.access_mode) return err(400, "access_mode is required");
-    if (!["open", "api_key", "burrow_login"].includes(b.access_mode))
-      return err(400, "access_mode must be 'open', 'api_key', or 'burrow_login'");
+    if (!["open", "api_key", "burrow_login", "mtls"].includes(b.access_mode))
+      return err(400, "access_mode must be 'open', 'api_key', 'burrow_login', or 'mtls'");
     if (b.access_mode !== "open" && svc.type === "tcp")
-      return err(409, "api_key and burrow_login require an http service");
+      return err(409, "api_key, burrow_login, and mtls require an http service");
     svc.access_mode = b.access_mode as typeof svc.access_mode;
     if (b.access_mode === "api_key" && b.api_key_header) svc.api_key_header = b.api_key_header;
     return noContent();
@@ -405,4 +405,28 @@ export const handlers = [
     gate(request, { admin: true }) ?? json({ entries: 47, on_disk_bytes: 3 * 1024 * 1024, hit_rate_24h: 0.31 })),
   http.delete("/api/v1/cache/entries", ({ request }) =>
     gate(request, { admin: true }) ?? noContent()),
+
+  // ---- v0.4.0 per-service IP/geo (spec Part J) ----
+  http.get("/api/v1/services/:id/ipgeo", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const cfg = db.aiConfigs[svc.id];
+    return json(
+      cfg?.ip_geo ?? { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
+    );
+  }),
+  http.put("/api/v1/services/:id/ipgeo", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const b = await body<MockDb["aiConfigs"][string]["ip_geo"]>(request);
+    if (!b) return err(400, "invalid ipgeo body");
+    const existing = db.aiConfigs[svc.id];
+    if (existing) existing.ip_geo = b;
+    return noContent();
+  }),
+  http.get("/api/v1/geo/status", ({ request }) =>
+    gate(request) ?? json({ enabled: true, db_path: "/var/burrow/geoip.mmdb", db_age_seconds: 3600 })),
 ];

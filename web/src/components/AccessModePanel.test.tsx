@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
@@ -43,15 +43,36 @@ describe("AccessModePanel (v0.3.0)", () => {
     expect((await screen.findAllByText(/access settings saved/i)).length).toBeGreaterThan(0);
   });
 
-  it("a 409 on a tcp service surfaces the contract message verbatim", async () => {
+  it("a 409 on a tcp service surfaces the v0.4.0 contract message verbatim", async () => {
     renderApp(<AccessModePanel serviceId="svc_pg001" serviceName="postgres" mode="open" />);
     await userEvent.click(screen.getByRole("radio", { name: /api key/i }));
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "api_key and burrow_login require an http service",
+        "api_key, burrow_login, and mtls require an http service",
       ),
     );
+  });
+
+  it("mtls mounts MtlsPanel and Save sends ca_pem to /services/:id/access-mode", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    renderApp(<AccessModePanel serviceId="svc_web01" serviceName="web" mode="open" />);
+    await userEvent.click(screen.getByRole("radio", { name: /mtls/i }));
+    const pem = await screen.findByLabelText(/ca pem/i);
+    await userEvent.type(pem, "-----BEGIN CERTIFICATE-----\nMIIB...=\n-----END CERTIFICATE-----");
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => {
+      const put = fetchSpy.mock.calls.find(([url, init]) =>
+        String(url).endsWith("/api/v1/services/svc_web01/access-mode")
+        && (init as RequestInit | undefined)?.method === "PUT",
+      );
+      expect(put).toBeTruthy();
+      const body = JSON.parse(String((put![1] as RequestInit).body));
+      expect(body.access_mode).toBe("mtls");
+      expect(typeof body.ca_pem).toBe("string");
+      expect(body.ca_pem).toContain("BEGIN CERTIFICATE");
+    });
+    expect((await screen.findAllByText(/access settings saved/i)).length).toBeGreaterThan(0);
   });
 
   it("a 403 surfaces a friendly permission message", async () => {
