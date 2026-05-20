@@ -1,6 +1,7 @@
 package inspector
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -282,6 +283,45 @@ func TestUnifiedBodyDiff(t *testing.T) {
 	}
 	if !strings.Contains(out, " alpha") || !strings.Contains(out, " gamma") {
 		t.Fatalf("diff missing unchanged context:\n%s", out)
+	}
+}
+
+// TestUnifiedBodyCapsExcessiveLines asserts that UnifiedBody refuses to
+// allocate the LCS DP table when the combined line count of the two
+// inputs exceeds maxDiffLines (DoS bound: ~16M ints / ~128MB worst case
+// at the cap). The function must fall back to a single-line metadata
+// summary, must not emit diff(1)-style framing, and must return quickly
+// (the LCS path on 5000x5000 lines takes seconds; the metadata path is
+// O(n) over the input bytes).
+func TestUnifiedBodyCapsExcessiveLines(t *testing.T) {
+	const linesPerSide = 5000 // 5000 + 5000 = 10000 > maxDiffLines (4000)
+	var aBuf, bBuf strings.Builder
+	aBuf.Grow(linesPerSide * 10)
+	bBuf.Grow(linesPerSide * 10)
+	for i := 0; i < linesPerSide; i++ {
+		// Distinct lines so a naive diff would emit ~10000 hunk rows.
+		fmt.Fprintf(&aBuf, "a-line-%d\n", i)
+		fmt.Fprintf(&bBuf, "b-line-%d\n", i)
+	}
+	a := []byte(aBuf.String())
+	b := []byte(bBuf.String())
+
+	start := time.Now()
+	out := UnifiedBody(a, b)
+	elapsed := time.Since(start)
+
+	if !strings.Contains(out, "too large to diff") {
+		t.Fatalf("expected metadata-only fallback, got:\n%s", out)
+	}
+	if strings.Contains(out, "--- original") || strings.Contains(out, "+++ replayed") {
+		t.Fatalf("LCS diff framing leaked into capped output:\n%s", out)
+	}
+	// 50ms is generous; the cap path is O(n) bytes. If the DP table got
+	// allocated (5001*5001 ≈ 25M ints ≈ 200MB) we would be well past 50ms
+	// even on a fast box.
+	if elapsed > 50*time.Millisecond {
+		t.Fatalf("UnifiedBody took %v with %d+%d lines — the cap was not hit",
+			elapsed, linesPerSide, linesPerSide)
 	}
 }
 

@@ -37,6 +37,16 @@ func IsTextualContentType(ct string) bool {
 	return false
 }
 
+// maxDiffLines bounds the combined line count (lines_a + lines_b) that
+// UnifiedBody will feed into the LCS DP table. The 256KB body cap does not
+// constrain line count: a body of all "\n" is 262144 lines and the
+// (n+1)*(m+1) int allocation would blow up to ~69e12 ints. With this
+// bound, the worst-case allocation is ~(maxDiffLines/2 + 1)^2 ints
+// ≈ 4_004_001 ints ≈ 32MB on 64-bit (and ≤ ~128MB if both sides hit the
+// cap individually for a (4001*4001) table). That is the upper limit we
+// are willing to allocate for a single replay-compare call.
+const maxDiffLines = 4000
+
 // UnifiedBody renders a small line-by-line unified diff of two textual
 // bodies. The result is single-block (no hunk headers), prefixed with
 // "--- original\n+++ replayed\n" so callers can render it directly. Lines
@@ -47,14 +57,29 @@ func IsTextualContentType(ct string) bool {
 // not meant to be diff(1)-byte-compatible — it's a human-readable summary
 // of the two responses. For full-fidelity diffs the UI can re-render on
 // the client.
+//
+// If the combined line count of the two inputs exceeds maxDiffLines, the
+// function falls back to a single-line "too large to diff" metadata
+// summary; the LCS DP table is never allocated in that case.
 func UnifiedBody(original, replayed []byte) string {
+	// Use strings.Count on the byte slice form to avoid an extra full-body
+	// copy when the inputs are large. ("\n" count is a fast upper bound on
+	// line count; splitLines trims one trailing empty line.)
+	linesA := strings.Count(string(original), "\n")
+	linesB := strings.Count(string(replayed), "\n")
+	if linesA+linesB > maxDiffLines {
+		return fmt.Sprintf(
+			"<text too large to diff; original %d lines / %d bytes, replayed %d lines / %d bytes>",
+			linesA, len(original), linesB, len(replayed),
+		)
+	}
 	a := splitLines(string(original))
 	b := splitLines(string(replayed))
 	var sb strings.Builder
 	sb.WriteString("--- original\n")
 	sb.WriteString("+++ replayed\n")
 	// Longest-Common-Subsequence-based unified diff. We keep it O(n*m) which
-	// is fine for the 256KB body cap (≈64K lines worst case).
+	// is bounded by maxDiffLines above.
 	ops := lcsDiff(a, b)
 	for _, op := range ops {
 		switch op.kind {
