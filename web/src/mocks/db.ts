@@ -1,12 +1,23 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
-  Service, ServiceApiKey,
+  Service, ServiceApiKey, ModelAlias, CostSummary,
 } from "@/lib/contract";
 
 // Internal service row: the wire Service plus the owning user_id (stripped
 // before serialization — owner-scoping the v0.3.0 /services surface).
 export interface ServiceRow extends Service {
   user_id: string;
+}
+
+// Per-service AI-endpoint metadata seeded for the v0.4.0 /ai/endpoints lens.
+// Backend derives these from runtime metrics; the mock seeds plausible values.
+export interface AiMetaRow {
+  backend_type: "ollama" | "vllm" | "openai-compat" | "other";
+  requests_24h: number;
+  cache_hits_24h: number;
+  latency_p95_ms: number;
+  status: "Connected" | "Degraded" | "Offline";
+  client_session_id: string;
 }
 
 export interface MockDb {
@@ -23,6 +34,9 @@ export interface MockDb {
   services: ServiceRow[];
   serviceApiKeys: Record<string, ServiceApiKey[]>;
   serviceAccessPolicy: Record<string, string[]>;
+  aiMeta: Record<string, AiMetaRow>;
+  modelAliases: ModelAlias[];
+  costSummary: Record<"today" | "week" | "month" | "year", CostSummary>;
 }
 
 function seed(): MockDb {
@@ -76,6 +90,25 @@ function seed(): MockDb {
     },
     serviceAccessPolicy: {
       svc_graf01: ["user"],
+    },
+    aiMeta: {
+      svc_ai001: {
+        backend_type: "ollama",
+        requests_24h: 1024,
+        cache_hits_24h: 200,
+        latency_p95_ms: 1200,
+        status: "Connected",
+        client_session_id: "sess_4f7a9c0b2e81",
+      },
+    },
+    modelAliases: [
+      { alias: "fast", concrete_model: "llama3.1:8b", service_id: "svc_ai001", created_at: "2026-05-10T08:00:00Z" },
+    ],
+    costSummary: {
+      today: { window: "today", total_usd: 1.23, tokens_in: 12000, tokens_out: 8000, top_consumers: [], pct_of_budget: 0.5 },
+      week:  { window: "week",  total_usd: 8.77, tokens_in: 80000, tokens_out: 55000, top_consumers: [], pct_of_budget: 0.4 },
+      month: { window: "month", total_usd: 32.50, tokens_in: 320000, tokens_out: 215000, top_consumers: [], pct_of_budget: 0.7 },
+      year:  { window: "year",  total_usd: 390.00, tokens_in: 3800000, tokens_out: 2550000, top_consumers: [], pct_of_budget: 0.6 },
     },
   };
 }

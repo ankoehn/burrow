@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog, Globe } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog, Globe, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
 import { useTheme } from "@/components/theme-provider";
 import { useAuth } from "@/auth/useAuth";
+import type { Service } from "@/lib/contract";
 
 /* Brand mark — geometric tunnel-and-arrow glyph (currentColor, never Signal Teal). */
 function BurrowMark({ size = 20 }: { size?: number }) {
@@ -37,6 +38,16 @@ export function Layout() {
     qc.clear();
     nav("/login", { replace: true });
   }
+  // AI GATEWAY group is conditional: only shown when ≥1 service is api_key-gated
+  // (spec §4.19). Cached against ["services"] so the rest of the dashboard reads
+  // the same data.
+  const services = useQuery({
+    queryKey: ["services"],
+    queryFn: () => apiFetch<Service[]>("/services"),
+    retry: false,
+  });
+  const hasAiEndpoints = Array.isArray(services.data)
+    && services.data.some((s) => s.access_mode === "api_key");
   const navItem = ({ isActive }: { isActive: boolean }) => cx("nav-item", isActive && "is-active");
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
   return (
@@ -68,6 +79,16 @@ export function Layout() {
               <span className="nav-label">Tokens</span>
             </NavLink>
           </div>
+
+          {hasAiEndpoints && (
+            <div className="nav-group">
+              <div className="nav-group-title">AI GATEWAY</div>
+              <NavLink to="/ai/endpoints" className={navItem}>
+                <span className="nav-icon"><Sparkles size={16} /></span>
+                <span className="nav-label">AI endpoints</span>
+              </NavLink>
+            </div>
+          )}
 
           {user?.role === "admin" && (
             <div className="nav-group">

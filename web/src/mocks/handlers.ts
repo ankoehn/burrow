@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb } from "@/mocks/db";
+import type { AiEndpoint, CostSummary } from "@/lib/contract";
 
 const json = (body: unknown, status = 200) => HttpResponse.json(body as object, { status });
 const err = (status: number, message: string) => HttpResponse.json({ error: message }, { status });
@@ -281,4 +282,43 @@ export const handlers = [
 
   // ---- tunnels (reference) ----
   http.get("/api/v1/tunnels", ({ request }) => gate(request) ?? json([])),
+
+  // ---- v0.4.0 AI endpoints lens (spec §4.19) ----
+  // Derived view over db.services where access_mode=api_key. Backend owns the
+  // real metrics; the mock joins seeded aiMeta + modelAliases + serviceApiKeys.
+  http.get("/api/v1/ai/endpoints", ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const rows = db.me.role === "admin"
+      ? db.services
+      : db.services.filter((s) => s.user_id === db.me.id);
+    const endpoints: AiEndpoint[] = rows
+      .filter((s) => s.access_mode === "api_key")
+      .map((s) => {
+        const meta = db.aiMeta[s.id];
+        const alias = db.modelAliases.find((a) => a.service_id === s.id);
+        return {
+          service_id: s.id,
+          name: s.name,
+          model_alias: alias?.alias ?? "",
+          concrete_model: alias?.concrete_model ?? "",
+          backend_type: meta?.backend_type ?? "other",
+          api_key_count: (db.serviceApiKeys[s.id] ?? []).length,
+          requests_24h: meta?.requests_24h ?? 0,
+          cache_hits_24h: meta?.cache_hits_24h ?? 0,
+          latency_p95_ms: meta?.latency_p95_ms ?? 0,
+          status: meta?.status ?? "Offline",
+          client_session_id: meta?.client_session_id ?? "",
+        };
+      });
+    return json(endpoints);
+  }),
+
+  // ---- v0.4.0 cost summary (spec Part F) ----
+  http.get("/api/v1/cost/summary", ({ request }) => {
+    const g = gate(request); if (g) return g;
+    const url = new URL(request.url);
+    const w = (url.searchParams.get("window") ?? "today") as CostSummary["window"];
+    const summary = db.costSummary[w] ?? db.costSummary.today;
+    return json(summary);
+  }),
 ];
