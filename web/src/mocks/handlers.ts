@@ -696,4 +696,48 @@ export const handlers = [
       },
     })),
   http.post("/api/v1/auth/webauthn/login/finish", () => noContent()),
+
+  // ---- v0.4.0 provisioning keys (§4.28 — pulled forward) ----
+  http.get("/api/v1/provisioning/keys", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.provisioningKeys)),
+  http.post("/api/v1/provisioning/keys", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{ name?: string; scope?: string; expires_at?: string | null; default_role?: string }>(request);
+    if (!b?.name) return err(400, "name is required");
+    const pk: MockDb["provisioningKeys"][number] = {
+      id: `pk_${Math.random().toString(36).slice(2, 8)}`,
+      name: b.name,
+      prefix: `bup_${Math.random().toString(36).slice(2, 7)}`,
+      scope: (b.scope ?? "multi") as MockDb["provisioningKeys"][number]["scope"],
+      expires_at: b.expires_at ?? null,
+      default_role: b.default_role ?? "user",
+      last_used: null,
+      created_at: new Date().toISOString(),
+    };
+    db.provisioningKeys.push(pk);
+    return json({ key: pk, plaintext: `${pk.prefix}_${Math.random().toString(36).slice(2, 22)}` }, 201);
+  }),
+  http.delete("/api/v1/provisioning/keys/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.provisioningKeys.findIndex((k) => k.id === params.id);
+    if (i < 0) return err(404, "provisioning key not found");
+    db.provisioningKeys.splice(i, 1);
+    return noContent();
+  }),
+  http.get("/api/v1/provisioning/pending", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.provisioningPending)),
+  http.post("/api/v1/provisioning/pending/:id/approve", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.provisioningPending.findIndex((p) => p.id === params.id);
+    if (i < 0) return err(404, "pending request not found");
+    db.provisioningPending.splice(i, 1);
+    return noContent();
+  }),
+  http.post("/api/v1/provisioning/pending/:id/reject", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.provisioningPending.findIndex((p) => p.id === params.id);
+    if (i < 0) return err(404, "pending request not found");
+    db.provisioningPending.splice(i, 1);
+    return noContent();
+  }),
 ];

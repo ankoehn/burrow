@@ -3,7 +3,7 @@ import type {
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
-  WebhookDelivery, WebAuthnCredential,
+  WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -58,6 +58,8 @@ export interface MockDb {
   webhooks: Webhook[];
   webhookDeliveries: WebhookDelivery[];
   webauthnCredentials: WebAuthnCredential[];
+  provisioningKeys: ProvisioningKey[];
+  provisioningPending: ProvisioningPending[];
 }
 
 function seed(): MockDb {
@@ -185,6 +187,12 @@ function seed(): MockDb {
     ],
     webauthnCredentials: [
       { id: "wc_yubi5", label: "YubiKey 5", created_at: "2026-04-01T08:00:00Z", last_used: "2026-05-15T09:00:00Z" },
+    ],
+    provisioningKeys: [
+      { id: "pk_fleet", name: "fleet", prefix: "bup_w7s9z", scope: "multi", expires_at: null, default_role: "user", last_used: "2026-05-15T09:00:00Z", created_at: "2026-04-01T08:00:00Z" },
+    ],
+    provisioningPending: [
+      { id: "pp_node1", hostname: "node-1.lan", os: "linux", arch: "amd64", remote_ip: "10.0.1.7", provisioning_key_id: "pk_fleet", first_seen: "2026-05-19T07:30:00Z" },
     ],
   };
 }

@@ -20,6 +20,7 @@ import RequestInspector from "@/pages/RequestInspector";
 import CostBudgets from "@/pages/CostBudgets";
 import AuditLog from "@/pages/AuditLog";
 import Webhooks from "@/pages/Webhooks";
+import ProvisioningKeys from "@/pages/ProvisioningKeys";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/cost" element={<CostBudgets />} />
         <Route path="/audit" element={<AuditLog />} />
         <Route path="/webhooks" element={<Webhooks />} />
+        <Route path="/provisioning" element={<ProvisioningKeys />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />
