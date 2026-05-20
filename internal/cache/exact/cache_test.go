@@ -2,6 +2,7 @@ package exact
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -222,6 +223,111 @@ func TestSettingsFromJSONRejectsUnknownAppliesPer(t *testing.T) {
 		if _, err := SettingsFromJSON(body); err != nil {
 			t.Fatalf("SettingsFromJSON(%q): %v", v, err)
 		}
+	}
+}
+
+// TestStoreTriggersEviction verifies that Store auto-invokes EvictIfOverflow
+// when SetMaxEntries has been called with a positive value, trimming the
+// oldest-by-last_hit_at entries down to the cap. The eviction goroutine is
+// async, so we poll for the row count to converge. last_hit_at is set
+// explicitly on each row (via a direct UPDATE) so the trim ordering is
+// deterministic — without that, all rows would share NULL last_hit_at and
+// COALESCE would fall back to created_at which can tie on identical
+// timestamps.
+func TestStoreTriggersEviction(t *testing.T) {
+	ctx := context.Background()
+	c := testCache(t)
+	const maxEntries = 5
+	c.SetMaxEntries(maxEntries)
+
+	// Insert maxEntries+2 entries with monotonically-increasing last_hit_at.
+	// Row i's last_hit_at = 2000-01-01 00:00:0i — so row 0 is oldest, row 6
+	// newest. After eviction we expect rows 0 and 1 to be gone.
+	const total = maxEntries + 2
+	keys := make([]string, total)
+	for i := 0; i < total; i++ {
+		keys[i] = fmt.Sprintf("global:k%02d", i)
+		if err := c.Store(ctx, keys[i], Entry{
+			Body:       []byte(fmt.Sprintf(`{"i":%d}`, i)),
+			Status:     200,
+			Headers:    map[string]string{"Content-Type": "application/json"},
+			CreatedAt:  time.Now().UTC(),
+			TTLSeconds: 3600,
+		}); err != nil {
+			t.Fatalf("Store %d: %v", i, err)
+		}
+		// Pin last_hit_at deterministically so eviction picks the lowest
+		// indices first. Format must match sqliteTimeFormat so julianday()
+		// parses cleanly if the engine ever inspects it (here it doesn't).
+		stamp := fmt.Sprintf("2000-01-01 00:00:%02d.000", i)
+		if _, err := c.d.DB().ExecContext(ctx,
+			`UPDATE cache_entries SET last_hit_at = ? WHERE key_hash = ?`,
+			stamp, keys[i],
+		); err != nil {
+			t.Fatalf("UPDATE last_hit_at row %d: %v", i, err)
+		}
+	}
+
+	// Eviction is async. Poll the row count for up to ~2s.
+	var entries int
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		entries, _, _, err = c.Stats(ctx)
+		if err != nil {
+			t.Fatalf("Stats: %v", err)
+		}
+		if entries == maxEntries {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if entries != maxEntries {
+		t.Fatalf("post-eviction entries=%d want %d", entries, maxEntries)
+	}
+
+	// The trimmed rows MUST be the oldest-by-last_hit_at ones — rows 0 and
+	// 1. Lookup on key 0/1 must miss; lookup on the remaining keys must hit.
+	for i := 0; i < total; i++ {
+		_, hit, err := c.Lookup(ctx, keys[i])
+		if err != nil {
+			t.Fatalf("Lookup row %d: %v", i, err)
+		}
+		wantHit := i >= 2
+		if hit != wantHit {
+			t.Fatalf("row %d (%s): hit=%v want %v (oldest 2 should be evicted)",
+				i, keys[i], hit, wantHit)
+		}
+	}
+}
+
+// TestSetMaxEntriesZeroDisablesEviction asserts that the default (no
+// SetMaxEntries call, or SetMaxEntries(0)) leaves the cache unbounded —
+// Store never triggers a trim. This is the safe-default contract; the
+// caller (PUT /cache/settings handler) opts in by writing a positive value.
+func TestSetMaxEntriesZeroDisablesEviction(t *testing.T) {
+	ctx := context.Background()
+	c := testCache(t)
+	// Explicitly set to zero (also the default) to be unambiguous.
+	c.SetMaxEntries(0)
+
+	for i := 0; i < 20; i++ {
+		if err := c.Store(ctx, fmt.Sprintf("global:k%02d", i), Entry{
+			Body: []byte("x"), Status: 200,
+			Headers:   map[string]string{"Content-Type": "application/json"},
+			CreatedAt: time.Now().UTC(), TTLSeconds: 3600,
+		}); err != nil {
+			t.Fatalf("Store %d: %v", i, err)
+		}
+	}
+	// Give any (incorrect) background trim a chance to run.
+	time.Sleep(50 * time.Millisecond)
+	entries, _, _, err := c.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if entries != 20 {
+		t.Fatalf("entries=%d want 20 (eviction must not run when cap=0)", entries)
 	}
 }
 

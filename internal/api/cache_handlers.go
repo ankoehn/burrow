@@ -208,7 +208,8 @@ func (d Deps) PutCacheSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if _, err := exact.SettingsFromJSON(raw); err != nil {
+	parsed, err := exact.SettingsFromJSON(raw)
+	if err != nil {
 		// "invalid setting" matches the spec error string (B.3).
 		writeErr(w, http.StatusBadRequest, "invalid setting")
 		return
@@ -222,6 +223,13 @@ func (d Deps) PutCacheSettings(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save cache settings failed")
 		return
+	}
+	// Push the new max_entries into the engine so auto-eviction in Store
+	// uses the updated cap without a process restart. Type-asserted so the
+	// narrow CacheEngine interface (Clear/Stats only) stays unchanged and
+	// test fakes don't need to implement the setter.
+	if cc, ok := d.CacheEngine.(interface{ SetMaxEntries(int) }); ok {
+		cc.SetMaxEntries(parsed.MaxEntries)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

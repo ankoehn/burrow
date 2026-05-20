@@ -73,6 +73,14 @@ const sqliteTimeFormat = "2006-01-02 15:04:05.000"
 //
 // In-process hit/miss counters back the GET /cache/stats hit_rate_24h field;
 // they reset on process restart (documented at the API).
+//
+// Caller-side invariants the engine cannot enforce:
+//
+//   - This engine does not inspect request headers. Callers MUST honour
+//     `Burrow-Cache: bypass` (spec E.2) by skipping the Lookup call entirely.
+//   - Streamed responses (SSE/chunked) MUST NOT be passed to Store; the
+//     caller is responsible for filtering. v0.4.0 never caches streamed
+//     responses.
 type Cache struct {
 	d   *db.DB
 	log *slog.Logger
@@ -83,18 +91,40 @@ type Cache struct {
 	hits   atomic.Uint64
 	misses atomic.Uint64
 
+	// maxEntries is the LRU cap threaded in from Settings via SetMaxEntries.
+	// Zero (the default) disables auto-eviction; the PUT /cache/settings
+	// handler updates this whenever the settings row is saved. Stored as
+	// atomic so Store can read it without taking a mutex on the hot path.
+	maxEntries atomic.Int64
+
 	// evictMu prevents two overlapping eviction goroutines (one running
 	// trims, the other queued no-op).
 	evictMu sync.Mutex
 }
 
 // New constructs a Cache over an open, migrated *db.DB. The logger is used
-// for non-fatal background errors (eviction) and may be nil.
+// for non-fatal background errors (eviction) and may be nil. The cap on
+// entries starts at zero (no auto-eviction); call SetMaxEntries to enable.
 func New(d *db.DB, log *slog.Logger) *Cache {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Cache{d: d, log: log}
+}
+
+// SetMaxEntries updates the LRU cap the auto-eviction path in Store uses.
+// The JSON-API PUT /cache/settings handler calls this after a successful
+// save so settings changes take effect without a process restart. Values
+// <= 0 disable auto-eviction (unbounded cache); positive values trigger a
+// background trim on the next Store overflow.
+func (c *Cache) SetMaxEntries(n int) {
+	if c == nil {
+		return
+	}
+	if n < 0 {
+		n = 0
+	}
+	c.maxEntries.Store(int64(n))
 }
 
 // Lookup checks for a cached entry under the given fully-prefixed key. On
@@ -180,11 +210,14 @@ func (c *Cache) Lookup(ctx context.Context, key string) (Entry, bool, error) {
 // is responsible for ensuring the response is cacheable (2xx, not streamed,
 // not body-too-large per per-entry size cap).
 //
-// If maxEntries > 0 and the total row count now exceeds it, a background
-// goroutine trims the (count - maxEntries) oldest by last_hit_at (with
-// NULL last_hit_at sorted oldest, so never-hit entries are evicted first).
-// Store returns as soon as the INSERT commits — eviction never blocks the
-// caller path.
+// Streamed responses (SSE/chunked) MUST NOT be passed to Store; the caller
+// is responsible for filtering. v0.4.0 never caches streamed responses.
+//
+// If the configured maxEntries (see SetMaxEntries) is > 0 and the total row
+// count now exceeds it, a background goroutine trims the (count - maxEntries)
+// oldest by last_hit_at (with NULL last_hit_at sorted oldest, so never-hit
+// entries are evicted first). Store returns as soon as the INSERT commits —
+// eviction never blocks the caller path.
 //
 // On a UNIQUE(key_hash) race with a concurrent Store, the duplicate is
 // swallowed (the first writer wins; the second's payload is the same value
@@ -216,6 +249,12 @@ func (c *Cache) Store(ctx context.Context, key string, e Entry) error {
 	)
 	if err != nil {
 		return fmt.Errorf("cache store: %w", err)
+	}
+	// Trigger LRU eviction when the configured cap is non-zero. Eviction
+	// itself is async (EvictIfOverflow spawns a goroutine), so this never
+	// blocks the caller path.
+	if limit := c.maxEntries.Load(); limit > 0 {
+		c.EvictIfOverflow(int(limit))
 	}
 	return nil
 }
