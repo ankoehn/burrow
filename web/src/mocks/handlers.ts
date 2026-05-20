@@ -519,4 +519,37 @@ export const handlers = [
     db.budgets.splice(i, 1);
     return noContent();
   }),
+
+  // ---- v0.4.0 audit (spec §4.25) ----
+  http.get("/api/v1/audit/events", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const url = new URL(request.url);
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
+    const beforeId = url.searchParams.get("before_id");
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    let rows = db.audit
+      .slice()
+      .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+    if (beforeId) {
+      const i = rows.findIndex((e) => e.id === beforeId);
+      if (i >= 0) rows = rows.slice(i + 1);
+    }
+    if (q) rows = rows.filter((e) => `${e.action} ${e.subject_label} ${e.actor_email}`.toLowerCase().includes(q));
+    return json(rows.slice(0, limit));
+  }),
+  http.get("/api/v1/audit/fingerprint", ({ request }) =>
+    gate(request, { admin: true }) ?? json({ public_key: "MIIBIjANBgkqhkiG…", fingerprint: "SHA256:deadbeef" })),
+  http.get("/api/v1/audit/export", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return new HttpResponse(db.audit.map((e) => JSON.stringify(e)).join("\n"), {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+  }),
+  http.post("/api/v1/audit/verify", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    if (db.audit.length === 0) return json({ ok: true, first_id: "", last_id: "" });
+    const sorted = db.audit.slice().sort((a, b) => (a.ts < b.ts ? -1 : 1));
+    return json({ ok: true, first_id: sorted[0]!.id, last_id: sorted.at(-1)!.id });
+  }),
 ];

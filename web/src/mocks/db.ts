@@ -2,7 +2,7 @@ import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
   Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
-  GuardrailSettings, Budget, PricingTable,
+  GuardrailSettings, Budget, PricingTable, AuditEvent,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -53,6 +53,7 @@ export interface MockDb {
   guardrailPatterns: string[];
   budgets: Budget[];
   pricing: PricingTable;
+  audit: AuditEvent[];
 }
 
 function seed(): MockDb {
@@ -164,6 +165,11 @@ function seed(): MockDb {
         { provider: "ollama", model: "llama3.1:8b", input_per_million: 0, output_per_million: 0 },
       ],
     },
+    audit: [
+      { id: "ae_001", ts: "2026-05-19T08:00:00Z", actor_id: meId, actor_email: "alice@acme.io", action: "services.create", subject_id: "svc_ai001", subject_label: "ollama", result: "ok", source_ip: "203.0.113.7", user_agent: "Mozilla/5.0", request_id: "req_001", payload: { name: "ollama" }, prev_hash: "0000000000000000000000000000000000000000000000000000000000000000", hash: "11111111111111111111111111111111111111111111111111111111111111111111" },
+      { id: "ae_002", ts: "2026-05-19T08:01:00Z", actor_id: meId, actor_email: "alice@acme.io", action: "services.update", subject_id: "svc_ai001", subject_label: "ollama", result: "ok", source_ip: "203.0.113.7", user_agent: "Mozilla/5.0", request_id: "req_002", payload: { access_mode: "api_key" }, prev_hash: "11", hash: "22" },
+      { id: "ae_003", ts: "2026-05-19T08:02:00Z", actor_id: meId, actor_email: "alice@acme.io", action: "tokens.create", subject_id: "tok_1", subject_label: "office-box-1", result: "ok", source_ip: "203.0.113.7", user_agent: "Mozilla/5.0", request_id: "req_003", payload: { name: "office-box-1" }, prev_hash: "22", hash: "33" },
+    ],
   };
 }
 
