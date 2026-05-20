@@ -118,6 +118,18 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAdminOrAIConfigureAny).Put("/cache/settings", d.PutCacheSettings)
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/entries", d.DeleteCacheEntries)
 			r.Delete("/services/{serviceID}/cache/entries", d.DeleteServiceCacheEntries)
+			// v0.4.0 Task 5: redaction rules + settings + preview JSON API.
+			// GET endpoints are session-authed (any user may read); mutations
+			// (POST/PUT/DELETE rules, PUT settings, POST preview) are gated
+			// by requireAdminOrAIConfigureAny (admin OR ai:configure:any),
+			// same pattern as the cache mutation routes.
+			r.Get("/redaction/rules", d.GetRedactionRules)
+			r.With(d.requireAdminOrAIConfigureAny).Post("/redaction/rules", d.PostRedactionRule)
+			r.With(d.requireAdminOrAIConfigureAny).Put("/redaction/rules/{id}", d.PutRedactionRule)
+			r.With(d.requireAdminOrAIConfigureAny).Delete("/redaction/rules/{id}", d.DeleteRedactionRule)
+			r.Get("/redaction/settings", d.GetRedactionSettings)
+			r.With(d.requireAdminOrAIConfigureAny).Put("/redaction/settings", d.PutRedactionSettings)
+			r.With(d.requireAdminOrAIConfigureAny).Post("/redaction/preview", d.PostRedactionPreview)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
