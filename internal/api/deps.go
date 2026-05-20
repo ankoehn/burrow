@@ -287,6 +287,24 @@ type Deps struct {
 	// after LoadOrGenerateSigningKey wires the key. Nil disables verify /
 	// export / fingerprint.
 	AuditChain AuditChain
+	// Webhooks is the CRUD + deliveries read surface backing every route
+	// under /api/v1/webhooks (Task 14, spec Part H). *db.DB satisfies it.
+	// Nil makes GET /webhooks + GET /webhooks/deliveries return [], and
+	// mutating routes return 500 "webhook store unavailable".
+	Webhooks WebhookStore
+	// WebhookDispatcher is the singleton outbound delivery engine; the
+	// handlers consume the synchronous DeliverNow seam used by
+	// POST /webhooks/{id}/test. *webhook.Dispatcher satisfies it. Nil
+	// makes POST .../test return 500 "dispatcher unavailable" (the
+	// CRUD routes still work — the dispatcher is only required for the
+	// test+deliver path).
+	WebhookDispatcher WebhookDispatcher
+	// WebhookSecrets is the in-memory plaintext registry the POST
+	// handler populates and DELETE cleans up. *webhook.InMemorySecrets
+	// satisfies it. Nil silently skips the registration call (delivery
+	// will then fail signature checks for that webhook — acceptable
+	// degraded mode for early wiring stages).
+	WebhookSecrets WebhookSecretRegistry
 }
 
 type ctxKey int

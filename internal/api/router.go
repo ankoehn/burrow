@@ -193,6 +193,19 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAdminOrAuditRead).Get("/audit/fingerprint", d.GetAuditFingerprint)
 			r.With(d.requireAdminOrAuditRead).Get("/audit/export", d.GetAuditExport)
 			r.With(d.requireAdminOrAuditRead).Post("/audit/verify", d.PostAuditVerify)
+			// v0.4.0 Task 14: outbound HMAC webhook delivery JSON API
+			// (spec Part H.1). Every route is gated by
+			// requireWebhooksManage (admin OR webhooks:manage). The
+			// signing_secret plaintext is returned exactly once in the
+			// POST response — never in GET / list responses.
+			r.With(d.requireWebhooksManage).Get("/webhooks", d.GetWebhooks)
+			r.With(d.requireWebhooksManage).Post("/webhooks", d.PostWebhook)
+			r.With(d.requireWebhooksManage).Put("/webhooks/{id}", d.PutWebhook)
+			r.With(d.requireWebhooksManage).Delete("/webhooks/{id}", d.DeleteWebhook)
+			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/test", d.PostWebhookTest)
+			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/pause", d.PostWebhookPause)
+			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/resume", d.PostWebhookResume)
+			r.With(d.requireWebhooksManage).Get("/webhooks/deliveries", d.GetWebhookDeliveries)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.

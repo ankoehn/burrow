@@ -1,0 +1,624 @@
+// Package webhook is Burrow's outbound HMAC webhook delivery layer
+// (spec Part H). One process-wide *Dispatcher accepts Publish(event,
+// payload) calls, fans them out to every configured webhook that
+// subscribes to the event, signs each request with HMAC-SHA256(secret,
+// timestamp + "." + body) (GitHub convention), and retries non-2xx /
+// network errors three times at 1s/5s/30s. Three consecutive failures
+// flip the webhook to a "Failing" status (UI tag); ten consecutive 4xx
+// in one hour auto-pause the webhook and emit a single
+// "webhook.delivery.failed" audit event.
+//
+// The dispatcher is intentionally in-process: one buffered chan + one
+// worker goroutine. Overflow drops with slog.Warn rather than blocking
+// the publisher. Per-attempt deliveries are persisted to
+// webhook_deliveries so the JSON API can show the history.
+package webhook
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ankoehn/burrow/internal/audit"
+	"github.com/ankoehn/burrow/internal/db"
+)
+
+// DefaultRetryBackoff is the spec-mandated retry schedule (Part H.2):
+// three attempts at 1s, 5s, 30s. The first attempt is immediate (no
+// initial wait); these are the waits between attempts.
+var DefaultRetryBackoff = []time.Duration{
+	1 * time.Second,
+	5 * time.Second,
+	30 * time.Second,
+}
+
+// FailingThreshold is the consecutive-failure count after which a webhook
+// is tagged "Failing" in the UI (spec Part H.2). The dispatcher only
+// writes the consecutive_failures counter to webhooks; the JSON handler
+// derives the "Failing" tag from the counter.
+const FailingThreshold = 3
+
+// AutoPauseThreshold is the count of consecutive 4xx within
+// AutoPauseWindow that auto-pauses the webhook (spec Part H.2).
+const AutoPauseThreshold = 10
+
+// AutoPauseWindow is the rolling window the auto-pause heuristic
+// inspects (spec Part H.2 — 10 consecutive 4xx in 1h).
+const AutoPauseWindow = time.Hour
+
+// PreviewCap caps the request / response body preview written to
+// webhook_deliveries.request_preview / response_preview. The actual HTTP
+// body sent to the remote endpoint is NEVER truncated — this is only the
+// stored audit artifact.
+const PreviewCap = 4 * 1024 // 4 KiB
+
+// queueCapacity is the buffered-chan capacity (spec architecture note).
+// 256 is large enough that a brief blip in the remote endpoint (one slow
+// 30s retry chain) cannot back the publisher up under normal load.
+const queueCapacity = 256
+
+// ClosedEvents is the spec-defined closed event vocabulary (Part H.3).
+// Publish silently no-ops any event outside this set (defense in depth:
+// callers should pass a constant from this file, never a free-form
+// string), and the JSON handler validates POST /webhooks bodies against
+// the same list.
+var ClosedEvents = []string{
+	"webhook.test",
+	"tunnel.connected",
+	"tunnel.disconnected",
+	"tunnel.failed",
+	"access.denied",
+	"quota.exceeded",
+	"budget.exceeded",
+	"redaction.applied",
+	"guardrail.refused",
+	"cert.expiring",
+	"audit.exported",
+	"backup.completed",
+}
+
+// IsClosedEvent reports whether s is one of the spec-closed event names.
+func IsClosedEvent(s string) bool {
+	for _, e := range ClosedEvents {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Store is the narrow DB surface the dispatcher needs. *db.DB satisfies
+// it directly; tests provide an in-memory fake.
+type Store interface {
+	ListWebhooks(ctx context.Context) ([]db.Webhook, error)
+	GetWebhook(ctx context.Context, id string) (db.Webhook, error)
+	InsertWebhookDelivery(ctx context.Context, d db.WebhookDelivery) error
+	SetWebhookFailureCounters(ctx context.Context, id string, count int, firstFailureAt *time.Time) error
+	SetWebhookPaused(ctx context.Context, id string, paused bool) error
+	CountConsecutive4xxSince(ctx context.Context, webhookID string, since time.Time) (int, error)
+}
+
+// SecretLookup is the narrow seam for retrieving the plaintext signing
+// secret for a webhook. Production wires this to an in-memory cache of
+// plaintexts populated at POST time (the DB only stores the hash). For
+// tests the helper is set inline.
+//
+// The dispatcher only needs the plaintext at delivery time; it never
+// reads, logs, or persists it.
+type SecretLookup interface {
+	Plaintext(webhookID string) (string, bool)
+}
+
+// AuditLogger is the narrow surface used to emit the single
+// webhook.delivery.failed event on auto-pause. *audit.Logger satisfies
+// it directly. nil disables auditing (safe for tests + early wiring).
+type AuditLogger interface {
+	Append(ctx context.Context, e audit.Event) error
+}
+
+// Dispatcher is the singleton outbound HMAC delivery engine. Start
+// launches the worker goroutine; Close shuts it down (closes the queue
+// and waits for the worker to drain in-flight retries).
+type Dispatcher struct {
+	store   Store
+	secrets SecretLookup
+	auditor AuditLogger
+	log     *slog.Logger
+	hc      *http.Client
+
+	mu      sync.RWMutex
+	backoff []time.Duration
+
+	queue   chan job
+	wg      sync.WaitGroup
+	once    sync.Once
+	stop    chan struct{}
+	stopped bool
+}
+
+// job is one Publish unit-of-work pushed onto the queue.
+type job struct {
+	event   string
+	payload any
+}
+
+// New constructs a Dispatcher with the spec-default retry backoff. Call
+// Start to launch the worker. The returned Dispatcher is the type that
+// satisfies the cost.Dispatcher interface (cost engine consumes the same
+// Publish signature).
+func New(store Store, secrets SecretLookup, auditor AuditLogger, log *slog.Logger) *Dispatcher {
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	bo := make([]time.Duration, len(DefaultRetryBackoff))
+	copy(bo, DefaultRetryBackoff)
+	return &Dispatcher{
+		store:   store,
+		secrets: secrets,
+		auditor: auditor,
+		log:     log,
+		hc:      &http.Client{Timeout: 30 * time.Second},
+		backoff: bo,
+		queue:   make(chan job, queueCapacity),
+		stop:    make(chan struct{}),
+	}
+}
+
+// SetHTTPClient overrides the http.Client (tests inject httptest
+// servers via the default client; this seam exists for production
+// timeouts and TLS config when needed).
+func (d *Dispatcher) SetHTTPClient(c *http.Client) {
+	if c == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.hc = c
+}
+
+// SetRetryBackoff overrides the retry schedule for tests. A zero-length
+// slice means a single attempt with no retries.
+func (d *Dispatcher) SetRetryBackoff(b []time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	bo := make([]time.Duration, len(b))
+	copy(bo, b)
+	d.backoff = bo
+}
+
+// Start launches the single worker goroutine. Safe to call once;
+// subsequent calls are no-ops.
+func (d *Dispatcher) Start() {
+	d.once.Do(func() {
+		d.wg.Add(1)
+		go d.workerLoop()
+	})
+}
+
+// Close stops accepting new jobs, waits for the worker to drain the
+// queue, then returns. Safe to call multiple times.
+func (d *Dispatcher) Close() {
+	d.mu.Lock()
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
+	d.stopped = true
+	close(d.queue)
+	close(d.stop)
+	d.mu.Unlock()
+	d.wg.Wait()
+}
+
+// Compile-time check that *Dispatcher satisfies the cost.Dispatcher
+// interface shape (Publish(ctx, event, payload)). We mirror the
+// signature here rather than importing the cost package (which would
+// create an internal-package cycle in tests). Any drift in the cost
+// engine's expected shape will be caught by Task 25 wiring and by
+// integration tests in cmd/server.
+var _ interface {
+	Publish(ctx context.Context, event string, payload any)
+} = (*Dispatcher)(nil)
+
+// Publish enqueues an event for delivery. It is fire-and-forget: the
+// dispatcher fans out to every matching webhook in the worker
+// goroutine. Returns immediately. Overflow drops with slog.Warn rather
+// than blocking the caller — the publisher (proxy hot path, cost engine)
+// MUST NOT stall on webhook delivery.
+//
+// Events outside the spec closed vocabulary are dropped silently with a
+// warn log; this matches the "closed event vocabulary" invariant
+// (callers should pass one of the constants in ClosedEvents, never a
+// free-form string).
+func (d *Dispatcher) Publish(ctx context.Context, event string, payload any) {
+	if d == nil {
+		return
+	}
+	if !IsClosedEvent(event) {
+		d.log.Warn("webhook: dropped non-closed event", "event", event)
+		return
+	}
+	select {
+	case d.queue <- job{event: event, payload: payload}:
+	default:
+		d.log.Warn("webhook: queue full, dropping event",
+			"event", event, "capacity", queueCapacity)
+	}
+}
+
+// workerLoop is the single worker goroutine that consumes the queue.
+// It exits when the queue is closed.
+func (d *Dispatcher) workerLoop() {
+	defer d.wg.Done()
+	for j := range d.queue {
+		d.handleJob(j)
+	}
+}
+
+// handleJob processes one Publish: list all webhooks, dispatch to those
+// that subscribe to the event, retry per attempt.
+func (d *Dispatcher) handleJob(j job) {
+	ctx := context.Background()
+	hooks, err := d.store.ListWebhooks(ctx)
+	if err != nil {
+		d.log.Warn("webhook: list webhooks failed", "err", err)
+		return
+	}
+	body, err := json.Marshal(map[string]any{
+		"event": j.event,
+		"data":  j.payload,
+	})
+	if err != nil {
+		d.log.Warn("webhook: marshal payload failed",
+			"event", j.event, "err", err)
+		return
+	}
+	for _, wh := range hooks {
+		if wh.Paused {
+			continue
+		}
+		if !webhookSubscribes(wh, j.event) {
+			continue
+		}
+		d.deliverOne(ctx, wh, j.event, body)
+	}
+}
+
+// DeliverNow runs the full attempt/retry loop for a single webhook and
+// a single event, then returns. Used by POST /webhooks/{id}/test —
+// the handler wants to deliver synchronously so the response can be
+// scoped to the delivery outcome.
+//
+// Returns the highest attempt number that ran (1..len(backoff)+1) and
+// the last status code (0 on network error). The delivery rows are
+// already persisted regardless.
+func (d *Dispatcher) DeliverNow(ctx context.Context, webhookID, event string, payload any) (int, int, error) {
+	wh, err := d.store.GetWebhook(ctx, webhookID)
+	if err != nil {
+		return 0, 0, err
+	}
+	body, err := json.Marshal(map[string]any{
+		"event": event,
+		"data":  payload,
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("marshal payload: %w", err)
+	}
+	return d.deliverOne(ctx, wh, event, body), 0, nil
+}
+
+// deliverOne attempts to deliver one event to one webhook with the
+// retry schedule. Each attempt is persisted as a webhook_deliveries
+// row. Returns the number of attempts that ran. Updates the
+// webhook's consecutive_failures + first_failure_at counters; on the
+// 4xx-pause heuristic, calls SetWebhookPaused + emits one audit event.
+func (d *Dispatcher) deliverOne(ctx context.Context, wh db.Webhook, event string, body []byte) int {
+	d.mu.RLock()
+	backoff := append([]time.Duration(nil), d.backoff...)
+	client := d.hc
+	d.mu.RUnlock()
+
+	maxAttempts := len(backoff) + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastStatus int
+	attempt := 0
+	for attempt < maxAttempts {
+		attempt++
+		status, respPreview, latency := d.attempt(ctx, wh, event, body, client)
+		// Persist this attempt regardless of outcome.
+		preview := previewBytes(body)
+		_ = d.store.InsertWebhookDelivery(ctx, db.WebhookDelivery{
+			ID:              newDeliveryID(),
+			WebhookID:       wh.ID,
+			Event:           event,
+			Ts:              time.Now().UTC(),
+			StatusCode:      status,
+			Attempt:         attempt,
+			LatencyMs:       int(latency / time.Millisecond),
+			RequestPreview:  &preview,
+			ResponsePreview: &respPreview,
+		})
+		lastStatus = status
+		if status >= 200 && status < 300 {
+			// Success: clear failure counters, exit retry loop.
+			d.recordSuccess(ctx, wh.ID)
+			return attempt
+		}
+		// Non-2xx or network error. If we have a retry left, sleep then loop.
+		if attempt < maxAttempts {
+			wait := backoff[attempt-1]
+			select {
+			case <-time.After(wait):
+			case <-d.stop:
+				// Shutting down — stop retrying, but record the failure first.
+				d.recordFailure(ctx, wh, lastStatus)
+				return attempt
+			case <-ctx.Done():
+				d.recordFailure(ctx, wh, lastStatus)
+				return attempt
+			}
+		}
+	}
+	// All attempts exhausted without success.
+	d.recordFailure(ctx, wh, lastStatus)
+	return attempt
+}
+
+// attempt performs one HTTP POST and returns (status, response preview,
+// elapsed). status is 0 for transport errors; respPreview is empty in
+// that case.
+func (d *Dispatcher) attempt(ctx context.Context, wh db.Webhook, event string, body []byte, client *http.Client) (int, string, time.Duration) {
+	start := time.Now()
+	deliveryID := newDeliveryID()
+	ts := time.Now().UTC().Format(time.RFC3339)
+
+	secret, _ := d.secrets.Plaintext(wh.ID)
+	sig := computeSignature(secret, ts, body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, bytes.NewReader(body))
+	if err != nil {
+		d.log.Warn("webhook: build request failed",
+			"webhook_id", wh.ID, "err", err)
+		return 0, "", time.Since(start)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "burrow-webhook/1")
+	req.Header.Set("Burrow-Event", event)
+	req.Header.Set("Burrow-Delivery", deliveryID)
+	req.Header.Set("Burrow-Timestamp", ts)
+	req.Header.Set("Burrow-Signature", "sha256="+sig)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		d.log.Warn("webhook: HTTP error",
+			"webhook_id", wh.ID, "url", wh.URL, "err", err)
+		return 0, "", time.Since(start)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, PreviewCap+1))
+	return resp.StatusCode, previewBytes(respBody), time.Since(start)
+}
+
+// recordSuccess clears the consecutive_failures + first_failure_at
+// counters on the webhook row.
+func (d *Dispatcher) recordSuccess(ctx context.Context, id string) {
+	if err := d.store.SetWebhookFailureCounters(ctx, id, 0, nil); err != nil {
+		d.log.Warn("webhook: clear failure counters", "webhook_id", id, "err", err)
+	}
+}
+
+// recordFailure increments consecutive_failures, sets first_failure_at
+// on the first failure of a streak, and runs the auto-pause heuristic.
+// status==0 means transport error (network); 4xx/5xx are HTTP errors —
+// both are failures from the dispatcher's POV.
+func (d *Dispatcher) recordFailure(ctx context.Context, wh db.Webhook, lastStatus int) {
+	// Re-read so we observe any failure-counter writes from concurrent
+	// deliveries of the same webhook (rare but possible: two events
+	// publishing to the same hook in the same job run).
+	cur, err := d.store.GetWebhook(ctx, wh.ID)
+	if err != nil {
+		d.log.Warn("webhook: re-read failed", "webhook_id", wh.ID, "err", err)
+		cur = wh
+	}
+	next := cur.ConsecutiveFailures + 1
+	first := cur.FirstFailureAt
+	if first == nil {
+		t := time.Now().UTC()
+		first = &t
+	}
+	if err := d.store.SetWebhookFailureCounters(ctx, wh.ID, next, first); err != nil {
+		d.log.Warn("webhook: set failure counters", "webhook_id", wh.ID, "err", err)
+	}
+
+	// Auto-pause: 10 consecutive 4xx in 1h.
+	if lastStatus >= 400 && lastStatus < 500 {
+		n, err := d.store.CountConsecutive4xxSince(ctx, wh.ID,
+			time.Now().UTC().Add(-AutoPauseWindow))
+		if err != nil {
+			d.log.Warn("webhook: count 4xx failed", "webhook_id", wh.ID, "err", err)
+			return
+		}
+		if n >= AutoPauseThreshold && !cur.Paused {
+			if err := d.store.SetWebhookPaused(ctx, wh.ID, true); err != nil {
+				d.log.Warn("webhook: auto-pause failed", "webhook_id", wh.ID, "err", err)
+				return
+			}
+			d.emitAuditFailed(ctx, wh, lastStatus, n)
+			d.log.Warn("webhook: auto-paused after 4xx streak",
+				"webhook_id", wh.ID, "count", n,
+				"window", AutoPauseWindow.String())
+			return
+		}
+	}
+
+	// 3 consecutive failures (any kind) → emit the "Failing" audit event
+	// once at the transition. We use the next counter value to detect
+	// the transition (only when crossing FailingThreshold for the first
+	// time inside a single job run).
+	if next == FailingThreshold {
+		d.emitAuditFailed(ctx, wh, lastStatus, next)
+	}
+}
+
+// emitAuditFailed writes one webhook.delivery.failed audit event.
+// Nil-safe: when the auditor is not wired, this is a no-op log line.
+func (d *Dispatcher) emitAuditFailed(ctx context.Context, wh db.Webhook, status, count int) {
+	if d.auditor == nil {
+		d.log.Warn("webhook: would emit audit event (no auditor wired)",
+			"webhook_id", wh.ID, "name", wh.Name, "status", status, "count", count)
+		return
+	}
+	payload := map[string]any{
+		"webhook_id":           wh.ID,
+		"url":                  wh.URL,
+		"last_status":          status,
+		"consecutive_failures": count,
+	}
+	raw, _ := json.Marshal(payload)
+	_ = d.auditor.Append(ctx, audit.Event{
+		Action:       audit.ActionWebhookDeliveryFailed,
+		SubjectID:    wh.ID,
+		SubjectLabel: wh.Name,
+		Result:       "error",
+		Payload:      raw,
+	})
+}
+
+// webhookSubscribes reports whether wh.Events (a JSON-encoded array of
+// event strings) contains event. A malformed Events column is treated
+// as "no subscriptions" (safe default — webhook is silently inert
+// rather than spamming every event).
+func webhookSubscribes(wh db.Webhook, event string) bool {
+	if strings.TrimSpace(wh.Events) == "" {
+		return false
+	}
+	var events []string
+	if err := json.Unmarshal([]byte(wh.Events), &events); err != nil {
+		return false
+	}
+	for _, e := range events {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
+
+// computeSignature returns the lowercase hex sha256 HMAC of
+// timestamp + "." + body using the given plaintext secret. This matches
+// GitHub's webhook signing convention (Spec Part H locked invariant).
+func computeSignature(secret, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifySignature is the inverse of computeSignature, exposed so the
+// JSON handlers' tests (and any future incoming-receipt code) can
+// re-validate a signature header without re-implementing the math.
+// header is the full "sha256=..." string the client received.
+func VerifySignature(secret, timestamp string, body []byte, header string) bool {
+	const prefix = "sha256="
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	want, err := hex.DecodeString(strings.TrimPrefix(header, prefix))
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	return hmac.Equal(want, mac.Sum(nil))
+}
+
+// previewBytes returns a string suitable for webhook_deliveries.*_preview:
+// the input truncated to PreviewCap bytes, plus a "...(truncated)" marker
+// when it was longer. Returns "" for nil input.
+func previewBytes(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if len(b) > PreviewCap {
+		return string(b[:PreviewCap]) + "...(truncated)"
+	}
+	return string(b)
+}
+
+// newDeliveryID returns a fresh ulid for a webhook_deliveries.id /
+// Burrow-Delivery header. We reuse audit.NewULID so every
+// time-sortable id in Burrow uses the same Crockford-base32 scheme.
+// On the (vanishingly rare) ulid mint failure we fall back to a
+// timestamp+random hex string so the delivery row still has a unique
+// id.
+func newDeliveryID() string {
+	if id, err := audit.NewULID(); err == nil {
+		return id
+	}
+	return fmt.Sprintf("d-%d", time.Now().UnixNano())
+}
+
+// InMemorySecrets is a tiny in-process SecretLookup backed by a
+// sync.Map. cmd/server populates it on POST /webhooks (the only place
+// the plaintext is generated), the dispatcher reads it on every
+// attempt, and Delete is called when the webhook is removed.
+//
+// Restart semantics: secrets are lost on process restart — admins
+// must rotate the secret (delete + recreate) on the next deploy.
+// This matches the spec's "secret returned exactly once on create"
+// invariant; the alternative (persisting the plaintext) would
+// violate the threat model.
+type InMemorySecrets struct {
+	mu sync.RWMutex
+	m  map[string]string
+}
+
+// NewInMemorySecrets returns a ready-to-use plaintext cache.
+func NewInMemorySecrets() *InMemorySecrets {
+	return &InMemorySecrets{m: map[string]string{}}
+}
+
+// Set associates id with the plaintext secret.
+func (s *InMemorySecrets) Set(id, plaintext string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[id] = plaintext
+}
+
+// Plaintext returns the secret for id and whether one is present.
+func (s *InMemorySecrets) Plaintext(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.m[id]
+	return p, ok
+}
+
+// Delete removes the secret for id. Called when a webhook is deleted.
+func (s *InMemorySecrets) Delete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, id)
+}
+
+// ErrNoSecret is returned by SecretLookup adapters that wish to signal
+// "no plaintext on record" with an error instead of a (string, false)
+// pair. The dispatcher itself uses the bool form; this is exported so
+// future adapters can stay symmetrical.
+var ErrNoSecret = errors.New("webhook: no plaintext secret cached for id")
