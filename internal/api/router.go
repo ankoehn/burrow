@@ -155,6 +155,24 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireQuotasManageAny).Post("/rate-limits", d.PostRateLimit)
 			r.With(d.requireQuotasManageAny).Put("/rate-limits/{id}", d.PutRateLimit)
 			r.With(d.requireQuotasManageAny).Delete("/rate-limits/{id}", d.DeleteRateLimit)
+			// v0.4.0 Task 12: cost pricing + budgets + summary/export
+			// (spec Part F). Permission tiers:
+			//   - GET /cost/pricing — session-authed (every signed-in
+			//     user may read the table; same as cache/redaction
+			//     settings).
+			//   - PUT /cost/pricing, POST/PUT/DELETE /budgets, GET
+			//     /budgets — admin-only.
+			//   - GET /cost/summary, GET /cost/export — admin OR
+			//     quotas:read:any (matches the spec note that summary +
+			//     export are a "cost dashboard" read surface).
+			r.Get("/cost/pricing", d.GetCostPricing)
+			r.With(d.RequireAdmin).Put("/cost/pricing", d.PutCostPricing)
+			r.With(d.requireQuotasReadAnyOrAdmin).Get("/cost/summary", d.GetCostSummary)
+			r.With(d.requireQuotasReadAnyOrAdmin).Get("/cost/export", d.GetCostExport)
+			r.With(d.RequireAdmin).Get("/budgets", d.GetBudgets)
+			r.With(d.RequireAdmin).Post("/budgets", d.PostBudget)
+			r.With(d.RequireAdmin).Put("/budgets/{id}", d.PutBudget)
+			r.With(d.RequireAdmin).Delete("/budgets/{id}", d.DeleteBudget)
 			// v0.4.0 Task 8: request inspector ring buffer (spec Part E).
 			// Read endpoints (list, get) are gated by inspector:read:own
 			// (owner) or inspector:read:any (admin) — enforced inside the

@@ -10,12 +10,27 @@ import (
 	"github.com/ankoehn/burrow/internal/db"
 )
 
+// BudgetChecker is the narrow surface SQLSink uses to fire the cost engine's
+// budget check after each successful insert. *cost.Engine satisfies it.
+// Kept here as a Sample-shaped value (not a cost.Subjects struct) to avoid
+// importing internal/cost from internal/aimeter (which would put cost on
+// the proxy hot path's import graph).
+type BudgetChecker interface {
+	// CheckBudgetsForSample inspects the just-recorded usage and triggers
+	// any exceeded budgets (alert_webhook / throttle_zero / disable_key)
+	// exactly once per UTC day. Errors are logged + swallowed.
+	CheckBudgetsForSample(ctx context.Context, serviceID, apiKeyID string)
+}
+
 // SQLSink writes one usage_events row per recorded Sample. Errors are
 // logged at warn level via the configured logger and swallowed (the proxy
-// path must never fail on a metering write).
+// path must never fail on a metering write). If Budgets is non-nil, the
+// sink calls it after each successful insert so the cost engine sees the
+// new row before the next request.
 type SQLSink struct {
-	DB  *db.DB
-	Log *slog.Logger // optional; if nil, slog.Default() is used
+	DB      *db.DB
+	Log     *slog.Logger // optional; if nil, slog.Default() is used
+	Budgets BudgetChecker
 }
 
 // NewSQLSink constructs a SQLSink using slog.Default for diagnostics. Callers
@@ -72,6 +87,12 @@ func (s *SQLSink) Record(ctx context.Context, sm Sample) error {
 		)
 		// Swallow: non-blocking per v0.4.0 spec.
 		return nil
+	}
+	// Optional budget check — fires exactly once per UTC day per exceeded
+	// budget. Implemented by *cost.Engine; nil-safe so existing call sites
+	// that don't set Budgets keep their original behaviour.
+	if s.Budgets != nil {
+		s.Budgets.CheckBudgetsForSample(ctx, sm.ServiceID, sm.APIKeyID)
 	}
 	return nil
 }

@@ -1,0 +1,55 @@
+# internal/cost/pricing.yaml — bundled default pricing table.
+#
+# Currency is USD per 1,000,000 tokens. Operator may override via
+# PUT /api/v1/cost/pricing or by setting BURROW_PRICING_PATH=/path/to/yaml
+# (Task 24 wires the env var). NEVER fetched online — Burrow has no
+# phone-home for prices (spec Part F invariant).
+#
+# Version is the date the bundle was last revised; pin to a real date so the
+# UI can show "pricing last updated YYYY-MM-DD" without ambiguity. Bump when
+# any entry changes.
+version: "2026-05-19"
+entries:
+  # ---- OpenAI ----
+  - { provider: openai,    model: gpt-4o,                   input_per_million: 2.50,   output_per_million: 10.00 }
+  - { provider: openai,    model: gpt-4o-mini,              input_per_million: 0.15,   output_per_million: 0.60 }
+  - { provider: openai,    model: gpt-4o-2024-08-06,        input_per_million: 2.50,   output_per_million: 10.00 }
+  - { provider: openai,    model: gpt-4-turbo,              input_per_million: 10.00,  output_per_million: 30.00 }
+  - { provider: openai,    model: gpt-4,                    input_per_million: 30.00,  output_per_million: 60.00 }
+  - { provider: openai,    model: gpt-3.5-turbo,            input_per_million: 0.50,   output_per_million: 1.50 }
+  - { provider: openai,    model: o1,                       input_per_million: 15.00,  output_per_million: 60.00 }
+  - { provider: openai,    model: o1-mini,                  input_per_million: 3.00,   output_per_million: 12.00 }
+  - { provider: openai,    model: o3-mini,                  input_per_million: 1.10,   output_per_million: 4.40 }
+  - { provider: openai,    model: text-embedding-3-small,   input_per_million: 0.02,   output_per_million: 0.00 }
+  - { provider: openai,    model: text-embedding-3-large,   input_per_million: 0.13,   output_per_million: 0.00 }
+  - { provider: openai,    model: text-embedding-ada-002,   input_per_million: 0.10,   output_per_million: 0.00 }
+
+  # ---- Anthropic ----
+  - { provider: anthropic, model: claude-3-5-sonnet,        input_per_million: 3.00,   output_per_million: 15.00 }
+  - { provider: anthropic, model: claude-3-5-haiku,         input_per_million: 0.80,   output_per_million: 4.00 }
+  - { provider: anthropic, model: claude-3-opus,            input_per_million: 15.00,  output_per_million: 75.00 }
+  - { provider: anthropic, model: claude-3-sonnet,          input_per_million: 3.00,   output_per_million: 15.00 }
+  - { provider: anthropic, model: claude-3-haiku,           input_per_million: 0.25,   output_per_million: 1.25 }
+  - { provider: anthropic, model: claude-2.1,               input_per_million: 8.00,   output_per_million: 24.00 }
+
+  # ---- Google ----
+  - { provider: google,    model: gemini-1.5-pro,           input_per_million: 1.25,   output_per_million: 5.00 }
+  - { provider: google,    model: gemini-1.5-flash,         input_per_million: 0.075,  output_per_million: 0.30 }
+  - { provider: google,    model: gemini-2.0-flash,         input_per_million: 0.10,   output_per_million: 0.40 }
+  - { provider: google,    model: gemini-pro,               input_per_million: 0.50,   output_per_million: 1.50 }
+
+  # ---- Mistral ----
+  - { provider: mistral,   model: mistral-large,            input_per_million: 2.00,   output_per_million: 6.00 }
+  - { provider: mistral,   model: mistral-small,            input_per_million: 0.20,   output_per_million: 0.60 }
+  - { provider: mistral,   model: codestral,                input_per_million: 0.20,   output_per_million: 0.60 }
+
+  # ---- Meta (hosted, e.g. via together/groq) ----
+  - { provider: meta,      model: llama-3.1-405b,           input_per_million: 3.50,   output_per_million: 3.50 }
+  - { provider: meta,      model: llama-3.1-70b,            input_per_million: 0.59,   output_per_million: 0.79 }
+  - { provider: meta,      model: llama-3.1-8b,             input_per_million: 0.05,   output_per_million: 0.08 }
+
+  # ---- Local / self-hosted (zero cost by default; operator overrides for
+  #      internal-amortized cost via PUT /cost/pricing) ----
+  - { provider: ollama,    model: llama3,                   input_per_million: 0.00,   output_per_million: 0.00 }
+  - { provider: ollama,    model: mistral,                  input_per_million: 0.00,   output_per_million: 0.00 }
+  - { provider: ollama,    model: qwen2,                    input_per_million: 0.00,   output_per_million: 0.00 }

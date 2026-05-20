@@ -265,6 +265,18 @@ type Deps struct {
 	// sees the new shape. Wired in cmd/server (Task 12); nil keeps the
 	// API routes functional but Charge always allows.
 	RateLimits QuotaEngine
+	// Budgets is the CRUD + usage-aggregation surface for the budgets
+	// table (spec Part F). *db.DB satisfies it; nil disables all of
+	// /api/v1/budgets and /api/v1/cost/export (handlers return 500 with a
+	// clear "budget store unavailable" body).
+	Budgets BudgetStore
+	// CostEngine is the in-process pricing-table + budget-trigger engine
+	// (spec Part F). Backs GET/PUT /api/v1/cost/pricing and the live
+	// current_usd field returned by GET /budgets. Wired in cmd/server
+	// (Task 25); nil makes GET /cost/pricing return an empty table and
+	// PUT return 500, while GET /budgets still returns the configured
+	// rows with current_usd=0.
+	CostEngine CostEngine
 }
 
 type ctxKey int
