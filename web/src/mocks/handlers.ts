@@ -374,6 +374,22 @@ export const handlers = [
       .slice(0, limit);
     return json(rows);
   }),
+  http.post("/api/v1/services/:id/inspector/requests/:rid/replay", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const list = db.inspectorEntries[String(params.id)] ?? [];
+    const orig = list.find((e) => e.id === params.rid);
+    if (!orig) return err(404, "request not found");
+    const replayed = { ...orig, id: `${orig.id}_replay_${Date.now()}`, ts: new Date().toISOString() };
+    list.unshift(replayed);
+    return json({ new_entry: replayed }, 201);
+  }),
+  http.post("/api/v1/services/:id/inspector/requests/:rid/replay-compare", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const list = db.inspectorEntries[String(params.id)] ?? [];
+    const orig = list.find((e) => e.id === params.rid);
+    if (!orig) return err(404, "request not found");
+    return json({ original: orig, replayed: orig, diff: "" });
+  }),
   http.get("/api/v1/services/:id/inspector/requests/:rid", ({ request, params }) => {
     const g = gate(request); if (g) return g;
     const list = db.inspectorEntries[String(params.id)] ?? [];
