@@ -146,6 +146,15 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAdminOrAIConfigureAny).Post("/models/aliases", d.PostModelAlias)
 			r.With(d.requireAdminOrAIConfigureAny).Put("/models/aliases/{alias}", d.PutModelAlias)
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/models/aliases/{alias}", d.DeleteModelAlias)
+			// v0.4.0 Task 11: rate-limit + quota CRUD (spec Part D.2).
+			// Reads are gated by quotas:read:own/:any (admin always passes);
+			// mutations require admin OR quotas:manage:any. The /usage
+			// endpoint also reads — same gate as the list endpoint.
+			r.With(d.requireQuotasReadOwnOrAny).Get("/rate-limits", d.GetRateLimits)
+			r.With(d.requireQuotasReadOwnOrAny).Get("/rate-limits/usage", d.GetRateLimitUsage)
+			r.With(d.requireQuotasManageAny).Post("/rate-limits", d.PostRateLimit)
+			r.With(d.requireQuotasManageAny).Put("/rate-limits/{id}", d.PutRateLimit)
+			r.With(d.requireQuotasManageAny).Delete("/rate-limits/{id}", d.DeleteRateLimit)
 			// v0.4.0 Task 8: request inspector ring buffer (spec Part E).
 			// Read endpoints (list, get) are gated by inspector:read:own
 			// (owner) or inspector:read:any (admin) — enforced inside the

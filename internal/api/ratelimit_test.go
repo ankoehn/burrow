@@ -1,9 +1,17 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/quota"
 )
 
 // TestLoginRateLimitPerIP verifies that the per-IP rate limiter on
@@ -127,5 +135,451 @@ func TestLoginRateLimitDoesNotAffectOtherEndpoints(t *testing.T) {
 		if resp.StatusCode == http.StatusTooManyRequests {
 			t.Fatalf("GET /api/v1/me request %d returned 429 — login limiter must NOT affect other endpoints", i+1)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// v0.4.0 Task 11: rate-limit + quota JSON API tests.
+// ---------------------------------------------------------------------------
+
+// fakeRateLimitStore is an in-memory RateLimitStore for the handler tests.
+// It mirrors the *db.DB CRUD shape but lives entirely in memory.
+type fakeRateLimitStore struct {
+	mu   sync.Mutex
+	rows map[string]db.RateLimit
+}
+
+func newFakeRateLimitStore() *fakeRateLimitStore {
+	return &fakeRateLimitStore{rows: map[string]db.RateLimit{}}
+}
+
+func (f *fakeRateLimitStore) ListRateLimits(_ context.Context) ([]db.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]db.RateLimit, 0, len(f.rows))
+	for _, rl := range f.rows {
+		out = append(out, rl)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		if out[i].Subject != out[j].Subject {
+			return out[i].Subject < out[j].Subject
+		}
+		return out[i].Dimension < out[j].Dimension
+	})
+	return out, nil
+}
+
+func (f *fakeRateLimitStore) GetRateLimit(_ context.Context, id string) (db.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rl, ok := f.rows[id]
+	if !ok {
+		return db.RateLimit{}, db.ErrNotFound
+	}
+	return rl, nil
+}
+
+func (f *fakeRateLimitStore) CreateRateLimit(_ context.Context, rl db.RateLimit) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows[rl.ID] = rl
+	return nil
+}
+
+func (f *fakeRateLimitStore) UpdateRateLimit(_ context.Context, rl db.RateLimit) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.rows[rl.ID]; !ok {
+		return db.ErrNotFound
+	}
+	f.rows[rl.ID] = rl
+	return nil
+}
+
+func (f *fakeRateLimitStore) DeleteRateLimit(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.rows[id]; !ok {
+		return db.ErrNotFound
+	}
+	delete(f.rows, id)
+	return nil
+}
+
+// fakeQuotaEngine is a stub QuotaEngine that records Reload calls and
+// returns canned UsageFor rows.
+type fakeQuotaEngine struct {
+	mu          sync.Mutex
+	reloadCount int
+	usage       []quota.Usage
+	limits      []quota.Limit
+}
+
+func (f *fakeQuotaEngine) Reload(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reloadCount++
+	return nil
+}
+
+func (f *fakeQuotaEngine) UsageFor(_ context.Context, _ quota.Subjects) []quota.Usage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]quota.Usage, len(f.usage))
+	copy(out, f.usage)
+	return out
+}
+
+func (f *fakeQuotaEngine) Limits() []quota.Limit {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]quota.Limit, len(f.limits))
+	copy(out, f.limits)
+	return out
+}
+
+// TestRateLimitHandler_GetEmpty — empty store returns a non-null JSON
+// empty array.
+func TestRateLimitHandler_GetEmpty(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.get(t, "/api/v1/rate-limits")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var out []rateLimitResp
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if out == nil || len(out) != 0 {
+		t.Fatalf("want empty non-nil array; got %v", out)
+	}
+}
+
+// TestRateLimitHandler_PostOK — happy path: a valid POST returns 201 with
+// the created row including a server-allocated id and triggers a Reload.
+func TestRateLimitHandler_PostOK(t *testing.T) {
+	engine := &fakeQuotaEngine{}
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  engine,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	body := map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "rpm",
+		"limit": 60, "burst": 60, "window": "minute",
+	}
+	r := c.post(t, "/api/v1/rate-limits", body)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var got rateLimitResp
+	if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if got.ID == "" {
+		t.Fatal("server must allocate an id")
+	}
+	if got.Scope != "api_key" || got.Subject != "k1" ||
+		got.Dimension != "rpm" || got.Limit != 60 ||
+		got.Burst != 60 || got.Window != "minute" {
+		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+	if engine.reloadCount != 1 {
+		t.Errorf("Reload not called after POST: count=%d", engine.reloadCount)
+	}
+}
+
+// TestRateLimitHandler_PostBadInputs — 400 paths.
+func TestRateLimitHandler_PostBadInputs(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"bad scope", map[string]any{
+			"scope": "garbage", "subject": "k1", "dimension": "rpm",
+			"limit": 1, "burst": 1, "window": "minute"}},
+		{"bad dimension", map[string]any{
+			"scope": "api_key", "subject": "k1", "dimension": "xxx",
+			"limit": 1, "burst": 1, "window": "minute"}},
+		{"bad window", map[string]any{
+			"scope": "api_key", "subject": "k1", "dimension": "rpm",
+			"limit": 1, "burst": 1, "window": "century"}},
+		{"zero limit", map[string]any{
+			"scope": "api_key", "subject": "k1", "dimension": "rpm",
+			"limit": 0, "burst": 1, "window": "minute"}},
+		{"negative burst", map[string]any{
+			"scope": "api_key", "subject": "k1", "dimension": "rpm",
+			"limit": 5, "burst": -1, "window": "minute"}},
+		{"global with subject", map[string]any{
+			"scope": "global", "subject": "x", "dimension": "rpm",
+			"limit": 5, "burst": 5, "window": "minute"}},
+		{"non-global without subject", map[string]any{
+			"scope": "api_key", "subject": "", "dimension": "rpm",
+			"limit": 5, "burst": 5, "window": "minute"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := c.post(t, "/api/v1/rate-limits", tc.body)
+			if r.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+			}
+		})
+	}
+}
+
+// TestRateLimitHandler_PutOK — successful update returns 204, persists the
+// new fields, and triggers a Reload.
+func TestRateLimitHandler_PutOK(t *testing.T) {
+	store := newFakeRateLimitStore()
+	store.rows["rl1"] = db.RateLimit{
+		ID: "rl1", Scope: "api_key", Subject: "k1", Dimension: "rpm",
+		Lim: 5, Burst: 5, Window: "minute",
+	}
+	engine := &fakeQuotaEngine{}
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: store,
+		RateLimits:  engine,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.put(t, "/api/v1/rate-limits/rl1", map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "bpm",
+		"limit": 100, "burst": 200, "window": "day",
+	})
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("PUT status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	row, _ := store.GetRateLimit(context.Background(), "rl1")
+	if row.Dimension != "bpm" || row.Lim != 100 || row.Burst != 200 || row.Window != "day" {
+		t.Fatalf("update did not persist: %+v", row)
+	}
+	if engine.reloadCount != 1 {
+		t.Errorf("Reload not called after PUT: count=%d", engine.reloadCount)
+	}
+}
+
+// TestRateLimitHandler_PutNotFound — PUT on missing id returns 404.
+func TestRateLimitHandler_PutNotFound(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.put(t, "/api/v1/rate-limits/nope", map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "rpm",
+		"limit": 1, "burst": 1, "window": "minute",
+	})
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestRateLimitHandler_DeleteOK — DELETE removes the row, returns 204,
+// and triggers a Reload.
+func TestRateLimitHandler_DeleteOK(t *testing.T) {
+	store := newFakeRateLimitStore()
+	store.rows["rl1"] = db.RateLimit{
+		ID: "rl1", Scope: "api_key", Subject: "k1", Dimension: "rpm",
+		Lim: 5, Burst: 5, Window: "minute",
+	}
+	engine := &fakeQuotaEngine{}
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: store,
+		RateLimits:  engine,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.delete(t, "/api/v1/rate-limits/rl1")
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	if _, err := store.GetRateLimit(context.Background(), "rl1"); err == nil {
+		t.Fatal("row should be gone")
+	}
+	if engine.reloadCount != 1 {
+		t.Errorf("Reload not called after DELETE: count=%d", engine.reloadCount)
+	}
+}
+
+// TestRateLimitHandler_DeleteNotFound — DELETE on missing id returns 404.
+func TestRateLimitHandler_DeleteNotFound(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.delete(t, "/api/v1/rate-limits/nope")
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestRateLimitHandler_Perms — admin can mutate, non-admin role "user" has
+// quotas:read:own (so GET passes) but no quotas:manage:any (so POST/PUT/
+// DELETE return 403).
+func TestRateLimitHandler_Perms(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "user"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	// GET allowed (quotas:read:own).
+	if r := c.get(t, "/api/v1/rate-limits"); r.StatusCode != http.StatusOK {
+		t.Fatalf("GET as user status=%d", r.StatusCode)
+	}
+	if r := c.get(t, "/api/v1/rate-limits/usage"); r.StatusCode != http.StatusOK {
+		t.Fatalf("GET usage as user status=%d", r.StatusCode)
+	}
+	// POST forbidden.
+	r := c.post(t, "/api/v1/rate-limits", map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "rpm",
+		"limit": 1, "burst": 1, "window": "minute",
+	})
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST as user status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	// PUT forbidden.
+	r = c.put(t, "/api/v1/rate-limits/x", map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "rpm",
+		"limit": 1, "burst": 1, "window": "minute",
+	})
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("PUT as user status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	// DELETE forbidden.
+	r = c.delete(t, "/api/v1/rate-limits/x")
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("DELETE as user status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestRateLimitHandler_UsageEndpoint — exercises the usage handler with a
+// canned engine response and verifies the JSON wire shape.
+func TestRateLimitHandler_UsageEndpoint(t *testing.T) {
+	engine := &fakeQuotaEngine{
+		usage: []quota.Usage{{
+			Limit: quota.Limit{
+				ID: "rl1", Scope: "api_key", Subject: "k1",
+				Dimension: "rpm", Limit: 60, Burst: 60, Window: "minute",
+			},
+			Used: 10, ResetSeconds: 10,
+		}},
+	}
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  engine,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.get(t, "/api/v1/rate-limits/usage?scope=api_key&subject=k1")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var out usageResp
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if len(out.Limits) != 1 {
+		t.Fatalf("limits len = %d, want 1", len(out.Limits))
+	}
+	row := out.Limits[0]
+	if row.ID != "rl1" || row.Used != 10 || row.ResetSeconds != 10 {
+		t.Fatalf("usage row mismatch: %+v", row)
+	}
+}
+
+// TestRateLimitHandler_UsageBadScope — invalid scope query param returns
+// 400, not 500/leak.
+func TestRateLimitHandler_UsageBadScope(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  &fakeQuotaEngine{},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+	r := c.get(t, "/api/v1/rate-limits/usage?scope=garbage&subject=x")
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestRateLimitHandler_NilEngineDegrades — when RateLimits is nil (early
+// wiring), the GET endpoints return empty bodies and the POST endpoint
+// still succeeds (the engine is consulted only for the post-mutation
+// reload, which is best-effort).
+func TestRateLimitHandler_NilEngineDegrades(t *testing.T) {
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		RateLimitDB: newFakeRateLimitStore(),
+		RateLimits:  nil,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.get(t, "/api/v1/rate-limits/usage")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("usage with nil engine: status=%d", r.StatusCode)
+	}
+	r = c.post(t, "/api/v1/rate-limits", map[string]any{
+		"scope": "api_key", "subject": "k1", "dimension": "rpm",
+		"limit": 1, "burst": 1, "window": "minute",
+	})
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("POST with nil engine: status=%d body=%s", r.StatusCode, readBody(t, r))
 	}
 }

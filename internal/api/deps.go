@@ -254,6 +254,17 @@ type Deps struct {
 	// but the POST .../replay and POST .../replay-compare handlers return
 	// 503 "replay engine unavailable".
 	InspectorReplayer InspectorReplayer
+	// RateLimitDB is the CRUD surface for the rate_limits table (spec
+	// Part D.2: GET/POST/PUT/DELETE /api/v1/rate-limits). *db.DB satisfies
+	// it; nil disables the four routes (handlers return 500 with a clear
+	// "rate-limit store unavailable" body).
+	RateLimitDB RateLimitStore
+	// RateLimits is the runtime engine consulted by the proxy chain and
+	// (read-side) by the /rate-limits/usage endpoint. Mutations to the
+	// configured rule set call Reload synchronously so the next charge
+	// sees the new shape. Wired in cmd/server (Task 12); nil keeps the
+	// API routes functional but Charge always allows.
+	RateLimits QuotaEngine
 }
 
 type ctxKey int
