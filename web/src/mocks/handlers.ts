@@ -769,4 +769,44 @@ export const handlers = [
     db.automationTokens.splice(i, 1);
     return noContent();
   }),
+
+  // ---- v0.4.0 backups (spec Part L) ----
+  http.get("/api/v1/backups", ({ request }) =>
+    gate(request, { admin: true }) ?? json(db.backups)),
+  http.post("/api/v1/backups", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const id = `bk_${Math.random().toString(36).slice(2, 8)}`;
+    const ts = new Date().toISOString();
+    db.backups.push({
+      id, taken_at: ts, version: "v0.4.0", size_bytes: 1024 * 1024,
+      db_sha256: "0".repeat(64), path: `/var/burrow/backups/${id}.tar.gz`,
+    });
+    return json({ id, started_at: ts }, 202);
+  }),
+  http.get("/api/v1/backups/:id/download", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const bk = db.backups.find((b) => b.id === params.id);
+    if (!bk) return err(404, "backup not found");
+    return new HttpResponse("(backup blob stub)", {
+      status: 200,
+      headers: { "Content-Type": "application/gzip" },
+    });
+  }),
+  http.post("/api/v1/backups/:id/verify", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const bk = db.backups.find((b) => b.id === params.id);
+    if (!bk) return err(404, "backup not found");
+    return json({ ok: true, sha256_match: true });
+  }),
+  http.delete("/api/v1/backups/:id", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const i = db.backups.findIndex((b) => b.id === params.id);
+    if (i < 0) return err(404, "backup not found");
+    db.backups.splice(i, 1);
+    return noContent();
+  }),
+  http.post("/api/v1/backups/restore", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return json({ restore_id: `rs_${Math.random().toString(36).slice(2, 8)}`, started_at: new Date().toISOString() }, 202);
+  }),
 ];

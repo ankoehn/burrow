@@ -22,6 +22,7 @@ import AuditLog from "@/pages/AuditLog";
 import Webhooks from "@/pages/Webhooks";
 import ProvisioningKeys from "@/pages/ProvisioningKeys";
 import AutomationTokens from "@/pages/AutomationTokens";
+import BackupRestore from "@/pages/BackupRestore";
 
 export default function App() {
   return (
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/webhooks" element={<Webhooks />} />
         <Route path="/provisioning" element={<ProvisioningKeys />} />
         <Route path="/account/automation" element={<AutomationTokens />} />
+        <Route path="/settings/backups" element={<BackupRestore />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />

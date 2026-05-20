@@ -4,7 +4,7 @@ import type {
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
-  AutomationToken,
+  AutomationToken, BackupRow,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -62,6 +62,7 @@ export interface MockDb {
   provisioningKeys: ProvisioningKey[];
   provisioningPending: ProvisioningPending[];
   automationTokens: AutomationToken[];
+  backups: BackupRow[];
 }
 
 function seed(): MockDb {
@@ -198,6 +199,9 @@ function seed(): MockDb {
     ],
     automationTokens: [
       { id: "at_ci01", name: "ci-runner", prefix: "bua_x9k", user_id: meId, role_at_mint: "user", permissions: ["tunnels:read:any", "audit:read"], expires_at: null, last_used: "2026-05-18T09:00:00Z", created_at: "2026-04-01T00:00:00Z" },
+    ],
+    backups: [
+      { id: "bk_20260515", taken_at: "2026-05-15T03:00:00Z", version: "v0.3.0", size_bytes: 5 * 1024 * 1024, db_sha256: "deadbeef1234567890abcdef1234567890abcdef1234567890abcdef1234beef", path: "/var/burrow/backups/bk_20260515.tar.gz" },
     ],
   };
 }
