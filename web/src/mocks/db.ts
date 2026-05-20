@@ -1,6 +1,7 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
-  Service, ServiceApiKey, ModelAlias, CostSummary,
+  Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
+  InspectorEntry,
 } from "@/lib/contract";
 
 // Internal service row: the wire Service plus the owning user_id (stripped
@@ -37,6 +38,8 @@ export interface MockDb {
   aiMeta: Record<string, AiMetaRow>;
   modelAliases: ModelAlias[];
   costSummary: Record<"today" | "week" | "month" | "year", CostSummary>;
+  aiConfigs: Record<string, ServiceAIConfig>;
+  inspectorEntries: Record<string, InspectorEntry[]>;
 }
 
 function seed(): MockDb {
@@ -110,7 +113,64 @@ function seed(): MockDb {
       month: { window: "month", total_usd: 32.50, tokens_in: 320000, tokens_out: 215000, top_consumers: [], pct_of_budget: 0.7 },
       year:  { window: "year",  total_usd: 390.00, tokens_in: 3800000, tokens_out: 2550000, top_consumers: [], pct_of_budget: 0.6 },
     },
+    aiConfigs: {
+      svc_ai001: defaultAiConfig(),
+    },
+    inspectorEntries: {
+      svc_ai001: seedInspector("svc_ai001"),
+    },
   };
+}
+
+// Default-filled ServiceAIConfig — every section disabled, sensible defaults.
+function defaultAiConfig(): ServiceAIConfig {
+  return {
+    cache: { enabled: false, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64 },
+    redaction: { enabled: false, redact_for_logs_only: false, rule_ids: [], presidio_enabled: false },
+    guardrails: { enabled: false, action: "log_only" },
+    inspector: { enabled: true, max_requests: 100 },
+    routing: {
+      strategy: "single",
+      model_alias: "fast",
+      header_name: "X-Burrow-Model",
+      paused: false,
+      circuit_breaker: { failure_pct: 50, window_seconds: 30, cool_down_seconds: 60 },
+      backends: [],
+      translate_to: "none",
+    },
+    ip_geo: { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
+    mtls: { enabled: false, ca_fingerprint_sha256: "" },
+  };
+}
+
+// Twelve inspector entries — enough to test the "10 newest" Recent Requests
+// table on the AI endpoint detail page.
+function seedInspector(serviceId: string): InspectorEntry[] {
+  const out: InspectorEntry[] = [];
+  for (let i = 0; i < 12; i++) {
+    out.push({
+      id: `ie_${serviceId}_${String(i).padStart(3, "0")}`,
+      service_id: serviceId,
+      api_key_id: i % 2 === 0 ? "sak_ci01" : "sak_prod1",
+      ts: new Date(Date.parse("2026-05-19T12:00:00Z") - i * 60_000).toISOString(),
+      method: "POST",
+      path: "/v1/chat/completions",
+      status: 200,
+      duration_ms: 100 + i * 20,
+      bytes_in: 256,
+      bytes_out: 1024,
+      req_headers: { "content-type": "application/json", authorization: "Bearer ••• [redacted]" },
+      req_body: `{"model":"llama3.1:8b","messages":[{"role":"user","content":"hi #${i}"}]}`,
+      resp_headers: { "content-type": "application/json" },
+      resp_body: `{"id":"chatcmpl-${i}","choices":[{"message":{"content":"hello #${i}"}}]}`,
+      truncated: false,
+      cache: i % 5 === 0 ? "HIT" : "MISS",
+      redactions: [],
+      trace_id: `tr_${i}`,
+      remote_ip: "203.0.113.7",
+    });
+  }
+  return out;
 }
 
 export let db: MockDb = seed();

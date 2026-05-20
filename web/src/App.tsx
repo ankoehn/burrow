@@ -13,6 +13,7 @@ import Clients from "@/pages/Clients";
 import ClientDetail from "@/pages/ClientDetail";
 import ConnectClient from "@/pages/ConnectClient";
 import AiEndpoints from "@/pages/AiEndpoints";
+import AiEndpointDetail from "@/pages/AiEndpointDetail";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/tunnels" element={<Tunnels />} />
         <Route path="/services" element={<Services />} />
         <Route path="/ai/endpoints" element={<AiEndpoints />} />
+        <Route path="/ai/endpoints/:id" element={<AiEndpointDetail />} />
         <Route path="/tokens" element={<Tokens />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/connect" element={<ConnectClient />} />

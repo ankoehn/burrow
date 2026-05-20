@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb } from "@/mocks/db";
-import type { AiEndpoint, CostSummary } from "@/lib/contract";
+import type { AiEndpoint, CostSummary, ServiceAIConfig } from "@/lib/contract";
 
 const json = (body: unknown, status = 200) => HttpResponse.json(body as object, { status });
 const err = (status: number, message: string) => HttpResponse.json({ error: message }, { status });
@@ -320,5 +320,74 @@ export const handlers = [
     const w = (url.searchParams.get("window") ?? "today") as CostSummary["window"];
     const summary = db.costSummary[w] ?? db.costSummary.today;
     return json(summary);
+  }),
+
+  // ---- v0.4.0 per-endpoint metrics (spec §4.20) ----
+  http.get("/api/v1/ai/endpoints/:service_id/metrics", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const meta = db.aiMeta[String(params.service_id)];
+    if (!meta) return err(404, "service not found");
+    const summary = db.costSummary.today;
+    // Deterministic sinusoidal sparkline — enough to render a stable curve.
+    const rpm: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      rpm.push(Math.round(20 + 15 * Math.sin(i / 4)));
+    }
+    return json({
+      requests_24h: meta.requests_24h,
+      tokens_in_24h: summary.tokens_in,
+      tokens_out_24h: summary.tokens_out,
+      cost_usd_24h: summary.total_usd,
+      cache_hit_ratio_24h: meta.requests_24h > 0 ? meta.cache_hits_24h / meta.requests_24h : 0,
+      requests_per_minute: rpm,
+    });
+  }),
+
+  // ---- v0.4.0 service AI config (spec Part B.7) ----
+  http.get("/api/v1/services/:id/ai-config", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    return json(db.aiConfigs[svc.id] ?? null);
+  }),
+  http.put("/api/v1/services/:id/ai-config", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    const b = await body<ServiceAIConfig>(request);
+    if (!b) return err(400, "invalid ai-config body");
+    db.aiConfigs[svc.id] = b;
+    return noContent();
+  }),
+
+  // ---- v0.4.0 inspector requests (spec Part E) ----
+  http.get("/api/v1/services/:id/inspector/requests", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const url = new URL(request.url);
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
+    const rows = (db.inspectorEntries[svc.id] ?? [])
+      .slice()
+      .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
+      .slice(0, limit);
+    return json(rows);
+  }),
+  http.get("/api/v1/services/:id/inspector/requests/:rid", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const list = db.inspectorEntries[String(params.id)] ?? [];
+    const entry = list.find((e) => e.id === params.rid);
+    if (!entry) return err(404, "request not found");
+    return json(entry);
+  }),
+
+  // ---- v0.4.0 per-service cache controls (spec Part B.7) ----
+  http.delete("/api/v1/services/:id/cache/entries", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    if (!canConfigure(svc)) return err(403, "forbidden");
+    return noContent();
   }),
 ];
