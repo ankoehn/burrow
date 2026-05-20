@@ -273,7 +273,7 @@ func bootE2EStack(t *testing.T) *e2eStack {
 	}
 	s.proxyAddr = proxyLn.Addr().String()
 	_, s.proxyPort, _ = net.SplitHostPort(s.proxyAddr)
-	checker := proxy.NewAccessCheckerWithLogger(st, e2eAuthDomain, s.log)
+	checker := proxy.NewAccessCheckerWithSessionsAndLogger(st, st, e2eAuthDomain, s.log)
 	gate := proxy.NewGate(st, e2eAuthDomain, true, s.log)
 	s.gate = gate
 	dialer := proxyDialerAdapter{st: st, srv: srv}

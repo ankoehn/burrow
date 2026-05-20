@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/ankoehn/burrow/internal/db"
 )
 
 // APIKeyValidator is the narrow interface the accessChecker uses to validate
@@ -13,6 +15,19 @@ import (
 // Tests use a local fake instead of pulling in the full store.
 type APIKeyValidator interface {
 	ValidateAPIKey(ctx context.Context, serviceID, presented string) (bool, error)
+}
+
+// SessionValidator is the narrow interface the accessChecker uses to validate
+// burrow_login visitor sessions on the proxy hot path. *store.Store satisfies
+// it implicitly. When nil (e.g. unit-test constructions), the checker falls
+// back to the v0.3.0-original behaviour of always 302-redirecting burrow_login
+// requests to the gate — which on its own creates a gate↔service redirect
+// loop for visitors with a valid session, so production wiring MUST pass a
+// non-nil SessionValidator (cmd/server uses NewAccessCheckerWithSessionsAndLogger).
+type SessionValidator interface {
+	ValidateSession(ctx context.Context, sessionID string) (userID string, err error)
+	GetUserByID(ctx context.Context, id string) (db.User, error)
+	RoleAllowed(ctx context.Context, serviceID, role string) (bool, error)
 }
 
 // accessChecker implements AccessChecker for all three access modes:
@@ -26,6 +41,10 @@ type APIKeyValidator interface {
 // required for redirect support.
 type accessChecker struct {
 	v          APIKeyValidator
+	sv         SessionValidator // optional; when non-nil, burrow_login passes
+	// through visitors with a valid session cookie + allowed role (the
+	// proxy-side validation the spec calls for; without this, the
+	// gate→service→gate loop makes burrow_login non-functional).
 	authDomain string
 	log        *slog.Logger
 }
@@ -56,6 +75,20 @@ func NewAccessCheckerWithLogger(v APIKeyValidator, authDomain string, log *slog.
 	}
 }
 
+// NewAccessCheckerWithSessionsAndLogger is the production constructor: it adds
+// a SessionValidator so burrow_login requests can be passed through directly
+// when the visitor already has a valid session cookie + allowed role. Without
+// this, every burrow_login request 302s to the gate and the gate then 302s
+// back, creating an infinite redirect loop. cmd/server uses this constructor.
+func NewAccessCheckerWithSessionsAndLogger(v APIKeyValidator, sv SessionValidator, authDomain string, log *slog.Logger) AccessChecker {
+	return &accessChecker{
+		v:          v,
+		sv:         sv,
+		authDomain: authDomain,
+		log:        log,
+	}
+}
+
 // Allow enforces the access mode policy for a single request.
 //
 // Return values follow the AccessChecker contract:
@@ -70,7 +103,7 @@ func (ac *accessChecker) Allow(ctx context.Context, res *Resolved, r *http.Reque
 		return ac.checkAPIKey(ctx, res, r)
 
 	case "burrow_login":
-		return ac.checkBurrowLogin(r)
+		return ac.checkBurrowLogin(ctx, res, r)
 
 	default:
 		h := make(http.Header)
@@ -119,22 +152,44 @@ func (ac *accessChecker) checkAPIKey(ctx context.Context, res *Resolved, r *http
 	return true, 0, "", nil
 }
 
-// checkBurrowLogin enforces burrow_login mode by 302-redirecting the visitor
-// to the gate's login page with the original URL encoded in the "next" query
-// parameter. The gate URL format is:
+// checkBurrowLogin enforces burrow_login mode.
 //
-//	https://<authDomain>/__burrow/login?next=<url.QueryEscape(originalURL)>
+// When a SessionValidator is wired (production path), the checker first
+// inspects the visitor's burrow_session cookie:
+//   - Cookie valid, user not suspended, role ∈ service access policy → allow
+//     through (return ok=true).
+//   - Otherwise (no cookie / invalid / suspended / role not allowed) → 302
+//     redirect to the gate; the gate then either re-renders the login form or
+//     (for the role-denied case) the friendly access-denied HTML page.
 //
-// where originalURL = "https://" + r.Host + r.RequestURI.
+// Without a SessionValidator (legacy two-arg constructors used by older unit
+// tests), every request 302s to the gate — which would create a gate↔service
+// redirect loop in production, but is acceptable for tests that never carry
+// a session cookie.
 //
 // If authDomain is empty (should never happen — the store layer rejects
 // burrow_login without a configured auth_domain at write time), we fail
 // closed with 500.
-func (ac *accessChecker) checkBurrowLogin(r *http.Request) (bool, int, string, http.Header) {
+func (ac *accessChecker) checkBurrowLogin(ctx context.Context, res *Resolved, r *http.Request) (bool, int, string, http.Header) {
 	if ac.authDomain == "" {
 		h := make(http.Header)
 		h.Set("Content-Type", "application/json")
 		return false, http.StatusInternalServerError, `{"error":"burrow_login requires auth_domain"}`, h
+	}
+
+	if ac.sv != nil {
+		if c, err := r.Cookie("burrow_session"); err == nil && c.Value != "" {
+			uid, err := ac.sv.ValidateSession(ctx, c.Value)
+			if err == nil {
+				user, err := ac.sv.GetUserByID(ctx, uid)
+				if err == nil && user.Status != "suspended" {
+					allowed, err := ac.sv.RoleAllowed(ctx, res.ServiceID, user.Role)
+					if err == nil && allowed {
+						return true, 0, "", nil
+					}
+				}
+			}
+		}
 	}
 
 	originalURL := "https://" + r.Host + r.RequestURI

@@ -398,7 +398,7 @@ func main() {
 
 				proxyTLSEnabled := cfg.HTTPProxyTLSCert != "" && cfg.HTTPProxyTLSKey != ""
 
-				accessChecker := proxy.NewAccessCheckerWithLogger(st, cfg.AuthDomain, log)
+				accessChecker := proxy.NewAccessCheckerWithSessionsAndLogger(st, st, cfg.AuthDomain, log)
 				gate := proxy.NewGate(st, cfg.AuthDomain, effectiveSecureCookies, log)
 				proxyOpts := []proxy.Option{
 					proxy.WithGate(gate),
