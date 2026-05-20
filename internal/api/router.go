@@ -107,6 +107,17 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/services/{serviceID}/api-keys/{id}", d.DeleteAPIKey)
 			r.Get("/services/{serviceID}/access-policy", d.GetAccessPolicy)
 			r.Put("/services/{serviceID}/access-policy", d.SetAccessPolicy)
+			// v0.4.0 Task 4: exact-match prompt cache JSON API.
+			// GET endpoints are session-authed only (any user may read
+			// settings/stats); the PUT and global DELETE are gated by
+			// requireAdminOrAIConfigureAny (admin OR ai:configure:any);
+			// the per-service DELETE handler does its own ownership
+			// check (owner OR ai:configure:own/any).
+			r.Get("/cache/settings", d.GetCacheSettings)
+			r.Get("/cache/stats", d.GetCacheStats)
+			r.With(d.requireAdminOrAIConfigureAny).Put("/cache/settings", d.PutCacheSettings)
+			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/entries", d.DeleteCacheEntries)
+			r.Delete("/services/{serviceID}/cache/entries", d.DeleteServiceCacheEntries)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.

@@ -223,6 +223,17 @@ type Deps struct {
 	// Empty means no auth domain is configured; burrow_login mode is rejected
 	// with 409 when this field is empty.
 	AuthDomain string
+
+	// v0.4.0 surfaces — additive; nil-safe handlers degrade gracefully.
+	// CacheEngine is the exact-match prompt cache (clear/stats surface for
+	// the JSON API; Lookup/Store live on the proxy hot path wired separately).
+	// May be nil before Task 12 wires the concrete *exact.Cache.
+	CacheEngine CacheEngine
+	// CacheServices is the per-service ai-config lookup surface used by the
+	// per-service cache endpoints (DELETE /services/{id}/cache/entries,
+	// GET /cache/settings per_service list). May be nil before Task 24 wires
+	// the typed ServiceAIConfig store.
+	CacheServices CacheServiceLookup
 }
 
 type ctxKey int
