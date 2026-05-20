@@ -234,6 +234,11 @@ type Deps struct {
 	// GET /cache/settings per_service list). May be nil before Task 24 wires
 	// the typed ServiceAIConfig store.
 	CacheServices CacheServiceLookup
+	// ModelAliases is the CRUD surface for the model_aliases table (spec
+	// Part C.1: GET/POST/PUT/DELETE /api/v1/models/aliases). *db.DB satisfies
+	// it; nil disables the four routes (handlers return 500 with a clear
+	// "alias store unavailable" body).
+	ModelAliases ModelAliasStore
 }
 
 type ctxKey int

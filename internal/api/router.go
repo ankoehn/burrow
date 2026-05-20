@@ -138,6 +138,14 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/guardrails/settings", d.GetGuardrailSettings)
 			r.With(d.requireAdminOrAIConfigureAny).Put("/guardrails/settings", d.PutGuardrailSettings)
 			r.Get("/guardrails/patterns", d.GetGuardrailPatterns)
+			// v0.4.0 Task 7: model alias registry (spec Part C.1).
+			// GET is session-authed (any user may read); POST/PUT/DELETE are
+			// admin OR ai:configure:any — same gating as cache/redaction/
+			// guardrails mutations.
+			r.Get("/models/aliases", d.GetModelAliases)
+			r.With(d.requireAdminOrAIConfigureAny).Post("/models/aliases", d.PostModelAlias)
+			r.With(d.requireAdminOrAIConfigureAny).Put("/models/aliases/{alias}", d.PutModelAlias)
+			r.With(d.requireAdminOrAIConfigureAny).Delete("/models/aliases/{alias}", d.DeleteModelAlias)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
