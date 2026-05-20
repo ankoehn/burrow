@@ -183,6 +183,16 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/services/{serviceID}/inspector/requests/{rid}", d.GetInspectorRequest)
 			r.Post("/services/{serviceID}/inspector/requests/{rid}/replay", d.ReplayInspectorRequest)
 			r.Post("/services/{serviceID}/inspector/requests/{rid}/replay-compare", d.ReplayCompareInspectorRequest)
+			// v0.4.0 Task 13: audit log JSON API (spec Part G.2).
+			// Every audit route is gated by requireAdminOrAuditRead
+			// (admin OR holds authz.PermAuditRead). The fingerprint
+			// endpoint returns the public key only — the private signing
+			// key lives in settings.audit.signing_key and is never
+			// surfaced.
+			r.With(d.requireAdminOrAuditRead).Get("/audit/events", d.GetAuditEvents)
+			r.With(d.requireAdminOrAuditRead).Get("/audit/fingerprint", d.GetAuditFingerprint)
+			r.With(d.requireAdminOrAuditRead).Get("/audit/export", d.GetAuditExport)
+			r.With(d.requireAdminOrAuditRead).Post("/audit/verify", d.PostAuditVerify)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.

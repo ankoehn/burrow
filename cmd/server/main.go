@@ -554,6 +554,16 @@ func main() {
 	_ = tokenCmd.MarkFlagRequired("email")
 	root.AddCommand(tokenCmd)
 
+	// `burrowd audit` is the umbrella for audit-log operator commands.
+	// Currently it has one subcommand: `audit verify`. Future audit
+	// helpers (export, etc.) will attach here too.
+	auditCmd := &cobra.Command{
+		Use:   "audit",
+		Short: "Audit log operator commands",
+	}
+	auditCmd.AddCommand(newAuditVerifyCmd())
+	root.AddCommand(auditCmd)
+
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print version information",

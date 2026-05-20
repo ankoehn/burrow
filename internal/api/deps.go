@@ -277,6 +277,16 @@ type Deps struct {
 	// PUT return 500, while GET /budgets still returns the configured
 	// rows with current_usd=0.
 	CostEngine CostEngine
+	// AuditEvents is the read surface backing GET /audit/events (the
+	// admin UI's audit log table) and POST /audit/verify (for resolving
+	// first_id/last_id within a range). *db.DB satisfies it. Nil disables
+	// the routes (handlers return 500 "audit store unavailable").
+	AuditEvents AuditQueryStore
+	// AuditChain is the action surface: verify, export, public-key. Wraps
+	// an *audit.Logger via NewAuditChainAdapter. cmd/server constructs it
+	// after LoadOrGenerateSigningKey wires the key. Nil disables verify /
+	// export / fingerprint.
+	AuditChain AuditChain
 }
 
 type ctxKey int
