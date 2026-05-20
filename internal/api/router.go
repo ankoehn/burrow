@@ -130,6 +130,14 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/redaction/settings", d.GetRedactionSettings)
 			r.With(d.requireAdminOrAIConfigureAny).Put("/redaction/settings", d.PutRedactionSettings)
 			r.With(d.requireAdminOrAIConfigureAny).Post("/redaction/preview", d.PostRedactionPreview)
+			// v0.4.0 Task 6: prompt-injection guardrails JSON API.
+			// GET endpoints are session-authed (any user may read settings
+			// and the bundled-pattern list); PUT settings is gated by
+			// requireAdminOrAIConfigureAny (admin OR ai:configure:any),
+			// same pattern as the cache/redaction mutation routes.
+			r.Get("/guardrails/settings", d.GetGuardrailSettings)
+			r.With(d.requireAdminOrAIConfigureAny).Put("/guardrails/settings", d.PutGuardrailSettings)
+			r.Get("/guardrails/patterns", d.GetGuardrailPatterns)
 			// Admin-only user management: RequireAdmin runs after RequireSession
 			// (already applied by the outer Group), so unauthenticated requests
 			// get 401 before RequireAdmin's 403 check runs.
