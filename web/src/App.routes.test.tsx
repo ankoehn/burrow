@@ -38,4 +38,31 @@ describe("App routes", () => {
     expect(screen.getByRole("link", { name: /^Settings$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Clients$/i })).toBeInTheDocument();
   });
+
+  // ---- v0.4.0 new routes ----
+  it.each([
+    ["/ai/endpoints",                  /^AI endpoints$/i],
+    ["/ai/endpoints/svc_ai001",        /^AI endpoint · /i],
+    ["/cache",                         /^Prompt cache$/i],
+    ["/guardrails",                    /^Guardrails & redaction$/i],
+    ["/inspector/svc_ai001",           /^Request inspector$/i],
+    ["/cost",                          /^Cost & budgets$/i],
+    ["/audit",                         /^Audit log$/i],
+    ["/webhooks",                      /^Webhooks$/i],
+    ["/provisioning",                  /^Provisioning keys$/i],
+    ["/account/automation",            /^Automation tokens$/i],
+    ["/settings/backups",              /^Backup & restore$/i],
+  ])("resolves %s to its page heading", async (path, heading) => {
+    renderAt(path);
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  });
+
+  // v0.4.0 conditional nav: AI GATEWAY group appears when an api_key service exists.
+  it("shows the AI GATEWAY nav group when an api_key service exists", async () => {
+    renderAt("/account");
+    expect(await screen.findByRole("link", { name: /^AI endpoints$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Cost & budgets$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Prompt cache$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Guardrails$/i })).toBeInTheDocument();
+  });
 });

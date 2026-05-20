@@ -1,6 +1,10 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck, ServerCog, Globe, Sparkles } from "lucide-react";
+import {
+  Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck,
+  ServerCog, Globe, Sparkles, DollarSign, Database, ShieldAlert, Search, ScrollText,
+  Webhook as WebhookIcon, Archive, Bot, KeyRound as KeyRoundIcon2,
+} from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
 import { useTheme } from "@/components/theme-provider";
@@ -87,6 +91,22 @@ export function Layout() {
                 <span className="nav-icon"><Sparkles size={16} /></span>
                 <span className="nav-label">AI endpoints</span>
               </NavLink>
+              <NavLink to="/cost" className={navItem}>
+                <span className="nav-icon"><DollarSign size={16} /></span>
+                <span className="nav-label">Cost & budgets</span>
+              </NavLink>
+              <NavLink to="/cache" className={navItem}>
+                <span className="nav-icon"><Database size={16} /></span>
+                <span className="nav-label">Prompt cache</span>
+              </NavLink>
+              <NavLink to="/guardrails" className={navItem}>
+                <span className="nav-icon"><ShieldAlert size={16} /></span>
+                <span className="nav-label">Guardrails</span>
+              </NavLink>
+              <NavLink to="/inspector/svc_ai001" className={navItem}>
+                <span className="nav-icon"><Search size={16} /></span>
+                <span className="nav-label">Request inspector</span>
+              </NavLink>
             </div>
           )}
 
@@ -101,6 +121,10 @@ export function Layout() {
                 <span className="nav-icon"><ShieldCheck size={16} /></span>
                 <span className="nav-label">Roles</span>
               </NavLink>
+              <NavLink to="/provisioning" className={navItem}>
+                <span className="nav-icon"><KeyRoundIcon2 size={16} /></span>
+                <span className="nav-label">Provisioning</span>
+              </NavLink>
             </div>
           )}
 
@@ -111,6 +135,18 @@ export function Layout() {
                 <span className="nav-icon"><ServerCog size={16} /></span>
                 <span className="nav-label">Settings</span>
               </NavLink>
+              <NavLink to="/audit" className={navItem}>
+                <span className="nav-icon"><ScrollText size={16} /></span>
+                <span className="nav-label">Audit</span>
+              </NavLink>
+              <NavLink to="/webhooks" className={navItem}>
+                <span className="nav-icon"><WebhookIcon size={16} /></span>
+                <span className="nav-label">Webhooks</span>
+              </NavLink>
+              <NavLink to="/settings/backups" className={navItem}>
+                <span className="nav-icon"><Archive size={16} /></span>
+                <span className="nav-label">Backup</span>
+              </NavLink>
             </div>
           )}
 
@@ -119,6 +155,10 @@ export function Layout() {
             <NavLink to="/account" className={navItem}>
               <span className="nav-icon"><UserCircle size={16} /></span>
               <span className="nav-label">Account</span>
+            </NavLink>
+            <NavLink to="/account/automation" className={navItem}>
+              <span className="nav-icon"><Bot size={16} /></span>
+              <span className="nav-label">Automation</span>
             </NavLink>
           </div>
         </div>
