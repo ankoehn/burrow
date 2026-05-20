@@ -13,6 +13,7 @@
 # Go
 *.test
 *.out
+*.exe
 __debug_bin*
 
 # OS / editor
