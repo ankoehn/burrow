@@ -1,0 +1,28 @@
+# test/integration/Dockerfile.relay
+# Two-stage build: golang-alpine builder → minimal alpine runtime.
+# Builds ONLY burrowd (not the client) — the client container builds its own burrow binary.
+
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+# Source context = repo root (build with `docker compose ... build` from repo root).
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# Strip symbols to keep the image small; CGO disabled for static linking.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/burrowd ./cmd/server
+
+FROM alpine:3.20 AS runtime
+RUN apk add --no-cache curl ca-certificates bash \
+    && addgroup -S burrow && adduser -S -G burrow -u 65532 burrow \
+    && mkdir -p /data /run/burrow /certs \
+    && chown -R 65532:65532 /data /run/burrow /certs
+COPY --from=builder /out/burrowd /usr/local/bin/burrowd
+COPY test/integration/relay-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+USER 65532:65532
+ENV BURROW_DATABASE_PATH=/data/burrow.db \
+    BURROW_LOG_LEVEL=info \
+    BURROW_LOG_FORMAT=text
+EXPOSE 7000 8080 9000-9100
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
