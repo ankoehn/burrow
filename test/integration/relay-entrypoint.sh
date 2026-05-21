@@ -17,9 +17,9 @@ burrowd serve --dev-certs &
 SERVE_PID=$!
 
 # Poll the dashboard /healthz; --dev-certs serves HTTPS, hence -k.
-echo "[relay-entrypoint] polling https://127.0.0.1:8080/healthz"
+echo "[relay-entrypoint] polling http://127.0.0.1:8080/healthz"
 for i in $(seq 1 60); do
-  if curl -fsS -k -o /dev/null "https://127.0.0.1:8080/healthz"; then
+  if curl -fsS -o /dev/null "http://127.0.0.1:8080/healthz"; then
     echo "[relay-entrypoint] burrowd /healthz is up (after ${i}s)"
     break
   fi

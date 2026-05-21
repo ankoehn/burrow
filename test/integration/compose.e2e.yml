@@ -22,9 +22,9 @@ services:
       # Dashboard (HTTPS, dev-certs — handy for manual UI poking).
       - "8080:8080"
     networks: [e2e]
-    # The dashboard speaks HTTPS with dev certs, hence -k.
+    # The dashboard speaks plain HTTP under --dev-certs (dev-certs only secure :7000 control plane).
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -k -o /dev/null https://127.0.0.1:8080/healthz"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz"]
       interval: 2s
       timeout: 2s
       retries: 30
