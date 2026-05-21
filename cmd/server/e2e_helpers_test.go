@@ -40,7 +40,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/aigw"
 	"github.com/ankoehn/burrow/internal/api"
+	"github.com/ankoehn/burrow/internal/cache/exact"
 	"github.com/ankoehn/burrow/internal/client"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
@@ -277,10 +279,19 @@ func bootE2EStack(t *testing.T) *e2eStack {
 	gate := proxy.NewGate(st, e2eAuthDomain, true, s.log)
 	s.gate = gate
 	dialer := proxyDialerAdapter{st: st, srv: srv}
+	// Wire a minimal aigw.Chain with a DB-backed Loader so tests that seed
+	// service_ai_config rows exercise the cache / redaction / guardrails
+	// middleware. Tests that don't seed a row → Loader returns ok=false →
+	// IsAIPassThrough → byte-for-byte v0.3.0 path (preserves the existing
+	// e2e contract).
+	cacheEngine := exact.New(db.Wrap(d), s.log)
+	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, nil, s.log)
+	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	handler := proxy.New(
 		dialer, checker, e2eAuthDomain, s.log,
 		proxy.WithGate(gate),
 		proxy.WithIngressPort(s.proxyPort),
+		proxy.WithAIChain(aiChain),
 	)
 	s.proxySrv = &http.Server{
 		Handler:           handler,

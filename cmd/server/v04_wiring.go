@@ -162,10 +162,13 @@ func buildV04Stack(
 		meterSink,
 		log,
 	)
-	// Loader stays nil in v0.4.0 — the chain treats every request as
-	// IsAIPassThrough → straight to the v0.3.0 proxy handler. Per-service
-	// AI config decoding (and quota/ipgeo middleware wrappers) lights up
-	// when Task 24's typed config store is wired into the chain.
+	// Wire the DB-backed Loader (Deferral D1): on each proxied request
+	// the chain reads service_ai_config to decide whether any AI feature
+	// is enabled. Services without a row → ok=false → IsAIPassThrough →
+	// straight to the v0.3.0 proxy handler (byte-for-byte preserved).
+	// Services with a row → cache/redaction/guardrails/inspector/anthropic
+	// pointers are populated and the chain runs the corresponding middleware.
+	aiChain.Loader = chainConfigLoader{db: wrapped, log: log}
 
 	// --- metrics recorder --------------------------------------------------
 	metricsRec := metrics.New()
