@@ -527,6 +527,26 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	bytesIn, bytesOut := stream.Bytes()
 	tokens := stream.Tokens()
 
+	// Non-stream upstream responses carry usage in the JSON body itself
+	// (no `data: ` prefix → openAIParser.inspect won't fire). For these,
+	// reparse the captured body so usage_events records authoritative
+	// token counts instead of the byte-estimate fallback.
+	if !isStreamedResponse(wrapped.Header()) && !capw.truncated() {
+		body := capw.bytes()
+		if len(body) > 0 {
+			switch kind {
+			case KindOpenAI:
+				if t := aimeter.ParseOpenAIBody(body); t.Total > 0 || t.In > 0 || t.Out > 0 {
+					tokens = t
+				}
+			case KindAnthropic:
+				if t := aimeter.ParseAnthropicBody(body); t.Total > 0 || t.In > 0 || t.Out > 0 {
+					tokens = t
+				}
+			}
+		}
+	}
+
 	// Should we cache the response? Only when:
 	//  - cache feature is enabled for this service
 	//  - upstream returned 2xx

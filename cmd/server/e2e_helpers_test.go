@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/ankoehn/burrow/internal/aigw"
+	"github.com/ankoehn/burrow/internal/aimeter"
 	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/cache/exact"
 	"github.com/ankoehn/burrow/internal/client"
@@ -285,7 +286,13 @@ func bootE2EStack(t *testing.T) *e2eStack {
 	// IsAIPassThrough → byte-for-byte v0.3.0 path (preserves the existing
 	// e2e contract).
 	cacheEngine := exact.New(db.Wrap(d), s.log)
-	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, nil, s.log)
+	// Wire a real SQLSink so usage_events lands in the test DB — Task 2-4
+	// real-stack tests assert per-key metering rows are written. The sink
+	// is non-blocking (errors logged + swallowed) so unrelated tests that
+	// never query usage_events are unaffected.
+	meterSink := aimeter.NewSQLSink(db.Wrap(d))
+	meterSink.Log = s.log
+	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	handler := proxy.New(
 		dialer, checker, e2eAuthDomain, s.log,
