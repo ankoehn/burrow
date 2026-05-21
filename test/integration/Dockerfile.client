@@ -1,0 +1,27 @@
+# test/integration/Dockerfile.client
+# Two-stage: golang-alpine builds BOTH `burrow` (client CLI) and the upstream
+# binary; alpine runtime carries them + a bash entrypoint.
+
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/burrow ./cmd/client \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/upstream ./test/integration/upstream
+
+FROM alpine:3.20 AS runtime
+RUN apk add --no-cache curl ca-certificates bash \
+    && addgroup -S burrow && adduser -S -G burrow -u 65532 burrow \
+    && mkdir -p /run/burrow \
+    && chown -R 65532:65532 /run/burrow
+COPY --from=builder /out/burrow    /usr/local/bin/burrow
+COPY --from=builder /out/upstream  /usr/local/bin/upstream
+COPY test/integration/client-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+USER 65532:65532
+ENV UPSTREAM_ADDR=127.0.0.1:8081 \
+    BURROW_RELAY=relay:7000 \
+    BURROW_REMOTE_PORT=9000 \
+    BURROW_TUNNEL_NAME=upstream
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
