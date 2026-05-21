@@ -23,6 +23,15 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
 
+  // v0.4.0: globalSetup logs in ONCE (via the JSON API) and persists session
+  // cookies to playwright-auth.json. Specs that use the seeded admin opt in
+  // via test.use({ storageState: "playwright-auth.json" }) — collapsing
+  // ~30 logins down to one and keeping the suite under the per-IP rate
+  // limit (LoginRateLimitPerIP=10/min in internal/api/deps.go). Specs that
+  // need to exercise the login UI (smoke, admin-v0.2.0) or anonymity (the
+  // 401 contract assertions) deliberately skip the storageState opt-in.
+  globalSetup: "./e2e/global-setup.ts",
+
   use: {
     baseURL: `http://${HTTP_LISTEN}`,
     // Capture traces on first retry to aid CI debugging.

@@ -1,3 +1,8 @@
 node_modules
 *.local
 .vite
+# Playwright artifacts — auth state written by e2e/global-setup.ts (re-created
+# every run; never committed), test traces, and report output.
+playwright-auth.json
+test-results
+playwright-report

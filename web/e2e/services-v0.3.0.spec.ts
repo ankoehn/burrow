@@ -25,7 +25,7 @@ async function login(page: Page) {
   await expect(page).toHaveURL(/\/login/);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Tunnels" })).toBeVisible();
 }
 

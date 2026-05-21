@@ -17,7 +17,7 @@ test("smoke: full happy-path", async ({ page }) => {
   // Use the id-tied labels from Login.tsx: htmlFor="login-email" / "login-password"
   await page.getByLabel("Email").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_INITIAL_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
   // ── 2. Tunnels dashboard ──────────────────────────────────────────────────
   // After login the SPA routes to / which renders <Tunnels />.
@@ -105,7 +105,7 @@ test("smoke: full happy-path", async ({ page }) => {
   // Re-login with the NEW password to prove it persisted
   await page.getByLabel("Email").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_NEW_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Tunnels" })).toBeVisible();
 
   // ── 7. Final logout ──────────────────────────────────────────────────────
