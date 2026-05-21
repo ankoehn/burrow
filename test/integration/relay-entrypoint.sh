@@ -16,7 +16,7 @@ echo "[relay-entrypoint] starting burrowd serve --dev-certs (admin=$BURROW_ADMIN
 burrowd serve --dev-certs &
 SERVE_PID=$!
 
-# Poll the dashboard /healthz; --dev-certs serves HTTPS, hence -k.
+# Poll the dashboard /healthz over plain HTTP — --dev-certs only secures the :7000 control plane.
 echo "[relay-entrypoint] polling http://127.0.0.1:8080/healthz"
 for i in $(seq 1 60); do
   if curl -fsS -o /dev/null "http://127.0.0.1:8080/healthz"; then

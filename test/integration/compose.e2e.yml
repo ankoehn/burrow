@@ -19,7 +19,7 @@ services:
     ports:
       # Visitor port (the public TCP tunnel target).
       - "9000:9000"
-      # Dashboard (HTTPS, dev-certs — handy for manual UI poking).
+      # Dashboard (plain HTTP under --dev-certs — handy for manual UI poking).
       - "8080:8080"
     networks: [e2e]
     # The dashboard speaks plain HTTP under --dev-certs (dev-certs only secure :7000 control plane).
