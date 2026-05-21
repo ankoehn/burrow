@@ -461,6 +461,10 @@ func (m *metricsBuf) String() string              { return string(m.b) }
 // listener. It is called from main.go after the live tunnel registry has
 // been constructed (so the ToolStore adapter can reach into it). Returns
 // nil when MCPListen is empty (disabled).
+//
+// The audit logger is wired into the server so every tools/call dispatch
+// emits one mcp.tool.call audit row (Task 15 — closes spec Part P's audit
+// contract).
 func BuildMCPServer(
 	cfg *config.ServerConfig,
 	st *store.Store,
@@ -478,12 +482,16 @@ func BuildMCPServer(
 		audit:   wrapped,
 		metrics: stack.Metrics,
 	}
-	return mcpserv.New(
+	srv := mcpserv.New(
 		mcpBearerAdapter{s: st},
 		st,
 		toolStore,
 		log,
 	)
+	if stack.AuditLogger != nil {
+		srv.SetAuditAppender(stack.AuditLogger)
+	}
+	return srv
 }
 
 // inspectorReplayerAdapter satisfies api.InspectorReplayer by re-dispatching

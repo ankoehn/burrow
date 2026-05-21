@@ -53,9 +53,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
 )
+
+// AuditAppender is the narrow append surface the MCP server uses to record
+// one mcp.tool.call row per tools/call dispatch. *audit.Logger satisfies it
+// directly; the field is optional (nil → audit hook disabled).
+type AuditAppender interface {
+	Append(ctx context.Context, e audit.Event) error
+}
 
 // ----- Bearer auth surface -------------------------------------------------
 
@@ -97,6 +105,36 @@ type Server struct {
 	log      *slog.Logger
 	tools    map[string]Tool
 	toolList []ToolDescriptor // stable order, for tools/list
+	audit    AuditAppender    // optional; nil = audit hook disabled
+}
+
+// SetAuditAppender installs an audit appender. The MCP server emits one
+// mcp.tool.call audit row per tools/call dispatch — both denied (the
+// bearer's perms did not include the tool's required permission) and ok.
+// Nil disables the audit hook entirely.
+//
+// Safe to call once at startup; not safe to mutate after the server has
+// been handed to goroutines.
+func (s *Server) SetAuditAppender(a AuditAppender) {
+	if s == nil {
+		return
+	}
+	s.audit = a
+}
+
+// emitToolAudit appends one mcp.tool.call row recording the (tool, result)
+// pair under the bearer's user as actor. Nil-safe — best-effort on writes;
+// the JSON-RPC response is never blocked on the audit append.
+func (s *Server) emitToolAudit(ctx context.Context, tok *authedToken, toolName, result string) {
+	if s == nil || s.audit == nil || tok == nil {
+		return
+	}
+	_ = s.audit.Append(ctx, audit.Event{
+		ActorID:      tok.userID,
+		Action:       audit.ActionMCPToolCall,
+		SubjectLabel: toolName,
+		Result:       result,
+	})
 }
 
 // New returns a Server with the closed 12-tool inventory installed. Pass nil
@@ -268,6 +306,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 		return
 	}
 	if !tok.can(tool.Permission) {
+		s.emitToolAudit(ctx, tok, tool.Name, "denied")
 		writeRPCError(w, req.ID, codeInternalError, "forbidden", nil)
 		return
 	}
@@ -280,13 +319,16 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 		// layer permission failures hit this path when a token granted
 		// only :own scope tries to read :any data.
 		if errors.Is(err, ErrForbidden) {
+			s.emitToolAudit(ctx, tok, tool.Name, "denied")
 			writeRPCError(w, req.ID, codeInternalError, "forbidden", nil)
 			return
 		}
+		s.emitToolAudit(ctx, tok, tool.Name, "error")
 		s.log.Warn("mcp tool call failed", "tool", tool.Name, "err", err)
 		writeRPCError(w, req.ID, codeInternalError, err.Error(), nil)
 		return
 	}
+	s.emitToolAudit(ctx, tok, tool.Name, "ok")
 	writeRPCResult(w, req.ID, json.RawMessage(result))
 }
 
