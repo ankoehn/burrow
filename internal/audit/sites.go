@@ -25,6 +25,11 @@ type LogContext struct {
 	RequestID  string
 }
 
+// MustJSON marshals v to a json.RawMessage suitable for Event.Payload.
+// On marshal failure it falls back to an empty object so the chain still
+// ticks forward — Marshal should never fail on the maps callers pass in.
+func MustJSON(v any) json.RawMessage { return mustJSON(v) }
+
 func mustJSON(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {

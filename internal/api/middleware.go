@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/store"
 )
@@ -103,6 +107,36 @@ func RequireCSRF(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// withAuditContext attaches an audit.LogContext (actor id/email, source IP,
+// user agent, request id) to the request context so store mutations can
+// emit chained audit rows without re-parsing the request. MUST run after
+// RequireSession + RequireBearerOrSession so it sees the authenticated
+// userID; a missing user record falls back to a zero-value actor and the
+// store still emits a row (the chain itself stays valid).
+func (d Deps) withAuditContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid := userID(r.Context())
+		actorEmail := ""
+		if uid != "" && d.Users != nil {
+			if u, err := d.Users.GetUserByID(r.Context(), uid); err == nil {
+				actorEmail = u.Email
+			}
+		}
+		ip := r.RemoteAddr
+		if h, _, err := net.SplitHostPort(ip); err == nil {
+			ip = h
+		}
+		lc := audit.LogContext{
+			ActorID:    uid,
+			ActorEmail: actorEmail,
+			SourceIP:   ip,
+			UserAgent:  r.UserAgent(),
+			RequestID:  middleware.GetReqID(r.Context()),
+		}
+		next.ServeHTTP(w, r.WithContext(audit.WithLogContext(r.Context(), lc)))
 	})
 }
 

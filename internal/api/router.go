@@ -122,6 +122,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(RequireBearerOrSession(d.Bearer, d.Users))
 			r.Use(d.RequireSession)
+			r.Use(d.withAuditContext)
 			r.Use(RequireCSRF)
 			r.Use(middleware.Timeout(JSONHandlerTimeout))
 			r.Post("/auth/logout", d.Logout)

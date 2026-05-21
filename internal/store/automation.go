@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
 )
@@ -123,6 +124,14 @@ func (s *Store) MintAutomationToken(
 	if err != nil {
 		return AutomationTokenView{}, "", err
 	}
+	s.emitAudit(ctx, audit.ActionAutomationTokenMint, func(e *audit.Event) {
+		e.SubjectID = row.ID
+		e.SubjectLabel = name
+		e.Payload = audit.MustJSON(map[string]any{
+			"role_at_mint": callerRole,
+			"permissions":  permissions,
+		})
+	})
 	return toAutomationTokenView(stored), plaintext, nil
 }
 
@@ -178,7 +187,14 @@ func (s *Store) RevokeAutomationToken(
 		// scoping pattern).
 		return db.ErrNotFound
 	}
-	return s.q.DeleteAutomationToken(ctx, id)
+	if err := s.q.DeleteAutomationToken(ctx, id); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionAutomationTokenRevoke, func(e *audit.Event) {
+		e.SubjectID = id
+		e.SubjectLabel = tok.Name
+	})
+	return nil
 }
 
 // LookupBearer is the surface consumed by RequireBearerOrSession: it hashes

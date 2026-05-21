@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/auth"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
@@ -125,6 +126,42 @@ func (s *Store) SetSMTPPassword(pw string) { s.smtpPassword = pw }
 // before any HTTP handler runs).
 func (s *Store) SetAuditLogger(a AuditAppender) { s.auditLogger = a }
 
+// emitAudit is the nil-safe, panic-safe trampoline every store mutation
+// uses to append a typed audit row. Mutations call it AFTER their DB write
+// succeeds: a failing mutation never produces a misleading audit row, and a
+// failing audit append never breaks the mutation (the audit chain itself is
+// best-effort on writes; auditors detect gaps offline). actor metadata is
+// pulled from ctx (set by api middleware via audit.WithLogContext).
+//
+// The defer/recover catches any panic from a misbehaving logger so that the
+// mutation's RunE / handler-level error path stays untouched. The audit
+// append return value is intentionally discarded — there is no caller that
+// could meaningfully react to it from inside a mutation.
+func (s *Store) emitAudit(ctx context.Context, action string, fill func(*audit.Event)) {
+	if s == nil || s.auditLogger == nil {
+		return
+	}
+	defer func() {
+		// Defensive: never let a logger bug propagate into the mutation
+		// caller. Spec G's audit chain is best-effort on writes.
+		_ = recover()
+	}()
+	lc := audit.LogContextFrom(ctx)
+	ev := audit.Event{
+		ActorID:    lc.ActorID,
+		ActorEmail: lc.ActorEmail,
+		Action:     action,
+		Result:     "ok",
+		SourceIP:   lc.SourceIP,
+		UserAgent:  lc.UserAgent,
+		RequestID:  lc.RequestID,
+	}
+	if fill != nil {
+		fill(&ev)
+	}
+	_ = s.auditLogger.Append(ctx, ev)
+}
+
 // SeedAdmin ensures the bootstrap admin user exists.
 // It is a no-op when email or password is empty (unset BURROW_ADMIN_* — safe).
 // Uses INSERT ... ON CONFLICT(email) DO NOTHING so the operation is
@@ -180,14 +217,19 @@ func (s *Store) IssueClientToken(ctx context.Context, userID, name string) (plai
 	if err != nil {
 		return "", err
 	}
+	id := uuid.NewString()
 	if err := s.q.CreateClientToken(ctx, db.ClientToken{
-		ID:        uuid.NewString(),
+		ID:        id,
 		UserID:    userID,
 		Name:      name,
 		TokenHash: hash,
 	}); err != nil {
 		return "", err
 	}
+	s.emitAudit(ctx, audit.ActionTokenMint, func(e *audit.Event) {
+		e.SubjectID = id
+		e.SubjectLabel = name
+	})
 	return pt, nil
 }
 
@@ -198,7 +240,13 @@ func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]db.Clien
 
 // RevokeClientToken deletes the token with the given id, scoped to owning user.
 func (s *Store) RevokeClientToken(ctx context.Context, id, userID string) error {
-	return s.q.DeleteClientToken(ctx, id, userID)
+	if err := s.q.DeleteClientToken(ctx, id, userID); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionTokenRevoke, func(e *audit.Event) {
+		e.SubjectID = id
+	})
+	return nil
 }
 
 // Authenticate validates a plaintext client token and returns the owning user's ID.
@@ -264,6 +312,22 @@ func (s *Store) CreateSession(ctx context.Context, userID, ua, ip string) (id st
 	}); err != nil {
 		return "", err
 	}
+	// session.create is unusual: the actor *is* the new session's user (a
+	// just-completed login). The api/Login handler has not yet stuffed an
+	// audit.LogContext, so we fill ActorID/SourceIP/UserAgent from the
+	// arguments we already have. SubjectID = sessionID (the new session).
+	s.emitAudit(ctx, audit.ActionSessionCreate, func(e *audit.Event) {
+		e.SubjectID = id
+		if e.ActorID == "" {
+			e.ActorID = userID
+		}
+		if e.SourceIP == "" {
+			e.SourceIP = ip
+		}
+		if e.UserAgent == "" {
+			e.UserAgent = ua
+		}
+	})
 	return id, nil
 }
 
@@ -287,7 +351,13 @@ func (s *Store) ValidateSession(ctx context.Context, id string) (userID string, 
 
 // DeleteSession removes the session with the given ID.
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
-	return s.q.DeleteSession(ctx, id)
+	if err := s.q.DeleteSession(ctx, id); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionSessionDelete, func(e *audit.Event) {
+		e.SubjectID = id
+	})
+	return nil
 }
 
 // ChangePassword verifies currentPassword, enforces minimum length on newPassword,
@@ -332,7 +402,19 @@ func (s *Store) UpdateUserRole(ctx context.Context, id, role string) error {
 	if role != "admin" && role != "user" {
 		return ErrInvalidRole
 	}
-	return s.q.UpdateUserRole(ctx, id, role)
+	if err := s.q.UpdateUserRole(ctx, id, role); err != nil {
+		return err
+	}
+	var email string
+	if u, err := s.q.GetUserByID(ctx, id); err == nil {
+		email = u.Email
+	}
+	s.emitAudit(ctx, audit.ActionUserUpdate, func(e *audit.Event) {
+		e.SubjectID = id
+		e.SubjectLabel = email
+		e.Payload = audit.MustJSON(map[string]string{"role": role})
+	})
+	return nil
 }
 
 // SetUserStatus validates and sets a user's status. Suspending also revokes
@@ -350,6 +432,18 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) error {
 			return err
 		}
 	}
+	var email string
+	if u, err := s.q.GetUserByID(ctx, id); err == nil {
+		email = u.Email
+	}
+	action := audit.ActionUserReactivate
+	if status == "suspended" {
+		action = audit.ActionUserSuspend
+	}
+	s.emitAudit(ctx, action, func(e *audit.Event) {
+		e.SubjectID = id
+		e.SubjectLabel = email
+	})
 	return nil
 }
 
@@ -439,6 +533,13 @@ func (s *Store) CreateRole(ctx context.Context, name, description string, permis
 		}
 		return err
 	}
+	s.emitAudit(ctx, audit.ActionRoleCreate, func(e *audit.Event) {
+		e.SubjectLabel = name
+		e.Payload = audit.MustJSON(map[string]any{
+			"permissions":           permissions,
+			"default_for_new_users": defaultForNewUsers,
+		})
+	})
 	return s.refreshRolesCache(ctx)
 }
 
@@ -461,6 +562,20 @@ func (s *Store) UpdateRole(ctx context.Context, name string, u RoleUpdate) error
 		}
 		return err
 	}
+	s.emitAudit(ctx, audit.ActionRoleUpdate, func(e *audit.Event) {
+		e.SubjectLabel = name
+		payload := map[string]any{}
+		if u.Permissions != nil {
+			payload["permissions"] = *u.Permissions
+		}
+		if u.Description != nil {
+			payload["description"] = *u.Description
+		}
+		if u.DefaultForNewUsers != nil {
+			payload["default_for_new_users"] = *u.DefaultForNewUsers
+		}
+		e.Payload = audit.MustJSON(payload)
+	})
 	return s.refreshRolesCache(ctx)
 }
 
@@ -499,6 +614,13 @@ func (s *Store) DeleteRole(ctx context.Context, name string) (affectedUserIDs []
 		}
 		return nil, err
 	}
+	s.emitAudit(ctx, audit.ActionRoleDelete, func(e *audit.Event) {
+		e.SubjectLabel = name
+		e.Payload = audit.MustJSON(map[string]any{
+			"fallback":        fallback,
+			"affected_users":  len(affected),
+		})
+	})
 	if err := s.refreshRolesCache(ctx); err != nil {
 		return nil, err
 	}
@@ -565,12 +687,26 @@ func (s *Store) ListSessions(ctx context.Context, userID string) ([]db.Session, 
 
 // RevokeSession deletes one of the user's sessions (scoped).
 func (s *Store) RevokeSession(ctx context.Context, id, userID string) error {
-	return s.q.DeleteSessionForUser(ctx, id, userID)
+	if err := s.q.DeleteSessionForUser(ctx, id, userID); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionSessionDelete, func(e *audit.Event) {
+		e.SubjectID = id
+	})
+	return nil
 }
 
 // RevokeOtherSessions signs the user out everywhere except keepID.
 func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepID string) (int64, error) {
-	return s.q.DeleteSessionsByUserExcept(ctx, userID, keepID)
+	n, err := s.q.DeleteSessionsByUserExcept(ctx, userID, keepID)
+	if err != nil {
+		return 0, err
+	}
+	s.emitAudit(ctx, audit.ActionSessionRevokeOthers, func(e *audit.Event) {
+		e.SubjectID = userID
+		e.Payload = audit.MustJSON(map[string]int64{"revoked": n})
+	})
+	return n, nil
 }
 
 // GetSettings returns the settings table as a flat map.
@@ -686,13 +822,30 @@ func (s *Store) CreateUser(ctx context.Context, email, password, role string) (d
 		}
 		return db.User{}, err
 	}
+	s.emitAudit(ctx, audit.ActionUserCreate, func(e *audit.Event) {
+		e.SubjectID = u.ID
+		e.SubjectLabel = u.Email
+		e.Payload = audit.MustJSON(map[string]string{"role": u.Role})
+	})
 	return u, nil
 }
 
 // DeleteUser removes the user and all associated sessions/tokens/tunnels (ON DELETE CASCADE).
 // Returns db.ErrNotFound if no such user exists.
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
-	return s.q.DeleteUser(ctx, id)
+	// Capture the email BEFORE the cascade so the audit row is still useful.
+	var email string
+	if u, err := s.q.GetUserByID(ctx, id); err == nil {
+		email = u.Email
+	}
+	if err := s.q.DeleteUser(ctx, id); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionUserDelete, func(e *audit.Event) {
+		e.SubjectID = id
+		e.SubjectLabel = email
+	})
+	return nil
 }
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint violation.

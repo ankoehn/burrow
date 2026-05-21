@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/auth"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
@@ -167,6 +168,7 @@ func (s *Store) SetServiceAccessMode(ctx context.Context, callerID, callerRole, 
 	if header == "" {
 		header = "Authorization"
 	}
+	oldMode := svc.AccessMode
 	if err := s.q.SetServiceAccessMode(ctx, serviceID, mode, header); err != nil {
 		return err
 	}
@@ -174,6 +176,17 @@ func (s *Store) SetServiceAccessMode(ctx context.Context, callerID, callerRole, 
 		if err := s.q.SetServiceMTLSCAPEM(ctx, serviceID, string(caPEM)); err != nil {
 			return err
 		}
+	}
+	s.emitAudit(ctx, audit.ActionServiceAccessModeUpdate, func(e *audit.Event) {
+		e.SubjectID = serviceID
+		e.SubjectLabel = svc.Name
+		e.Payload = audit.MustJSON(map[string]string{"from": oldMode, "to": mode})
+	})
+	if mode == "mtls" {
+		s.emitAudit(ctx, audit.ActionMtlsCAUpdate, func(e *audit.Event) {
+			e.SubjectID = serviceID
+			e.SubjectLabel = svc.Name
+		})
 	}
 	return nil
 }
@@ -238,6 +251,12 @@ func (s *Store) CreateAPIKey(ctx context.Context, callerID, callerRole, serviceI
 	}); err != nil {
 		return "", "", err
 	}
+	keyID := id
+	s.emitAudit(ctx, audit.ActionServiceAPIKeyCreate, func(e *audit.Event) {
+		e.SubjectID = keyID
+		e.SubjectLabel = name
+		e.Payload = audit.MustJSON(map[string]string{"service_id": serviceID})
+	})
 	return id, pt, nil
 }
 
@@ -248,7 +267,25 @@ func (s *Store) DeleteAPIKey(ctx context.Context, callerID, callerRole, serviceI
 	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
 		return err
 	}
-	return s.q.DeleteServiceAPIKey(ctx, keyID, serviceID)
+	// Capture key name for the audit row before delete.
+	var keyName string
+	if keys, err := s.q.ListServiceAPIKeys(ctx, serviceID); err == nil {
+		for _, k := range keys {
+			if k.ID == keyID {
+				keyName = k.Name
+				break
+			}
+		}
+	}
+	if err := s.q.DeleteServiceAPIKey(ctx, keyID, serviceID); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionServiceAPIKeyRevoke, func(e *audit.Event) {
+		e.SubjectID = keyID
+		e.SubjectLabel = keyName
+		e.Payload = audit.MustJSON(map[string]string{"service_id": serviceID})
+	})
+	return nil
 }
 
 // GetAccessPolicy returns the access policy roles for the given service.
@@ -267,7 +304,8 @@ func (s *Store) GetAccessPolicy(ctx context.Context, callerID, callerRole, servi
 // return ErrUnknownRole (maps to HTTP 400). An empty roles slice means
 // deny-all.
 func (s *Store) SetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string, roles []string) error {
-	if _, err := s.canConfigure(ctx, callerID, callerRole, serviceID); err != nil {
+	svc, err := s.canConfigure(ctx, callerID, callerRole, serviceID)
+	if err != nil {
 		return err
 	}
 	for _, r := range roles {
@@ -275,7 +313,15 @@ func (s *Store) SetAccessPolicy(ctx context.Context, callerID, callerRole, servi
 			return ErrUnknownRole
 		}
 	}
-	return s.q.SetAccessPolicy(ctx, serviceID, roles)
+	if err := s.q.SetAccessPolicy(ctx, serviceID, roles); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.ActionServiceAccessPolicyUpdate, func(e *audit.Event) {
+		e.SubjectID = serviceID
+		e.SubjectLabel = svc.Name
+		e.Payload = audit.MustJSON(map[string]any{"roles": roles})
+	})
+	return nil
 }
 
 // ValidateAPIKey checks whether the presented plaintext API key is valid for
