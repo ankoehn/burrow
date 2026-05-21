@@ -1,0 +1,53 @@
+# test/integration/compose.e2e.yml
+# Basic 2-container e2e harness: relay (burrowd) + client (burrow + upstream).
+# Run from repo root: `docker compose -f test/integration/compose.e2e.yml ...`
+
+name: burrow-e2e
+
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: test/integration/Dockerfile.relay
+    image: burrow-e2e-relay:dev
+    environment:
+      BURROW_ADMIN_EMAIL: admin@e2e.local
+      BURROW_ADMIN_PASSWORD: e2e-pass
+    volumes:
+      - token-share:/run/burrow
+      - relay-data:/data
+    ports:
+      # Visitor port (the public TCP tunnel target).
+      - "9000:9000"
+      # Dashboard (HTTPS, dev-certs — handy for manual UI poking).
+      - "8080:8080"
+    networks: [e2e]
+    # The dashboard speaks HTTPS with dev certs, hence -k.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -k -o /dev/null https://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+
+  client:
+    build:
+      context: ../..
+      dockerfile: test/integration/Dockerfile.client
+    image: burrow-e2e-client:dev
+    depends_on:
+      relay:
+        condition: service_healthy
+    volumes:
+      - token-share:/run/burrow:ro
+    networks: [e2e]
+    # Client opens an outbound TLS control connection to relay:7000.
+    # No host ports — only reachable from inside the e2e network.
+
+volumes:
+  token-share:
+  relay-data:
+
+networks:
+  e2e:
+    driver: bridge
