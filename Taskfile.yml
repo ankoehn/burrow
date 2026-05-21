@@ -50,3 +50,18 @@ tasks:
         platforms: [linux, darwin]
       - cmd: powershell -NoProfile -Command "go run ./cmd/gencerts"
         platforms: [windows]
+
+  e2e:up:
+    desc: Build + start the basic e2e Docker Compose stack (foreground)
+    cmds:
+      - docker compose -f test/integration/compose.e2e.yml up --build
+
+  e2e:smoke:
+    desc: Run the automated e2e smoke (brings stack up, asserts, tears down)
+    cmds:
+      - bash test/integration/smoke.sh
+
+  e2e:down:
+    desc: Stop the e2e stack and remove its named volumes
+    cmds:
+      - docker compose -f test/integration/compose.e2e.yml down --volumes
