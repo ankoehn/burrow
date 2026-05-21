@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,7 +12,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ankoehn/burrow/internal/audit"
+	"github.com/ankoehn/burrow/internal/cost"
+	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/inspector"
+	"github.com/ankoehn/burrow/internal/mcpserv"
+	"github.com/ankoehn/burrow/internal/quota"
+	"github.com/ankoehn/burrow/internal/store"
+	bwebauthn "github.com/ankoehn/burrow/internal/webauthn"
 	"github.com/go-chi/chi/v5"
 	"gopkg.in/yaml.v3"
 )
@@ -112,6 +123,628 @@ func TestOpenAPI_RouteCoverage(t *testing.T) {
 		t.Fatalf("%d route(s) not documented in %s:\n  %s",
 			len(missing), docsOpenAPIPath, strings.Join(missing, "\n  "))
 	}
+}
+
+// TestOpenAPIRouteCoverage_FullIntegrationMux is the v0.4.0 Task 17 lock that
+// catches a route added to the chi mux behind a non-nil Deps field. The
+// minimal TestOpenAPI_RouteCoverage above uses Deps{Log: discardLog()} and so
+// will not notice a future route that only registers when (say) Deps.Webhooks
+// is non-nil. This test wires every field cmd/server/main.go populates with a
+// throwaway stub that satisfies the relevant interface — chi.Walk never
+// invokes the handlers, so the stubs panic on call to make any accidental
+// dereference loud and obvious. A SPA catch-all is also installed so the
+// "/*" registration branch is exercised; the walk filter drops it from the
+// coverage assertion (the spec describes the JSON API, not the SPA).
+func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
+	stub := &fullDepsStub{}
+	deps := Deps{
+		Users:          stub,
+		Tunnels:        stub,
+		Events:         stub,
+		Log:            discardLog(),
+		SecureCookies:  true,
+		HTTPSEnabled:   true,
+		SPA:            http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		TrustedProxies: []string{"127.0.0.1/32"},
+		Roles:          stub,
+		Sessions:       stub,
+		Settings:       stub,
+		Clients:        stub,
+		AccessModes:    stub,
+		DB:             stub,
+		Services:       stub,
+		LiveTunnels:    stub,
+		AuthDomain:     "tunnels.example.com",
+		// v0.4.0 surfaces.
+		CacheEngine:       stub,
+		CacheServices:     stub,
+		ModelAliases:      stub,
+		InspectorRings:    stub,
+		InspectorServices: stub,
+		InspectorReplayer: stub,
+		RateLimitDB:       stub,
+		RateLimits:        stub,
+		Budgets:           stub,
+		CostEngine:        stub,
+		AuditEvents:       stub,
+		AuditChain:        stub,
+		Webhooks:          stub,
+		WebhookDispatcher: stub,
+		WebhookSecrets:    stub,
+		Automation:        stub,
+		Bearer:            stub,
+		IPGeo:             stub,
+		IPGeoServices:     stub,
+		GeoLookup:         stub,
+		WebAuthn:          stub,
+		BackupDir:         t.TempDir(),
+		BackupRunner:      stub,
+		RestoreRunner:     stub,
+		RestoreTracker:    NewRestoreTracker(),
+		AuditAppender:     stub,
+		Metrics:           stub,
+		MCP: MCPInfo{
+			Enabled: true,
+			Listen:  ":7800",
+			TokenID: "atk_stub",
+			Server:  stub,
+		},
+	}
+	r := NewRouter(deps)
+	mux, ok := r.(chi.Router)
+	if !ok {
+		t.Fatalf("NewRouter did not return chi.Router; got %T", r)
+	}
+	routes := enumerateRoutes(t, mux)
+	// Drop the SPA catch-all from the assertion — the spec describes the
+	// JSON API, not the embedded dashboard. chi reports the catch-all as
+	// "/*"; filter it out here rather than inside enumerateRoutes so the
+	// minimal-Deps test (no SPA) is unaffected.
+	filtered := routes[:0]
+	for _, e := range routes {
+		if e.Path == "/*" {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	routes = filtered
+	docPaths := loadOpenAPIPaths(t, docsOpenAPIPath)
+
+	var missing []string
+	for _, e := range routes {
+		if !docPaths[e] {
+			missing = append(missing, fmt.Sprintf("%s %s", e.Method, e.Path))
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("%d route(s) on the full integration mux not documented in %s:\n  %s",
+			len(missing), docsOpenAPIPath, strings.Join(missing, "\n  "))
+	}
+}
+
+// fullDepsStub satisfies every Deps interface in one type so the route
+// enumeration walk has typed (non-nil) values for each field. None of the
+// methods are invoked during chi.Walk — they panic if anything is ever
+// dereferenced, making a future regression that calls into Deps from
+// registration time impossible to miss.
+type fullDepsStub struct{}
+
+func stubPanic(name string) {
+	panic("fullDepsStub: " + name + " should not be called during route enumeration")
+}
+
+// UserStore.
+func (*fullDepsStub) VerifyUserPassword(context.Context, string, string) (bool, error) {
+	stubPanic("VerifyUserPassword")
+	return false, nil
+}
+func (*fullDepsStub) GetUserByEmail(context.Context, string) (db.User, error) {
+	stubPanic("GetUserByEmail")
+	return db.User{}, nil
+}
+func (*fullDepsStub) GetUserByID(context.Context, string) (db.User, error) {
+	stubPanic("GetUserByID")
+	return db.User{}, nil
+}
+func (*fullDepsStub) IssueClientToken(context.Context, string, string) (string, error) {
+	stubPanic("IssueClientToken")
+	return "", nil
+}
+func (*fullDepsStub) ListClientTokens(context.Context, string) ([]db.ClientToken, error) {
+	stubPanic("ListClientTokens")
+	return nil, nil
+}
+func (*fullDepsStub) RevokeClientToken(context.Context, string, string) error {
+	stubPanic("RevokeClientToken")
+	return nil
+}
+func (*fullDepsStub) CreateSession(context.Context, string, string, string) (string, error) {
+	stubPanic("CreateSession")
+	return "", nil
+}
+func (*fullDepsStub) ValidateSession(context.Context, string) (string, error) {
+	stubPanic("ValidateSession")
+	return "", nil
+}
+func (*fullDepsStub) DeleteSession(context.Context, string) error {
+	stubPanic("DeleteSession")
+	return nil
+}
+func (*fullDepsStub) ChangePassword(context.Context, string, string, string) error {
+	stubPanic("ChangePassword")
+	return nil
+}
+func (*fullDepsStub) ListUsersPage(context.Context, string, int, int) ([]db.User, int, error) {
+	stubPanic("ListUsersPage")
+	return nil, 0, nil
+}
+func (*fullDepsStub) CreateUser(context.Context, string, string, string) (db.User, error) {
+	stubPanic("CreateUser")
+	return db.User{}, nil
+}
+func (*fullDepsStub) DeleteUser(context.Context, string) error {
+	stubPanic("DeleteUser")
+	return nil
+}
+func (*fullDepsStub) UpdateUserRole(context.Context, string, string) error {
+	stubPanic("UpdateUserRole")
+	return nil
+}
+func (*fullDepsStub) SetUserStatus(context.Context, string, string) error {
+	stubPanic("SetUserStatus")
+	return nil
+}
+func (*fullDepsStub) TouchUserLastLogin(context.Context, string) error {
+	stubPanic("TouchUserLastLogin")
+	return nil
+}
+
+// TunnelLister.
+func (*fullDepsStub) ListUserTunnels(string) []TunnelView {
+	stubPanic("ListUserTunnels")
+	return nil
+}
+
+// EventStream.
+func (*fullDepsStub) Subscribe(string) (<-chan struct{}, func()) {
+	stubPanic("Subscribe")
+	return nil, nil
+}
+
+// RoleStore.
+func (*fullDepsStub) ListRoles(context.Context) ([]db.Role, error) {
+	stubPanic("ListRoles")
+	return nil, nil
+}
+func (*fullDepsStub) GetRole(context.Context, string) (store.RoleDetail, error) {
+	stubPanic("GetRole")
+	return store.RoleDetail{}, nil
+}
+func (*fullDepsStub) CreateRole(context.Context, string, string, []string, bool) error {
+	stubPanic("CreateRole")
+	return nil
+}
+func (*fullDepsStub) UpdateRole(context.Context, string, store.RoleUpdate) error {
+	stubPanic("UpdateRole")
+	return nil
+}
+func (*fullDepsStub) DeleteRole(context.Context, string) ([]string, error) {
+	stubPanic("DeleteRole")
+	return nil, nil
+}
+
+// SessionStore.
+func (*fullDepsStub) ListSessions(context.Context, string) ([]db.Session, error) {
+	stubPanic("ListSessions")
+	return nil, nil
+}
+func (*fullDepsStub) RevokeSession(context.Context, string, string) error {
+	stubPanic("RevokeSession")
+	return nil
+}
+func (*fullDepsStub) RevokeOtherSessions(context.Context, string, string) (int64, error) {
+	stubPanic("RevokeOtherSessions")
+	return 0, nil
+}
+
+// SettingsStore.
+func (*fullDepsStub) GetSettings(context.Context) (map[string]string, error) {
+	stubPanic("GetSettings")
+	return nil, nil
+}
+func (*fullDepsStub) SaveSettings(context.Context, map[string]string) error {
+	stubPanic("SaveSettings")
+	return nil
+}
+func (*fullDepsStub) SendTestEmail(context.Context, string) error {
+	stubPanic("SendTestEmail")
+	return nil
+}
+
+// ClientLister.
+func (*fullDepsStub) ListClients() []ClientView {
+	stubPanic("ListClients")
+	return nil
+}
+func (*fullDepsStub) GetClient(string) (ClientDetail, bool) {
+	stubPanic("GetClient")
+	return ClientDetail{}, false
+}
+
+// AccessModeSetter.
+func (*fullDepsStub) SetTunnelAccessMode(context.Context, string, string, string) error {
+	stubPanic("SetTunnelAccessMode")
+	return nil
+}
+
+// Pinger (DB).
+func (*fullDepsStub) PingContext(context.Context) error {
+	stubPanic("PingContext")
+	return nil
+}
+
+// ServiceStore.
+func (*fullDepsStub) ListServices(context.Context, string, string) ([]store.ServiceView, error) {
+	stubPanic("ListServices")
+	return nil, nil
+}
+func (*fullDepsStub) GetService(context.Context, string, string, string) (store.ServiceDetail, error) {
+	stubPanic("GetService")
+	return store.ServiceDetail{}, nil
+}
+func (*fullDepsStub) SetServiceAccessMode(context.Context, string, string, string, string, string, []byte) error {
+	stubPanic("SetServiceAccessMode")
+	return nil
+}
+func (*fullDepsStub) ListAPIKeys(context.Context, string, string, string) ([]db.ServiceAPIKey, error) {
+	stubPanic("ListAPIKeys")
+	return nil, nil
+}
+func (*fullDepsStub) CreateAPIKey(context.Context, string, string, string, string) (string, string, error) {
+	stubPanic("CreateAPIKey")
+	return "", "", nil
+}
+func (*fullDepsStub) DeleteAPIKey(context.Context, string, string, string, string) error {
+	stubPanic("DeleteAPIKey")
+	return nil
+}
+func (*fullDepsStub) GetAccessPolicy(context.Context, string, string, string) ([]string, error) {
+	stubPanic("GetAccessPolicy")
+	return nil, nil
+}
+func (*fullDepsStub) SetAccessPolicy(context.Context, string, string, string, []string) error {
+	stubPanic("SetAccessPolicy")
+	return nil
+}
+
+// LiveTunnelLookup.
+func (*fullDepsStub) LookupByServiceID(string) (LiveTunnelSnapshot, bool) {
+	stubPanic("LookupByServiceID")
+	return LiveTunnelSnapshot{}, false
+}
+func (*fullDepsStub) LookupByTunnelID(string) (TunnelLocator, bool) {
+	stubPanic("LookupByTunnelID")
+	return TunnelLocator{}, false
+}
+
+// CacheEngine.
+func (*fullDepsStub) Clear(context.Context, string) error {
+	stubPanic("CacheEngine.Clear")
+	return nil
+}
+func (*fullDepsStub) Stats(context.Context) (int, int64, float64, error) {
+	stubPanic("CacheEngine.Stats")
+	return 0, 0, 0, nil
+}
+
+// CacheServiceLookup + InspectorOwnerLookup share GetServiceOwner.
+// ServiceOwnerLookup has GetServiceByID, distinct from GetServiceOwner — both
+// live on the same stub type so the same value can be assigned to multiple
+// Deps fields.
+func (*fullDepsStub) GetServiceOwner(context.Context, string) (string, error) {
+	stubPanic("GetServiceOwner")
+	return "", nil
+}
+func (*fullDepsStub) GetServiceAIConfig(context.Context, string) ([]byte, error) {
+	stubPanic("GetServiceAIConfig")
+	return nil, nil
+}
+func (*fullDepsStub) ListAllServiceAIConfigs(context.Context) ([]CacheServiceConfigRow, error) {
+	stubPanic("ListAllServiceAIConfigs")
+	return nil, nil
+}
+func (*fullDepsStub) GetServiceByID(context.Context, string) (db.Service, error) {
+	stubPanic("GetServiceByID")
+	return db.Service{}, nil
+}
+
+// ModelAliasStore.
+func (*fullDepsStub) ListModelAliases(context.Context) ([]db.ModelAlias, error) {
+	stubPanic("ListModelAliases")
+	return nil, nil
+}
+func (*fullDepsStub) GetModelAlias(context.Context, string) (db.ModelAlias, error) {
+	stubPanic("GetModelAlias")
+	return db.ModelAlias{}, nil
+}
+func (*fullDepsStub) CreateModelAlias(context.Context, db.ModelAlias) error {
+	stubPanic("CreateModelAlias")
+	return nil
+}
+func (*fullDepsStub) UpdateModelAlias(context.Context, string, string, string) error {
+	stubPanic("UpdateModelAlias")
+	return nil
+}
+func (*fullDepsStub) DeleteModelAlias(context.Context, string) error {
+	stubPanic("DeleteModelAlias")
+	return nil
+}
+
+// InspectorRings.
+func (*fullDepsStub) GetOrCreate(string, int) *inspector.Ring {
+	stubPanic("InspectorRings.GetOrCreate")
+	return nil
+}
+func (*fullDepsStub) Get(string) *inspector.Ring {
+	stubPanic("InspectorRings.Get")
+	return nil
+}
+
+// InspectorReplayer.
+func (*fullDepsStub) Replay(context.Context, string, *http.Request) (inspector.Entry, error) {
+	stubPanic("Replay")
+	return inspector.Entry{}, nil
+}
+
+// RateLimitStore.
+func (*fullDepsStub) ListRateLimits(context.Context) ([]db.RateLimit, error) {
+	stubPanic("ListRateLimits")
+	return nil, nil
+}
+func (*fullDepsStub) GetRateLimit(context.Context, string) (db.RateLimit, error) {
+	stubPanic("GetRateLimit")
+	return db.RateLimit{}, nil
+}
+func (*fullDepsStub) CreateRateLimit(context.Context, db.RateLimit) error {
+	stubPanic("CreateRateLimit")
+	return nil
+}
+func (*fullDepsStub) UpdateRateLimit(context.Context, db.RateLimit) error {
+	stubPanic("UpdateRateLimit")
+	return nil
+}
+func (*fullDepsStub) DeleteRateLimit(context.Context, string) error {
+	stubPanic("DeleteRateLimit")
+	return nil
+}
+
+// QuotaEngine.
+func (*fullDepsStub) Reload(context.Context) error {
+	stubPanic("QuotaEngine.Reload")
+	return nil
+}
+func (*fullDepsStub) UsageFor(context.Context, quota.Subjects) []quota.Usage {
+	stubPanic("QuotaEngine.UsageFor")
+	return nil
+}
+func (*fullDepsStub) Limits() []quota.Limit {
+	stubPanic("QuotaEngine.Limits")
+	return nil
+}
+
+// BudgetStore.
+func (*fullDepsStub) ListBudgets(context.Context) ([]db.Budget, error) {
+	stubPanic("ListBudgets")
+	return nil, nil
+}
+func (*fullDepsStub) GetBudget(context.Context, string) (db.Budget, error) {
+	stubPanic("GetBudget")
+	return db.Budget{}, nil
+}
+func (*fullDepsStub) CreateBudget(context.Context, db.Budget) error {
+	stubPanic("CreateBudget")
+	return nil
+}
+func (*fullDepsStub) UpdateBudget(context.Context, db.Budget) error {
+	stubPanic("UpdateBudget")
+	return nil
+}
+func (*fullDepsStub) DeleteBudget(context.Context, string) error {
+	stubPanic("DeleteBudget")
+	return nil
+}
+func (*fullDepsStub) ListUsageForWindow(context.Context, string) ([]db.UsageRow, error) {
+	stubPanic("ListUsageForWindow")
+	return nil, nil
+}
+
+// CostEngine.
+func (*fullDepsStub) Pricing() cost.Pricing {
+	stubPanic("Pricing")
+	return cost.Pricing{}
+}
+func (*fullDepsStub) ReplacePricing(cost.Pricing) {
+	stubPanic("ReplacePricing")
+}
+func (*fullDepsStub) Summary(context.Context, string) (cost.Summary, error) {
+	stubPanic("Summary")
+	return cost.Summary{}, nil
+}
+func (*fullDepsStub) CurrentUsdFor(context.Context, db.Budget) (float64, error) {
+	stubPanic("CurrentUsdFor")
+	return 0, nil
+}
+
+// AuditQueryStore.
+func (*fullDepsStub) ListAuditEvents(context.Context, db.AuditQuery) ([]db.AuditEvent, error) {
+	stubPanic("ListAuditEvents")
+	return nil, nil
+}
+
+// AuditChain.
+func (*fullDepsStub) Verify(context.Context, string, string) (bool, string, error) {
+	stubPanic("AuditChain.Verify")
+	return false, "", nil
+}
+func (*fullDepsStub) ExportNDJSON(context.Context, io.Writer, audit.ExportQuery) error {
+	stubPanic("ExportNDJSON")
+	return nil
+}
+func (*fullDepsStub) PublicKey() []byte {
+	stubPanic("PublicKey")
+	return nil
+}
+func (*fullDepsStub) FingerprintHex() string {
+	stubPanic("FingerprintHex")
+	return ""
+}
+
+// WebhookStore.
+func (*fullDepsStub) ListWebhooks(context.Context) ([]db.Webhook, error) {
+	stubPanic("ListWebhooks")
+	return nil, nil
+}
+func (*fullDepsStub) GetWebhook(context.Context, string) (db.Webhook, error) {
+	stubPanic("GetWebhook")
+	return db.Webhook{}, nil
+}
+func (*fullDepsStub) CreateWebhook(context.Context, db.Webhook) error {
+	stubPanic("CreateWebhook")
+	return nil
+}
+func (*fullDepsStub) UpdateWebhook(context.Context, db.Webhook) error {
+	stubPanic("UpdateWebhook")
+	return nil
+}
+func (*fullDepsStub) DeleteWebhook(context.Context, string) error {
+	stubPanic("DeleteWebhook")
+	return nil
+}
+func (*fullDepsStub) SetWebhookPaused(context.Context, string, bool) error {
+	stubPanic("SetWebhookPaused")
+	return nil
+}
+func (*fullDepsStub) ListWebhookDeliveries(context.Context, db.WebhookDeliveryQuery) ([]db.WebhookDelivery, error) {
+	stubPanic("ListWebhookDeliveries")
+	return nil, nil
+}
+
+// WebhookDispatcher.
+func (*fullDepsStub) DeliverNow(context.Context, string, string, any) (int, int, error) {
+	stubPanic("DeliverNow")
+	return 0, 0, nil
+}
+
+// WebhookSecretRegistry.
+func (*fullDepsStub) Set(string, string) {
+	stubPanic("WebhookSecrets.Set")
+}
+func (*fullDepsStub) Delete(string) {
+	stubPanic("WebhookSecrets.Delete")
+}
+
+// AutomationStore.
+func (*fullDepsStub) MintAutomationToken(context.Context, string, string, string, []string, *time.Time) (store.AutomationTokenView, string, error) {
+	stubPanic("MintAutomationToken")
+	return store.AutomationTokenView{}, "", nil
+}
+func (*fullDepsStub) ListAutomationTokensForCaller(context.Context, string, string) ([]store.AutomationTokenView, error) {
+	stubPanic("ListAutomationTokensForCaller")
+	return nil, nil
+}
+func (*fullDepsStub) RevokeAutomationToken(context.Context, string, string, string) error {
+	stubPanic("RevokeAutomationToken")
+	return nil
+}
+
+// BearerStore.
+func (*fullDepsStub) LookupBearer(context.Context, string) (AutomationTokenInfo, error) {
+	stubPanic("LookupBearer")
+	return AutomationTokenInfo{}, nil
+}
+func (*fullDepsStub) TouchBearer(context.Context, string) error {
+	stubPanic("TouchBearer")
+	return nil
+}
+
+// IPGeoStore.
+func (*fullDepsStub) GetServiceIPGeo(context.Context, string) (db.ServiceIPGeoConfig, error) {
+	stubPanic("GetServiceIPGeo")
+	return db.ServiceIPGeoConfig{}, nil
+}
+func (*fullDepsStub) SetServiceIPGeo(context.Context, db.ServiceIPGeoConfig) error {
+	stubPanic("SetServiceIPGeo")
+	return nil
+}
+
+// GeoLookupSurface.
+func (*fullDepsStub) Enabled() bool {
+	stubPanic("GeoLookup.Enabled")
+	return false
+}
+func (*fullDepsStub) DBPath() string {
+	stubPanic("GeoLookup.DBPath")
+	return ""
+}
+func (*fullDepsStub) DBAgeSeconds() int64 {
+	stubPanic("GeoLookup.DBAgeSeconds")
+	return 0
+}
+
+// WebAuthnProvider.
+func (*fullDepsStub) BeginRegister(context.Context, string) (*bwebauthn.BeginRegisterResult, error) {
+	stubPanic("BeginRegister")
+	return nil, nil
+}
+func (*fullDepsStub) FinishRegister(context.Context, string, string, string, *http.Request) (*db.WebAuthnCredential, error) {
+	stubPanic("FinishRegister")
+	return nil, nil
+}
+func (*fullDepsStub) BeginLogin(context.Context, string) (*bwebauthn.BeginLoginResult, error) {
+	stubPanic("BeginLogin")
+	return nil, nil
+}
+func (*fullDepsStub) FinishLogin(context.Context, string, *http.Request) (string, error) {
+	stubPanic("FinishLogin")
+	return "", nil
+}
+func (*fullDepsStub) ListCredentialsForUser(context.Context, string) ([]db.WebAuthnCredential, error) {
+	stubPanic("ListCredentialsForUser")
+	return nil, nil
+}
+func (*fullDepsStub) DeleteCredential(context.Context, string, string) error {
+	stubPanic("DeleteCredential")
+	return nil
+}
+
+// BackupRunner.
+func (*fullDepsStub) RunBackup(context.Context, string) error {
+	stubPanic("RunBackup")
+	return nil
+}
+
+// RestoreRunner.
+func (*fullDepsStub) RunRestore(context.Context, string) error {
+	stubPanic("RunRestore")
+	return nil
+}
+
+// AuditAppender.
+func (*fullDepsStub) Append(context.Context, audit.Event) error {
+	stubPanic("Append")
+	return nil
+}
+
+// MetricsRecorder.
+func (*fullDepsStub) WriteText(http.ResponseWriter) error {
+	stubPanic("WriteText")
+	return nil
+}
+
+// MCPToolsLister.
+func (*fullDepsStub) Tools() []mcpserv.ToolDescriptor {
+	stubPanic("Tools")
+	return nil
 }
 
 // TestOpenAPI_EmbedFresh asserts the embedded copy at
