@@ -392,7 +392,7 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 		if redactDrop != nil {
 			// Drop-action rule fired — short-circuit with 400 redaction.drop.
 			writeJSONError(w, http.StatusBadRequest, "redaction.drop")
-			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusBadRequest, nil, 0, false, "MISS", fromReplay)
+			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusBadRequest, nil, nil, 0, false, "MISS", fromReplay)
 			return
 		}
 	}
@@ -418,7 +418,7 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 					slog.String("service_id", svc.ID),
 					slog.String("pattern", pattern),
 				)
-				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusForbidden, nil, 0, false, "MISS", fromReplay)
+				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusForbidden, nil, nil, 0, false, "MISS", fromReplay)
 				return
 			case guardrails.ActionRefuseSafe:
 				refusalBody, hdr := safeRefusalBody(kind)
@@ -432,7 +432,7 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 				// Pass the ORIGINAL + redacted request bodies so operators
 				// investigating refusals can see what was sent.
 				// TruncateRequest will cap whatever we pass.
-				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusOK, refusalBody, 0, false, "MISS", fromReplay)
+				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, http.StatusOK, refusalBody, hdr, 0, false, "MISS", fromReplay)
 				return
 			case guardrails.ActionLogOnly:
 				// Fall through; just record the hit in logs.
@@ -461,7 +461,14 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 		if hit {
 			cacheStatus = "HIT"
 			c.serveCacheHit(w, entry)
-			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, entry.Status, entry.Body, 0, false, cacheStatus, fromReplay)
+			// Convert the cached entry's flat header map to http.Header so
+			// the inspector entry's RespHeaders mirrors what the visitor
+			// saw (Content-Type drives the replay-compare diff path).
+			cacheHdr := make(http.Header, len(entry.Headers))
+			for k, v := range entry.Headers {
+				cacheHdr.Set(k, v)
+			}
+			c.captureEntry(svc, r, body, redactedBody, redactHits, kind, entry.Status, entry.Body, cacheHdr, 0, false, cacheStatus, fromReplay)
 			c.recordMeter(r.Context(), svc, kind, 0, 0, int64(len(redactedBody)), int64(len(entry.Body)), false, true, entry.Status)
 			return
 		}
@@ -587,7 +594,7 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 
 	// Inspector capture: only when this service has the feature enabled.
 	c.captureEntry(svc, r, body, redactedBody, redactHits, kind,
-		wrapped.statusCode, capw.bytes(), bytesIn, isStreamedResponse(wrapped.Header()), cacheStatus, fromReplay)
+		wrapped.statusCode, capw.bytes(), wrapped.Header(), bytesIn, isStreamedResponse(wrapped.Header()), cacheStatus, fromReplay)
 
 	// Meter the request — always, even on non-2xx, so quota usage reflects
 	// reality. cache_hit is false on this MISS path; cacheStatus tells the
@@ -603,9 +610,16 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 // captureEntry records one inspector entry IF the per-service inspector
 // feature is enabled. The fromReplay flag is informational — the inspector
 // API exposes captured entries the same way regardless.
+//
+// respHeaders is the response header set the upstream produced (or the
+// cache HIT replayed). It MUST be passed in: the inspector API's
+// replay-compare diff path consults RespHeaders["Content-Type"] to decide
+// between a textual unified diff and a binary metadata-only summary, and
+// without these the diff always falls back to binary.
 func (c *Chain) captureEntry(svc Service, r *http.Request,
 	origBody, redactedBody []byte, redactHits []redact.RuleHit,
-	kind Kind, status int, respBody []byte, bytesIn int64, streamed bool, cacheStatus string, fromReplay bool) {
+	kind Kind, status int, respBody []byte, respHeaders http.Header,
+	bytesIn int64, streamed bool, cacheStatus string, fromReplay bool) {
 	if c.Inspector == nil {
 		return
 	}
@@ -639,6 +653,7 @@ func (c *Chain) captureEntry(svc Service, r *http.Request,
 		BytesOut:     int64(len(respBody)),
 		ReqHeaders:   firstValues(r.Header),
 		ReqBody:      reqBody,
+		RespHeaders:  firstValues(respHeaders),
 		RespBody:     respBodyT,
 		Truncated:    reqTrunc || respTrunc,
 		BytesOmitted: reqOmitted + respOmitted,

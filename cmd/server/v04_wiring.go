@@ -517,11 +517,36 @@ func newInspectorReplayer(chain *aigw.Chain, log *slog.Logger) api.InspectorRepl
 // Replay re-fires r through the chain. Returns the resulting Entry. The
 // proxyHandler is a no-op: replay does not hit upstream — we want the
 // inspector capture from the chain itself, not a live response.
+//
+// The chain's Loader resolves the service's AIConfig so the replay path
+// exercises the same middleware chain (cache/redaction/guardrails/
+// inspector/anthropic) as a live request. Without this, svc.AIConfig
+// would be empty and Chain.run's captureEntry would silently no-op
+// because cfg.Inspector is nil — meaning replay never adds a new entry
+// to the per-service ring and the API caller sees a synthesised
+// minimal entry instead of one that actually flowed through the chain.
+// Loader errors are non-fatal: we fall back to an empty AIConfig so
+// the replay still produces a response (with the same fail-open
+// semantics as Chain.Dispatch).
 func (a inspectorReplayerAdapter) Replay(ctx context.Context, serviceID string, r *http.Request) (inspector.Entry, error) {
 	if a.chain == nil {
 		return inspector.Entry{}, errors.New("aigw chain not wired")
 	}
 	svc := aigw.Service{ID: serviceID}
+	if a.chain.Loader != nil {
+		loaded, ok, err := a.chain.Loader.LoadAIConfig(ctx, serviceID)
+		if err != nil && a.log != nil {
+			a.log.Warn("inspector replay: load ai config failed",
+				slog.String("service_id", serviceID),
+				slog.String("err", err.Error()))
+		}
+		if ok {
+			if loaded.ID == "" {
+				loaded.ID = serviceID
+			}
+			svc = loaded
+		}
+	}
 	noUpstream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
