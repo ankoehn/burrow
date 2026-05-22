@@ -338,3 +338,64 @@ func TestCacheDeleteServiceEntriesAuthz(t *testing.T) {
 		r.Body.Close()
 	}
 }
+
+// TestDeleteCacheEntriesClearsBothTiers asserts spec A.4: DELETE
+// /api/v1/cache/entries clears the exact tier (CacheEngine.Clear("")) AND the
+// semantic tier (SemanticEngine.ClearAll) in the same request.
+func TestDeleteCacheEntriesClearsBothTiers(t *testing.T) {
+	fce := &fakeCacheEngine{}
+	fse := &fakeSemanticEngine{}
+	d := Deps{
+		Log:            discardLog(),
+		Users:          &fakeUserStore{role: "admin"},
+		Settings:       &fakeCacheSettingsStore{},
+		CacheEngine:    fce,
+		SemanticEngine: fse,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.delete(t, "/api/v1/cache/entries")
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", r.StatusCode)
+	}
+	r.Body.Close()
+
+	// Exact tier: Clear("") must have been called exactly once.
+	if len(fce.clearCalls) != 1 || fce.clearCalls[0] != "" {
+		t.Fatalf("exact Clear calls=%v want [\"\"]", fce.clearCalls)
+	}
+	// Semantic tier: ClearAll must have been called.
+	if !fse.clearAllCalled {
+		t.Fatal("SemanticEngine.ClearAll was not called (spec A.4: both tiers must be cleared)")
+	}
+}
+
+// TestDeleteCacheEntriesNilSemanticEngineDoesNotRegress asserts that when
+// SemanticEngine is nil (legacy callers that never wired the semantic tier),
+// DELETE /api/v1/cache/entries still succeeds with 204 and the exact tier is
+// cleared normally.
+func TestDeleteCacheEntriesNilSemanticEngineDoesNotRegress(t *testing.T) {
+	fce := &fakeCacheEngine{}
+	d := Deps{
+		Log:         discardLog(),
+		Users:       &fakeUserStore{role: "admin"},
+		Settings:    &fakeCacheSettingsStore{},
+		CacheEngine: fce,
+		// SemanticEngine intentionally nil.
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.delete(t, "/api/v1/cache/entries")
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("nil-semantic status=%d want 204", r.StatusCode)
+	}
+	r.Body.Close()
+
+	if len(fce.clearCalls) != 1 || fce.clearCalls[0] != "" {
+		t.Fatalf("exact Clear calls=%v want [\"\"]", fce.clearCalls)
+	}
+}

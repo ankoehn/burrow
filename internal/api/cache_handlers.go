@@ -285,6 +285,9 @@ func (d Deps) GetCacheStats(w http.ResponseWriter, r *http.Request) {
 // DeleteCacheEntries handles DELETE /api/v1/cache/entries (clear all).
 // Admin or ai:configure:any only — gating is enforced by the router (this
 // runs inside the admin-or-ai-configure group). 204 on success.
+// Spec A.4: clears BOTH tiers — exact (CacheEngine.Clear) and semantic
+// (SemanticEngine.ClearAll). A nil SemanticEngine is skipped gracefully so
+// legacy callers that do not wire the semantic tier continue to work.
 func (d Deps) DeleteCacheEntries(w http.ResponseWriter, r *http.Request) {
 	if d.CacheEngine == nil {
 		w.WriteHeader(http.StatusNoContent)
@@ -293,6 +296,12 @@ func (d Deps) DeleteCacheEntries(w http.ResponseWriter, r *http.Request) {
 	if err := d.CacheEngine.Clear(r.Context(), ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, "clear cache failed")
 		return
+	}
+	if d.SemanticEngine != nil {
+		if err := d.SemanticEngine.ClearAll(r.Context()); err != nil {
+			writeErr(w, http.StatusInternalServerError, "clear semantic cache failed")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
