@@ -258,11 +258,11 @@ func (d Deps) PutServiceUpstreamCredential(w http.ResponseWriter, r *http.Reques
 		lc := audit.LogContextFrom(r.Context())
 		_ = d.AuditAppender.Append(r.Context(), audit.Event{
 			ActorID: lc.ActorID, ActorEmail: lc.ActorEmail,
-			Action:       audit.ActionServiceUpstreamCredentialBind,
-			SubjectID:    serviceID, SubjectLabel: serviceID,
-			Result:       "ok",
-			SourceIP:     lc.SourceIP, UserAgent: lc.UserAgent, RequestID: lc.RequestID,
-			Payload:      audit.MustJSON(map[string]string{"slot": in.Slot}),
+			Action:    audit.ActionServiceUpstreamCredentialBind,
+			SubjectID: serviceID, SubjectLabel: serviceID,
+			Result:   "ok",
+			SourceIP: lc.SourceIP, UserAgent: lc.UserAgent, RequestID: lc.RequestID,
+			Payload: audit.MustJSON(map[string]string{"slot": in.Slot}),
 		})
 	}
 
@@ -297,11 +297,11 @@ func (d Deps) DeleteServiceUpstreamCredential(w http.ResponseWriter, r *http.Req
 		lc := audit.LogContextFrom(r.Context())
 		_ = d.AuditAppender.Append(r.Context(), audit.Event{
 			ActorID: lc.ActorID, ActorEmail: lc.ActorEmail,
-			Action:       audit.ActionServiceUpstreamCredentialUnbind,
-			SubjectID:    serviceID, SubjectLabel: serviceID,
-			Result:       "ok",
-			SourceIP:     lc.SourceIP, UserAgent: lc.UserAgent, RequestID: lc.RequestID,
-			Payload:      audit.MustJSON(map[string]string{"slot": slot}),
+			Action:    audit.ActionServiceUpstreamCredentialUnbind,
+			SubjectID: serviceID, SubjectLabel: serviceID,
+			Result:   "ok",
+			SourceIP: lc.SourceIP, UserAgent: lc.UserAgent, RequestID: lc.RequestID,
+			Payload: audit.MustJSON(map[string]string{"slot": slot}),
 		})
 	}
 

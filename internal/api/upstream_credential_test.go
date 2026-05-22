@@ -3,9 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ankoehn/burrow/internal/audit"
@@ -146,8 +146,8 @@ func TestGetSlots_NilVaultReturnsEmpty(t *testing.T) {
 func TestGetSlots_NonAdminForbidden(t *testing.T) {
 	vault := &stubCredVault{slots: []string{"OPENAI"}}
 	d := Deps{
-		Users:         &fakeUserStore{role: "user"},
-		Log:           discardLog(),
+		Users:           &fakeUserStore{role: "user"},
+		Log:             discardLog(),
 		CredentialVault: vault,
 	}
 	srv := httptest.NewServer(NewRouter(d))
@@ -220,6 +220,54 @@ func TestGetServiceCred_Bound_SlotPresent(t *testing.T) {
 	}
 }
 
+// TestGetServiceCred_BoundSlotMissing covers spec B.2: the binding row exists in
+// the store but the env var has been removed from the vault at request time.
+// The handler must return 200 with slot_present=false and still return the slot
+// name and header fields so the dashboard can render the handle.
+func TestGetServiceCred_BoundSlotMissing(t *testing.T) {
+	// Vault only has "OPENAI"; the binding points to "REMOVED" which is gone.
+	vault := &stubCredVault{slots: []string{"OPENAI"}}
+	store := &stubCredStore{
+		present: true,
+		row: db.ServiceUpstreamCredential{
+			ServiceID:    "svc1",
+			Slot:         "REMOVED",
+			HeaderName:   "Authorization",
+			HeaderFormat: "Bearer {key}",
+		},
+	}
+	d := newCredDeps(vault, store)
+	d.CredentialServices = &stubSvcLookup{ownerID: "u-self"}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	ac := authedClient(t, srv)
+
+	resp := ac.get(t, "/api/v1/services/svc1/upstream-credential")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	// slot_present must be false — the env var was removed.
+	if sp, _ := body["slot_present"].(bool); sp {
+		t.Error("env var removed: slot_present should be false")
+	}
+	// slot name must still be returned so the dashboard can display the handle.
+	if body["slot"] != "REMOVED" {
+		t.Errorf("slot=%v; want REMOVED", body["slot"])
+	}
+	// header fields must also be returned.
+	if body["header_name"] != "Authorization" {
+		t.Errorf("header_name=%v; want Authorization", body["header_name"])
+	}
+	if body["header_format"] != "Bearer {key}" {
+		t.Errorf("header_format=%v; want 'Bearer {key}'", body["header_format"])
+	}
+}
+
 // --- Tests: PUT .../upstream-credential -------------------------------------
 
 func TestPutServiceCred_HappyPath(t *testing.T) {
@@ -257,7 +305,6 @@ func TestPutServiceCred_HappyPath(t *testing.T) {
 	}
 	// Payload must contain slot but NOT a credential value.
 	payloadStr := string(auditApp.events[0].Payload)
-	if !errors.Is(nil, nil) /* placeholder */ { /* always runs */ }
 	if payloadStr == "" {
 		t.Error("audit payload should be non-empty")
 	}
@@ -384,7 +431,7 @@ func TestDeleteServiceCred_SlotNotInAuditPayload_ValueAbsent(t *testing.T) {
 	vault := &stubCredVault{slots: []string{"OPENAI"}}
 	store := &stubCredStore{
 		present: true,
-		row: db.ServiceUpstreamCredential{ServiceID: "svc1", Slot: "OPENAI"},
+		row:     db.ServiceUpstreamCredential{ServiceID: "svc1", Slot: "OPENAI"},
 	}
 	auditApp := &stubAuditAppender{}
 	d := newCredDeps(vault, store)
@@ -414,10 +461,9 @@ func TestDeleteServiceCred_SlotNotInAuditPayload_ValueAbsent(t *testing.T) {
 	}
 }
 
-// containsCredValue is a best-effort check that the stubCredVault's fake key
-// prefix doesn't leak into the audit payload.
+// containsCredValue returns true if the stubCredVault's fake-key prefix
+// ("fake-key") appears anywhere in s. The stub's Get method returns
+// "fake-key-for-<SLOT>", so any leak of that value will be caught.
 func containsCredValue(s string) bool {
-	return len(s) > 0 && (s[0] == '{') &&
-		// The fake key format is "fake-key-for-<SLOT>"; check for "fake-key".
-		false // stub returns "fake-key-for-SLOT" but we only care about slot in payload
+	return strings.Contains(s, "fake-key")
 }
