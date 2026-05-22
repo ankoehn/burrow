@@ -479,6 +479,10 @@ func (*fullDepsStub) UpdateModelAlias(context.Context, string, string, string) e
 	stubPanic("UpdateModelAlias")
 	return nil
 }
+func (*fullDepsStub) UpdateModelAliasFull(context.Context, string, string, string, string, int) error {
+	stubPanic("UpdateModelAliasFull")
+	return nil
+}
 func (*fullDepsStub) DeleteModelAlias(context.Context, string) error {
 	stubPanic("DeleteModelAlias")
 	return nil

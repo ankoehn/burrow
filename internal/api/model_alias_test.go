@@ -72,6 +72,21 @@ func (f *fakeModelAliasStore) UpdateModelAlias(_ context.Context, alias, concret
 	return nil
 }
 
+func (f *fakeModelAliasStore) UpdateModelAliasFull(_ context.Context, alias, concrete, svc, provider string, priority int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.rows[alias]
+	if !ok {
+		return db.ErrNotFound
+	}
+	m.ConcreteModel = concrete
+	m.ServiceID = svc
+	m.Provider = provider
+	m.Priority = priority
+	f.rows[alias] = m
+	return nil
+}
+
 func (f *fakeModelAliasStore) DeleteModelAlias(_ context.Context, alias string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -283,6 +298,135 @@ func TestModelAliasDelete_NotFound(t *testing.T) {
 	r := c.delete(t, "/api/v1/models/aliases/nope")
 	if r.StatusCode != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestAliasPostAcceptsProviderAndPriority verifies that POST /api/v1/models/aliases
+// accepts provider and priority fields (v0.5.0) and that GET returns them.
+func TestAliasPostAcceptsProviderAndPriority(t *testing.T) {
+	store := newFakeModelAliasStore()
+	d := Deps{
+		Log:          discardLog(),
+		Users:        &fakeUserStore{role: "admin"},
+		ModelAliases: store,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	body := map[string]any{
+		"alias":          "fast",
+		"concrete_model": "llama3.1:8b",
+		"service_id":     "svc_ai001",
+		"provider":       "ollama",
+		"priority":       50,
+	}
+	r := c.post(t, "/api/v1/models/aliases", body)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var created modelAliasResp
+	if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if created.Provider != "ollama" {
+		t.Errorf("POST response: provider=%q, want %q", created.Provider, "ollama")
+	}
+	if created.Priority != 50 {
+		t.Errorf("POST response: priority=%d, want 50", created.Priority)
+	}
+
+	// GET must return provider + priority.
+	r = c.get(t, "/api/v1/models/aliases")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("GET status=%d", r.StatusCode)
+	}
+	var list []modelAliasResp
+	_ = json.NewDecoder(r.Body).Decode(&list)
+	r.Body.Close()
+	if len(list) != 1 || list[0].Provider != "ollama" || list[0].Priority != 50 {
+		t.Fatalf("GET list: %+v", list)
+	}
+}
+
+// TestAliasPostValidatesProvider verifies that an unknown provider value
+// returns 400 with an appropriate error (v0.5.0).
+func TestAliasPostValidatesProvider(t *testing.T) {
+	d := Deps{
+		Log:          discardLog(),
+		Users:        &fakeUserStore{role: "admin"},
+		ModelAliases: newFakeModelAliasStore(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.post(t, "/api/v1/models/aliases", map[string]any{
+		"alias":          "x",
+		"concrete_model": "m",
+		"service_id":     "s",
+		"provider":       "unknown-provider",
+	})
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestAliasPostValidatesPriorityNegative verifies that a negative priority
+// returns 400 (v0.5.0).
+func TestAliasPostValidatesPriorityNegative(t *testing.T) {
+	d := Deps{
+		Log:          discardLog(),
+		Users:        &fakeUserStore{role: "admin"},
+		ModelAliases: newFakeModelAliasStore(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.post(t, "/api/v1/models/aliases", map[string]any{
+		"alias":          "x",
+		"concrete_model": "m",
+		"service_id":     "s",
+		"provider":       "ollama",
+		"priority":       -1,
+	})
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+}
+
+// TestAliasPutUpdatesProviderAndPriority verifies that PUT /api/v1/models/aliases/{alias}
+// persists provider and priority when provided (v0.5.0).
+func TestAliasPutUpdatesProviderAndPriority(t *testing.T) {
+	store := newFakeModelAliasStore()
+	_ = store.CreateModelAlias(context.Background(), db.ModelAlias{
+		Alias: "m", ConcreteModel: "old", ServiceID: "svc",
+		Provider: "ollama", Priority: 100,
+	})
+	d := Deps{
+		Log:          discardLog(),
+		Users:        &fakeUserStore{role: "admin"},
+		ModelAliases: store,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/models/aliases/m", map[string]any{
+		"concrete_model": "new-model",
+		"service_id":     "svc2",
+		"provider":       "openai",
+		"priority":       10,
+	})
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("PUT status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+
+	got, _ := store.GetModelAlias(context.Background(), "m")
+	if got.Provider != "openai" || got.Priority != 10 {
+		t.Fatalf("PUT did not update provider/priority: %+v", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -21,15 +22,20 @@ type ModelAliasStore interface {
 	GetModelAlias(ctx context.Context, alias string) (db.ModelAlias, error)
 	CreateModelAlias(ctx context.Context, m db.ModelAlias) error
 	UpdateModelAlias(ctx context.Context, alias, concreteModel, serviceID string) error
+	// UpdateModelAliasFull replaces all mutable columns including provider and priority (v0.5.0).
+	UpdateModelAliasFull(ctx context.Context, alias, concreteModel, serviceID, provider string, priority int) error
 	DeleteModelAlias(ctx context.Context, alias string) error
 }
 
 // modelAliasResp is the JSON wire shape for one alias (spec Part C.1).
+// v0.5.0 adds provider and priority fields.
 type modelAliasResp struct {
 	Alias         string    `json:"alias"`
 	ConcreteModel string    `json:"concrete_model"`
 	ServiceID     string    `json:"service_id"`
 	CreatedAt     time.Time `json:"created_at"`
+	Provider      string    `json:"provider"`
+	Priority      int       `json:"priority"`
 }
 
 func toModelAliasResp(m db.ModelAlias) modelAliasResp {
@@ -38,23 +44,60 @@ func toModelAliasResp(m db.ModelAlias) modelAliasResp {
 		ConcreteModel: m.ConcreteModel,
 		ServiceID:     m.ServiceID,
 		CreatedAt:     m.CreatedAt,
+		Provider:      m.Provider,
+		Priority:      m.Priority,
 	}
+}
+
+// allowedProviders is the closed set of provider values (spec C.1).
+// An empty string is permitted (represents "other" / unset / legacy rows).
+var allowedProviders = map[string]bool{
+	"":              true, // default / unset
+	"ollama":        true,
+	"vllm":          true,
+	"openai-compat": true,
+	"openai":        true,
+	"anthropic":     true,
+	"other":         true,
+}
+
+// validateProvider returns "" on success or an error string. Empty string is
+// accepted (defaults to "other" semantics).
+func validateProvider(p string) string {
+	if !allowedProviders[p] {
+		return fmt.Sprintf("unknown provider %q", p)
+	}
+	return ""
+}
+
+// validatePriority returns "" when priority >= 0, else an error string.
+func validatePriority(p int) string {
+	if p < 0 {
+		return "priority must be >= 0"
+	}
+	return ""
 }
 
 // modelAliasCreateReq is the POST body shape. The alias is required to be
 // 1–128 chars, restricted to ASCII letters/digits/dot/dash/underscore so it
 // can appear verbatim in upstream URL paths and in audit logs.
+// v0.5.0: provider (string, optional) and priority (int, default 100).
 type modelAliasCreateReq struct {
 	Alias         string `json:"alias"`
 	ConcreteModel string `json:"concrete_model"`
 	ServiceID     string `json:"service_id"`
+	Provider      string `json:"provider"`
+	Priority      *int   `json:"priority"` // pointer to distinguish 0 from absent
 }
 
 // modelAliasUpdateReq is the PUT body shape. The {alias} path param keys
-// the row; only the (concrete_model, service_id) pair is mutable.
+// the row; only the mutable columns are accepted.
+// v0.5.0: provider and priority are now mutable.
 type modelAliasUpdateReq struct {
 	ConcreteModel string `json:"concrete_model"`
 	ServiceID     string `json:"service_id"`
+	Provider      string `json:"provider"`
+	Priority      *int   `json:"priority"` // pointer to distinguish 0 from absent
 }
 
 // validateAlias returns "" on success or a user-visible error string on
@@ -100,6 +143,7 @@ func (d Deps) GetModelAliases(w http.ResponseWriter, r *http.Request) {
 // PostModelAlias handles POST /api/v1/models/aliases.
 // Admin OR ai:configure:any (router-applied middleware). Returns 201 with
 // the created row; 409 on alias conflict; 400 on validation failure.
+// v0.5.0: accepts provider and priority in the request body.
 func (d Deps) PostModelAlias(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	raw, err := io.ReadAll(r.Body)
@@ -115,6 +159,7 @@ func (d Deps) PostModelAlias(w http.ResponseWriter, r *http.Request) {
 	in.Alias = strings.TrimSpace(in.Alias)
 	in.ConcreteModel = strings.TrimSpace(in.ConcreteModel)
 	in.ServiceID = strings.TrimSpace(in.ServiceID)
+	in.Provider = strings.TrimSpace(in.Provider)
 	if msg := validateAlias(in.Alias); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
@@ -127,6 +172,19 @@ func (d Deps) PostModelAlias(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "service_id is required")
 		return
 	}
+	if msg := validateProvider(in.Provider); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	// Default priority to 100 when absent (spec C.3).
+	priority := 100
+	if in.Priority != nil {
+		priority = *in.Priority
+	}
+	if msg := validatePriority(priority); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
 	if d.ModelAliases == nil {
 		writeErr(w, http.StatusInternalServerError, "alias store unavailable")
 		return
@@ -135,6 +193,8 @@ func (d Deps) PostModelAlias(w http.ResponseWriter, r *http.Request) {
 		Alias:         in.Alias,
 		ConcreteModel: in.ConcreteModel,
 		ServiceID:     in.ServiceID,
+		Provider:      in.Provider,
+		Priority:      priority,
 	}
 	if err := d.ModelAliases.CreateModelAlias(r.Context(), row); err != nil {
 		if errors.Is(err, db.ErrAliasExists) {
@@ -158,6 +218,7 @@ func (d Deps) PostModelAlias(w http.ResponseWriter, r *http.Request) {
 // PutModelAlias handles PUT /api/v1/models/aliases/{alias}.
 // Admin OR ai:configure:any (router-applied middleware). 204 on success;
 // 404 when no row matches; 400 on validation failure.
+// v0.5.0: accepts provider and priority as optional fields.
 func (d Deps) PutModelAlias(w http.ResponseWriter, r *http.Request) {
 	alias := chi.URLParam(r, "alias")
 	if msg := validateAlias(alias); msg != "" {
@@ -177,6 +238,7 @@ func (d Deps) PutModelAlias(w http.ResponseWriter, r *http.Request) {
 	}
 	in.ConcreteModel = strings.TrimSpace(in.ConcreteModel)
 	in.ServiceID = strings.TrimSpace(in.ServiceID)
+	in.Provider = strings.TrimSpace(in.Provider)
 	if in.ConcreteModel == "" {
 		writeErr(w, http.StatusBadRequest, "concrete_model is required")
 		return
@@ -185,17 +247,42 @@ func (d Deps) PutModelAlias(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "service_id is required")
 		return
 	}
+	if msg := validateProvider(in.Provider); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
 	if d.ModelAliases == nil {
 		writeErr(w, http.StatusInternalServerError, "alias store unavailable")
 		return
 	}
-	if err := d.ModelAliases.UpdateModelAlias(r.Context(), alias, in.ConcreteModel, in.ServiceID); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "alias not found")
+	// When provider/priority are present, use the full update; otherwise
+	// fall back to the legacy update (preserves existing provider/priority).
+	if in.Provider != "" || in.Priority != nil {
+		priority := 100
+		if in.Priority != nil {
+			priority = *in.Priority
+		}
+		if msg := validatePriority(priority); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "update model alias failed")
-		return
+		if err := d.ModelAliases.UpdateModelAliasFull(r.Context(), alias, in.ConcreteModel, in.ServiceID, in.Provider, priority); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "alias not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "update model alias failed")
+			return
+		}
+	} else {
+		if err := d.ModelAliases.UpdateModelAlias(r.Context(), alias, in.ConcreteModel, in.ServiceID); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "alias not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "update model alias failed")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
