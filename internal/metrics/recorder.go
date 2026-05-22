@@ -67,73 +67,73 @@ type metricDef struct {
 var closedSet = []metricDef{
 	// HTTP per tunnel (proxy ingress).
 	{name: "burrow_http_requests_total", kind: kindCounter,
-		help: "Total HTTP requests through the proxy.",
+		help:   "Total HTTP requests through the proxy.",
 		labels: []string{"service", "method", "status"}},
 	{name: "burrow_http_request_duration_seconds", kind: kindHistogram,
-		help: "Histogram of HTTP request durations (seconds).",
+		help:   "Histogram of HTTP request durations (seconds).",
 		labels: []string{"service", "method"}},
 	{name: "burrow_http_request_bytes_in_total", kind: kindCounter,
-		help: "Total HTTP request bytes received.",
+		help:   "Total HTTP request bytes received.",
 		labels: []string{"service"}},
 	{name: "burrow_http_request_bytes_out_total", kind: kindCounter,
-		help: "Total HTTP response bytes sent.",
+		help:   "Total HTTP response bytes sent.",
 		labels: []string{"service"}},
 
 	// Connection per client.
 	{name: "burrow_client_session_count", kind: kindGauge,
-		help: "Current client control sessions.",
+		help:   "Current client control sessions.",
 		labels: []string{"user"}},
 	{name: "burrow_client_session_duration_seconds", kind: kindHistogram,
-		help: "Histogram of client control session durations (seconds).",
+		help:   "Histogram of client control session durations (seconds).",
 		labels: []string{"user"}},
 	{name: "burrow_client_bytes_in_total", kind: kindCounter,
-		help: "Total client bytes received.",
+		help:   "Total client bytes received.",
 		labels: []string{"user"}},
 	{name: "burrow_client_bytes_out_total", kind: kindCounter,
-		help: "Total client bytes sent.",
+		help:   "Total client bytes sent.",
 		labels: []string{"user"}},
 
 	// AI per service / key.
 	{name: "burrow_ai_tokens_in_total", kind: kindCounter,
-		help: "Total AI input tokens charged.",
+		help:   "Total AI input tokens charged.",
 		labels: []string{"service", "api_key"}},
 	{name: "burrow_ai_tokens_out_total", kind: kindCounter,
-		help: "Total AI output tokens charged.",
+		help:   "Total AI output tokens charged.",
 		labels: []string{"service", "api_key"}},
 	{name: "burrow_ai_cost_usd_total", kind: kindCounter,
-		help: "Total AI cost in USD.",
+		help:   "Total AI cost in USD.",
 		labels: []string{"service", "api_key"}},
 	{name: "burrow_ai_cache_hits_total", kind: kindCounter,
-		help: "Total prompt-cache hits.",
+		help:   "Total prompt-cache hits.",
 		labels: []string{"service"}},
 	{name: "burrow_ai_cache_misses_total", kind: kindCounter,
-		help: "Total prompt-cache misses.",
+		help:   "Total prompt-cache misses.",
 		labels: []string{"service"}},
 	{name: "burrow_ai_failover_events_total", kind: kindCounter,
-		help: "Total AI upstream failover events.",
-		labels: []string{"service", "from", "to"}},
+		help:   "Total AI upstream failover events.",
+		labels: []string{"service", "from", "to", "cross_provider"}},
 	{name: "burrow_ai_upstream_errors_total", kind: kindCounter,
-		help: "Total AI upstream errors.",
+		help:   "Total AI upstream errors.",
 		labels: []string{"service", "status"}},
 
 	// Internal.
 	{name: "burrow_goroutines", kind: kindGauge,
-		help: "Live goroutine count (sampled at scrape time).",
+		help:   "Live goroutine count (sampled at scrape time).",
 		labels: nil},
 	{name: "burrow_db_query_duration_seconds", kind: kindHistogram,
-		help: "Histogram of DB query durations (seconds).",
+		help:   "Histogram of DB query durations (seconds).",
 		labels: []string{"op"}},
 	{name: "burrow_control_reconnects_total", kind: kindCounter,
-		help: "Total control-plane reconnect events.",
+		help:   "Total control-plane reconnect events.",
 		labels: []string{"client"}},
 	{name: "burrow_cert_expiry_days", kind: kindGauge,
-		help: "Days remaining until the operator-supplied wildcard cert expires.",
+		help:   "Days remaining until the operator-supplied wildcard cert expires.",
 		labels: []string{"cert"}},
 	{name: "burrow_audit_chain_length", kind: kindGauge,
-		help: "Total rows in the audit log.",
+		help:   "Total rows in the audit log.",
 		labels: nil},
 	{name: "burrow_audit_chain_last_hash", kind: kindGauge,
-		help: "Last audit chain hash (gauge value is always 1; the hex digest lives in the hash label).",
+		help:   "Last audit chain hash (gauge value is always 1; the hex digest lives in the hash label).",
 		labels: []string{"hash"}},
 }
 
@@ -430,10 +430,13 @@ func (r *Recorder) IncAICacheMiss(service string) {
 }
 
 // IncAIFailover records a single failover event from→to inside service.
-func (r *Recorder) IncAIFailover(service, from, to string) {
+// crossProvider is "true" when the from and to backends have different
+// provider values (e.g. ollama→anthropic), "false" when they are the same
+// provider. This label was added in v0.5.0 (Task 6).
+func (r *Recorder) IncAIFailover(service, from, to, crossProvider string) {
 	r.incCounter("burrow_ai_failover_events_total",
-		[]string{"service", "from", "to"},
-		[]string{service, from, to}, 1)
+		[]string{"service", "from", "to", "cross_provider"},
+		[]string{service, from, to, crossProvider}, 1)
 }
 
 // IncAIUpstreamError records one upstream error for service at HTTP status.

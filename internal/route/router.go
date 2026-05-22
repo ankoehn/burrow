@@ -39,11 +39,12 @@ type Strategy string
 
 // Strategy enum constants.
 const (
-	StrategySingle      Strategy = "single"
-	StrategyFailover    Strategy = "failover"
-	StrategyWeighted    Strategy = "weighted"
-	StrategyHeaderBased Strategy = "header_based"
-	StrategySticky      Strategy = "sticky"
+	StrategySingle        Strategy = "single"
+	StrategyFailover      Strategy = "failover"
+	StrategyWeighted      Strategy = "weighted"
+	StrategyHeaderBased   Strategy = "header_based"
+	StrategySticky        Strategy = "sticky"
+	StrategyMultiProvider Strategy = "multi_provider" // v0.5.0: priority-ordered walk with cross-provider gate
 )
 
 // Backend is one routing target — a (service_id, weight, concrete_model)
@@ -54,12 +55,25 @@ type Backend struct {
 	ConcreteModel string // exposed to the upstream Director / aliased away from the client-facing model name
 }
 
+// MultiProviderBackend is a Backend extended with provider + priority fields
+// used by the multi_provider strategy (v0.5.0, spec Part C.2).
+// Provider is one of: ollama | vllm | openai-compat | openai | anthropic | other.
+// Priority is the walk order (lower value = higher priority; ties broken by id ASC).
+type MultiProviderBackend struct {
+	Backend
+	Provider string // upstream provider discriminator
+	Priority int    // routing priority; lower = tried first
+}
+
 // Policy is the operator-supplied routing rule for a single ai-endpoint
 // (the v0.4.0 ServiceAIConfig.routing block, spec Part B.7).
 type Policy struct {
-	Strategy             Strategy
-	ModelAlias           string
-	Backends             []Backend
+	Strategy   Strategy
+	ModelAlias string
+	Backends   []Backend
+	// MultiBackends is populated only for StrategyMultiProvider (v0.5.0).
+	// The regular Backends slice is ignored in that strategy.
+	MultiBackends        []MultiProviderBackend
 	HeaderName           string // header_based: the request header to inspect (default "X-Burrow-Model")
 	CircuitFailurePct    int    // breaker tripping threshold (0–100)
 	CircuitWindowSeconds int    // rolling-window size; default 60s
@@ -180,13 +194,13 @@ type Router struct {
 // HealthChecker maintains. The fields are guarded by mu (the per-backend
 // mutex, not the Router's map mutex) — keep critical sections short.
 type backendState struct {
-	mu          sync.Mutex
-	record      BackendRecord
-	tripped     bool
-	trippedAt   time.Time
-	probes      ringBuffer // rolling-window success/failure samples
-	probeCount  int
-	failCount   int
+	mu         sync.Mutex
+	record     BackendRecord
+	tripped    bool
+	trippedAt  time.Time
+	probes     ringBuffer // rolling-window success/failure samples
+	probeCount int
+	failCount  int
 }
 
 // ringBucketCount is the fixed size of the rolling-window ring (one bucket

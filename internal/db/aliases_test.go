@@ -131,3 +131,117 @@ func TestModelAliasesCascadeOnServiceDelete(t *testing.T) {
 		t.Fatalf("alias should cascade away with service; got %v", err)
 	}
 }
+
+// TestModelAliasProviderPriority verifies that provider and priority are
+// stored and retrieved correctly (v0.5.0 columns).
+func TestModelAliasProviderPriority(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+	mustUser(t, x, "u1")
+	svc := seedSvc(t, x, "u1", "svc")
+
+	if err := x.CreateModelAlias(ctx, ModelAlias{
+		Alias: "fast", ConcreteModel: "llama3.1:8b", ServiceID: svc,
+		Provider: "ollama", Priority: 50,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := x.GetModelAlias(ctx, "fast")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Provider != "ollama" {
+		t.Errorf("provider: got %q, want %q", got.Provider, "ollama")
+	}
+	if got.Priority != 50 {
+		t.Errorf("priority: got %d, want 50", got.Priority)
+	}
+
+	// List also exposes provider + priority.
+	list, err := x.ListModelAliases(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].Provider != "ollama" || list[0].Priority != 50 {
+		t.Fatalf("list: %+v", list)
+	}
+}
+
+// TestGetAliasesByPriority verifies that GetAliasesByPriority returns rows
+// for the given alias ordered by priority ASC (v0.5.0).
+func TestGetAliasesByPriority(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+	mustUser(t, x, "u1")
+	svcA := seedSvc(t, x, "u1", "svc-a")
+	svcB := seedSvc(t, x, "u1", "svc-b")
+	svcC := seedSvc(t, x, "u1", "svc-c")
+
+	// Insert in non-priority order to prove the ORDER BY is effective.
+	if err := x.CreateModelAlias(ctx, ModelAlias{
+		Alias: "fast", ConcreteModel: "claude-3-5", ServiceID: svcC,
+		Provider: "anthropic", Priority: 100,
+	}); err != nil {
+		t.Fatalf("create anthropic: %v", err)
+	}
+	if err := x.CreateModelAlias(ctx, ModelAlias{
+		Alias: "fast2", ConcreteModel: "gpt-4o-mini", ServiceID: svcB,
+		Provider: "openai", Priority: 50,
+	}); err != nil {
+		t.Fatalf("create openai: %v", err)
+	}
+	if err := x.CreateModelAlias(ctx, ModelAlias{
+		Alias: "fast3", ConcreteModel: "llama3.1:8b", ServiceID: svcA,
+		Provider: "ollama", Priority: 0,
+	}); err != nil {
+		t.Fatalf("create ollama: %v", err)
+	}
+
+	// GetAliasesByPriority for "fast" should return only the one matching alias.
+	rows, err := x.GetAliasesByPriority(ctx, "fast")
+	if err != nil {
+		t.Fatalf("get by priority: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Provider != "anthropic" {
+		t.Fatalf("expected 1 anthropic row; got %+v", rows)
+	}
+
+	// Empty alias → empty result (not an error).
+	rows2, err := x.GetAliasesByPriority(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("get nonexistent: %v", err)
+	}
+	if len(rows2) != 0 {
+		t.Fatalf("want 0 rows for nonexistent alias; got %d", len(rows2))
+	}
+}
+
+// TestUpdateModelAliasFull verifies UpdateModelAliasFull persists provider
+// and priority (v0.5.0).
+func TestUpdateModelAliasFull(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+	mustUser(t, x, "u1")
+	svcA := seedSvc(t, x, "u1", "svc-a")
+	svcB := seedSvc(t, x, "u1", "svc-b")
+
+	if err := x.CreateModelAlias(ctx, ModelAlias{
+		Alias: "m", ConcreteModel: "old", ServiceID: svcA,
+		Provider: "ollama", Priority: 100,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if err := x.UpdateModelAliasFull(ctx, "m", "new-model", svcB, "openai", 10); err != nil {
+		t.Fatalf("update full: %v", err)
+	}
+	got, _ := x.GetModelAlias(ctx, "m")
+	if got.ConcreteModel != "new-model" || got.ServiceID != svcB || got.Provider != "openai" || got.Priority != 10 {
+		t.Fatalf("update did not persist: %+v", got)
+	}
+
+	// Unknown alias → ErrNotFound.
+	if err := x.UpdateModelAliasFull(ctx, "nope", "x", svcA, "ollama", 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update unknown: %v, want ErrNotFound", err)
+	}
+}

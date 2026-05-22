@@ -238,7 +238,7 @@ func TestE2EMetrics_ClosedSetCoverage(t *testing.T) {
 	s.recorder.AddAICostUSD("svc1", "k1", 0.0001)
 	s.recorder.IncAICacheHit("svc1")
 	s.recorder.IncAICacheMiss("svc1")
-	s.recorder.IncAIFailover("svc1", "openai", "anthropic")
+	s.recorder.IncAIFailover("svc1", "openai", "anthropic", "true")
 	s.recorder.IncAIUpstreamError("svc1", 502)
 
 	// Internal: cert expiry + db query duration + goroutines (set by handler).

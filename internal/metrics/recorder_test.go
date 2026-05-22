@@ -257,7 +257,7 @@ func TestWriteTextClosedSetPresent(t *testing.T) {
 	r.AddAICostUSD("svc", "k", 0.0125)
 	r.IncAICacheHit("svc")
 	r.IncAICacheMiss("svc")
-	r.IncAIFailover("svc", "anthropic", "openai")
+	r.IncAIFailover("svc", "anthropic", "openai", "true")
 	r.IncAIUpstreamError("svc", 502)
 	r.SetGoroutines(42)
 	r.ObserveDBQueryDuration("select", 0.01)
@@ -446,4 +446,3 @@ func TestLabelEscaping(t *testing.T) {
 		t.Errorf("escaped service mismatch: got %q want %q", m.Samples[0].Labels["service"], wantSvc)
 	}
 }
-

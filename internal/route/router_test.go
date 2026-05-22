@@ -530,3 +530,90 @@ func TestStickyAllTrippedFallback(t *testing.T) {
 		t.Fatalf("want error when all sticky backends tripped")
 	}
 }
+
+// TestMultiProviderRouterPicksByPriorityThenSkipsTrippedBreaker exercises
+// the multi_provider strategy with three aliases for "fast":
+//
+//	ollama   priority=0   (tripped)
+//	openai   priority=50  (healthy)
+//	anthropic priority=100 (healthy but provider-filtered out when kind=openai)
+//
+// Translation = "none" + kind="openai": walk order is prio 0→50→100.
+// ollama(0) is tripped → skip. openai(50) is healthy and provider matches
+// openai-compat kinds → pick. anthropic(100) never reached.
+func TestMultiProviderRouterPicksByPriorityThenSkipsTrippedBreaker(t *testing.T) {
+	hc := newScriptedHealth()
+	hc.Trip("svc_ollama")
+	r := newRouterForTest(t, hc)
+
+	policy := Policy{
+		Strategy:    StrategyMultiProvider,
+		ModelAlias:  "fast",
+		TranslateTo: "none",
+		MultiBackends: []MultiProviderBackend{
+			{Backend: Backend{ServiceID: "svc_ollama", ConcreteModel: "llama3.1:8b"}, Provider: "ollama", Priority: 0},
+			{Backend: Backend{ServiceID: "svc_openai", ConcreteModel: "gpt-4o-mini"}, Provider: "openai", Priority: 50},
+			{Backend: Backend{ServiceID: "svc_anthropic", ConcreteModel: "claude-3-5-sonnet"}, Provider: "anthropic", Priority: 100},
+		},
+	}
+	// Kind=openai: only ollama/openai/openai-compat/vllm providers are routable.
+	p, err := r.PickMulti(context.Background(), policy, RouteContext{Kind: "openai"})
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if p.ServiceID != "svc_openai" {
+		t.Fatalf("want svc_openai (lowest-prio non-tripped openai-kind backend); got %q", p.ServiceID)
+	}
+
+	// Retry should land on nothing — anthropic is excluded by kind filter.
+	next, ok := p.Retry()
+	if ok {
+		t.Errorf("Retry returned %+v ok=true; want exhausted (anthropic filtered out)", next)
+	}
+}
+
+// TestMultiProviderAllTripped: every compatible backend tripped → error.
+func TestMultiProviderAllTripped(t *testing.T) {
+	hc := newScriptedHealth()
+	hc.Trip("svc_ollama")
+	hc.Trip("svc_openai")
+	r := newRouterForTest(t, hc)
+
+	policy := Policy{
+		Strategy:    StrategyMultiProvider,
+		TranslateTo: "none",
+		MultiBackends: []MultiProviderBackend{
+			{Backend: Backend{ServiceID: "svc_ollama", ConcreteModel: "llama3.1:8b"}, Provider: "ollama", Priority: 0},
+			{Backend: Backend{ServiceID: "svc_openai", ConcreteModel: "gpt-4o-mini"}, Provider: "openai", Priority: 50},
+		},
+	}
+	_, err := r.PickMulti(context.Background(), policy, RouteContext{Kind: "openai"})
+	if err == nil {
+		t.Fatalf("want error when all compatible backends tripped")
+	}
+}
+
+// TestMultiProviderTranslateTo_CrossProvider: translate_to="openai" allows
+// anthropic backends to be routed to (cross-provider).
+func TestMultiProviderTranslateTo_CrossProvider(t *testing.T) {
+	hc := newScriptedHealth()
+	hc.Trip("svc_ollama")
+	r := newRouterForTest(t, hc)
+
+	policy := Policy{
+		Strategy:    StrategyMultiProvider,
+		TranslateTo: "openai",
+		MultiBackends: []MultiProviderBackend{
+			{Backend: Backend{ServiceID: "svc_ollama", ConcreteModel: "llama3.1:8b"}, Provider: "ollama", Priority: 0},
+			{Backend: Backend{ServiceID: "svc_anthropic", ConcreteModel: "claude-3-5-sonnet"}, Provider: "anthropic", Priority: 50},
+		},
+	}
+	// translate_to != "none" → cross-provider permitted; anthropic should be picked.
+	p, err := r.PickMulti(context.Background(), policy, RouteContext{Kind: "openai"})
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if p.ServiceID != "svc_anthropic" {
+		t.Fatalf("want svc_anthropic (cross-provider with translate_to=openai); got %q", p.ServiceID)
+	}
+}

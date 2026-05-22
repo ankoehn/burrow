@@ -42,6 +42,113 @@ func (r *Router) Pick(_ context.Context, p Policy, rc RouteContext) (Pick, error
 	return Pick{}, fmt.Errorf("unknown strategy %q", p.Strategy)
 }
 
+// PickMulti is the entry point for the multi_provider strategy (v0.5.0).
+// It uses p.MultiBackends (sorted by Priority ASC, then by the slice index
+// as a stable tiebreaker) and applies the cross-provider translation gate
+// described in spec C.2.
+//
+// The RouteContext.Kind drives the provider filter:
+//   - translate_to == "none" (default): the backend's Provider must be
+//     compatible with the request wire kind (openai-wire → ollama/vllm/
+//     openai/openai-compat; anthropic-wire → anthropic only).
+//   - translate_to == "openai" or "anthropic": all providers are permitted
+//     (the translation adapter in the hot path handles transcoding).
+//
+// Backends whose circuit breaker is OPEN are skipped; the returned Retry
+// closure walks to the next candidate in the filtered+sorted list.
+func (r *Router) PickMulti(_ context.Context, p Policy, rc RouteContext) (Pick, error) {
+	if len(p.MultiBackends) == 0 {
+		return Pick{}, ErrNoBackends
+	}
+	hc := r.healthChecker()
+	return r.pickMultiProvider(p, rc, hc)
+}
+
+// openaiKindProviders is the closed set of provider values that are
+// compatible with openai-wire-protocol requests (kind == "openai").
+var openaiKindProviders = map[string]bool{
+	"ollama":        true,
+	"vllm":          true,
+	"openai":        true,
+	"openai-compat": true,
+}
+
+// multiProviderCompatible reports whether a MultiProviderBackend is
+// routable given the request kind and the policy's translate_to setting.
+// When translate_to != "none", cross-provider routing is permitted so any
+// backend qualifies (the adapter handles transcoding). When translate_to ==
+// "none" (or empty), the provider must match the request's wire kind:
+//
+//   - kind "openai" → provider in {ollama, vllm, openai, openai-compat}
+//   - kind "anthropic" → provider == "anthropic"
+//   - any other kind → no filter applied (pass through)
+func multiProviderCompatible(b MultiProviderBackend, kind, translateTo string) bool {
+	if translateTo != "" && translateTo != "none" {
+		// Cross-provider translation enabled — all providers permitted.
+		return true
+	}
+	switch kind {
+	case "openai":
+		return openaiKindProviders[b.Provider]
+	case "anthropic":
+		return b.Provider == "anthropic"
+	default:
+		return true
+	}
+}
+
+// pickMultiProvider implements the multi_provider strategy: sort by priority
+// ASC (stable, preserving original slice order for ties), filter by provider
+// compatibility and breaker health, then return the first healthy candidate
+// with a Retry closure that walks the remaining list.
+func (r *Router) pickMultiProvider(p Policy, rc RouteContext, hc HealthChecker) (Pick, error) {
+	// Sort a copy by priority ASC; the sort is stable so ties preserve
+	// the original slice order (which the DB query orders by id ASC).
+	sorted := make([]MultiProviderBackend, len(p.MultiBackends))
+	copy(sorted, p.MultiBackends)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Priority < sorted[j].Priority
+	})
+
+	// Filter by provider compatibility.
+	translateTo := p.TranslateTo
+	kind := rc.Kind
+	filtered := make([]MultiProviderBackend, 0, len(sorted))
+	for _, b := range sorted {
+		if multiProviderCompatible(b, kind, translateTo) {
+			filtered = append(filtered, b)
+		}
+	}
+
+	// Walk the filtered list skipping tripped backends.
+	healthy := make([]MultiProviderBackend, 0, len(filtered))
+	for _, b := range filtered {
+		if hc.Healthy(b.ServiceID) {
+			healthy = append(healthy, b)
+		}
+	}
+	if len(healthy) == 0 {
+		return Pick{}, ErrBackendUnavailable
+	}
+	return multiProviderPickFromList(healthy, 0), nil
+}
+
+// multiProviderPickFromList builds a Pick pointing at healthy[idx] whose
+// Retry closure walks to healthy[idx+1].
+func multiProviderPickFromList(healthy []MultiProviderBackend, idx int) Pick {
+	b := healthy[idx]
+	return Pick{
+		ServiceID:     b.ServiceID,
+		ConcreteModel: b.ConcreteModel,
+		Retry: func() (Pick, bool) {
+			if idx+1 >= len(healthy) {
+				return Pick{}, false
+			}
+			return multiProviderPickFromList(healthy, idx+1), true
+		},
+	}
+}
+
 func (r *Router) healthChecker() HealthChecker {
 	if r.hcOverride != nil {
 		return r.hcOverride
