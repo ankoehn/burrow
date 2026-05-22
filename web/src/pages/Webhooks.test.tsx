@@ -50,4 +50,75 @@ describe("Webhooks (§4.26)", () => {
       await screen.findByText("Save this signing secret now — you won't see it again."),
     ).toBeInTheDocument();
   });
+
+  it("Add Dialog events picker includes the v0.5.0 events", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /add webhook/i }));
+
+    // Wait for dialog to appear — identify by the dialog heading specifically
+    await screen.findByRole("heading", { name: /add webhook/i });
+
+    // All 6 v0.5.0 event checkboxes should be present (as text labels)
+    const v5Events = [
+      "ai.upstream_error",
+      "ai.cache_promotion",
+      "audit.policy_change",
+      "service.created",
+      "service.deleted",
+      "connection.session_summary",
+    ];
+
+    for (const ev of v5Events) {
+      // getAllByText to avoid "multiple elements" error in case there are multiple matches
+      const matches = screen.getAllByText(ev);
+      expect(matches.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("Edit menu opens dialog with template editor + Save → PUT /webhooks/:id", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    mount();
+
+    // Find the row's action menu and click Edit
+    const actionsBtn = await screen.findByRole("button", { name: /actions for ops-pager/i });
+    await userEvent.click(actionsBtn);
+
+    const editItem = await screen.findByRole("menuitem", { name: /^edit$/i });
+    await userEvent.click(editItem);
+
+    // Edit dialog should open
+    await screen.findByText(/edit webhook/i);
+
+    // The URL input and template editor should be visible
+    const urlInput = screen.getByLabelText(/^url$/i);
+    expect(urlInput).toBeInTheDocument();
+
+    // The Payload template textarea from WebhookTemplateEditor should be visible
+    expect(
+      await screen.findByRole("textbox", { name: /payload template/i }),
+    ).toBeInTheDocument();
+
+    // Type a template
+    const tplTextarea = screen.getByRole("textbox", { name: /payload template/i });
+    await userEvent.clear(tplTextarea);
+    await userEvent.type(tplTextarea, "Service: {{.service_id}}");
+
+    // Save
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    // Verify PUT fired with body containing url, events, payload_template
+    await waitFor(() => {
+      const putCalls = fetchSpy.mock.calls.filter(([u, init]) =>
+        String(u).includes("/api/v1/webhooks/wh_ops") &&
+        (init as RequestInit | undefined)?.method === "PUT",
+      );
+      expect(putCalls.length).toBeGreaterThan(0);
+      const [, init] = putCalls[0]!;
+      const bodyStr = (init as RequestInit).body as string;
+      const parsed = JSON.parse(bodyStr) as Record<string, unknown>;
+      expect(parsed).toHaveProperty("url");
+      expect(parsed).toHaveProperty("events");
+      expect(parsed).toHaveProperty("payload_template");
+    });
+  });
 });

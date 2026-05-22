@@ -659,6 +659,76 @@ export const handlers = [
     return json(rows.slice(0, limit));
   }),
 
+  // ---- v0.5.0 webhook PUT + preview (spec Part H) ----
+  http.put("/api/v1/webhooks/:id", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const wh = db.webhooks.find((w) => w.id === params.id);
+    if (!wh) return err(404, "webhook not found");
+    const b = await body<{ url?: string; events?: string[]; payload_template?: string }>(request);
+    if (!b) return err(400, "invalid request body");
+    // Validate template if provided
+    if (typeof b.payload_template === "string" && b.payload_template !== "") {
+      if (b.payload_template.includes('{{template "')) {
+        return err(400, "template: nested template includes are forbidden");
+      }
+      const openCount = (b.payload_template.match(/\{\{/g) ?? []).length;
+      const closeCount = (b.payload_template.match(/\}\}/g) ?? []).length;
+      if (openCount !== closeCount) {
+        return err(400, "template: unbalanced delimiters at line 1");
+      }
+    }
+    if (b.url != null) wh.url = b.url;
+    if (Array.isArray(b.events)) wh.events = b.events;
+    if (typeof b.payload_template === "string") (wh as unknown as Record<string, unknown>)["payload_template"] = b.payload_template;
+    return noContent();
+  }),
+
+  http.post("/api/v1/webhooks/:id/preview", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const wh = db.webhooks.find((w) => w.id === params.id);
+    if (!wh) return err(404, "webhook not found");
+    const b = await body<{ event?: string; fields?: Record<string, unknown>; payload_template?: string }>(request);
+    if (!b) return err(400, "invalid request body");
+
+    // Use the draft template from the request body if provided; fall back to stored template.
+    const tpl = typeof b.payload_template === "string"
+      ? b.payload_template
+      : (wh as unknown as Record<string, unknown>)["payload_template"] as string | undefined ?? "";
+
+    // Validate template
+    if (tpl.includes('{{template "')) {
+      return err(400, "template: nested template includes are forbidden");
+    }
+    const openCount = (tpl.match(/\{\{/g) ?? []).length;
+    const closeCount = (tpl.match(/\}\}/g) ?? []).length;
+    if (openCount !== closeCount) {
+      return err(400, "template: unbalanced delimiters at line 1");
+    }
+
+    // Render: replace {{.FieldName}} with field values; empty string for unknown
+    function renderTemplate(template: string, fields: Record<string, unknown>): string {
+      if (!template) {
+        // Default JSON body when no template is set
+        return JSON.stringify({ event: b?.event ?? "", fields: fields ?? {} }, null, 2);
+      }
+      return template.replace(
+        /\{\{\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g,
+        (_, name: string) => {
+          if (name in fields) {
+            const val = fields[name];
+            if (typeof val === "string") return val;
+            return JSON.stringify(val);
+          }
+          return "";
+        },
+      );
+    }
+
+    const rendered = renderTemplate(tpl, b.fields ?? {});
+    const size_bytes = new TextEncoder().encode(rendered).length;
+    return json({ rendered, size_bytes });
+  }),
+
   // ---- v0.4.0 WebAuthn / passkeys (spec Part K) ----
   // begin returns canned PublicKeyCredentialCreation/RequestOptions JSON; the
   // browser-side helpers decode the base64url challenge.

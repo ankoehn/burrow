@@ -4,11 +4,68 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Dialog, DropdownMenu, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, SkeletonRows } from "@/components/ds";
+import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
+import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
+
+// Full list of known webhook events (v0.4.0 original + v0.5.0 additions).
+const WEBHOOK_EVENTS = [
+  // v0.4.0 events
+  "audit.tokens.create",
+  "quota.exceeded",
+  "budget.exceeded",
+  "redaction.applied",
+  "tunnel.connected",
+  "tunnel.disconnected",
+  "tunnel.failed",
+  "cert.expiring",
+  // v0.5.0 events
+  "ai.upstream_error",
+  "ai.cache_promotion",
+  "audit.policy_change",
+  "service.created",
+  "service.deleted",
+  "connection.session_summary",
+];
 
 function copy(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+// Multi-select events picker using Checkbox DS component.
+function EventsPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (events: string[]) => void;
+}) {
+  function toggle(ev: string) {
+    if (selected.includes(ev)) {
+      onChange(selected.filter((e) => e !== ev));
+    } else {
+      onChange([...selected, ev]);
+    }
+  }
+
+  return (
+    <div className="events-picker" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {WEBHOOK_EVENTS.map((ev) => (
+        <label
+          key={ev}
+          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.875rem" }}
+        >
+          <Checkbox
+            id={`ev-${ev}`}
+            checked={selected.includes(ev)}
+            onChange={() => toggle(ev)}
+          />
+          <span className="mono">{ev}</span>
+        </label>
+      ))}
+    </div>
+  );
 }
 
 export default function Webhooks() {
@@ -24,17 +81,38 @@ export default function Webhooks() {
     retry: false,
   });
 
+  // ---- Add dialog state ----
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [addEvents, setAddEvents] = useState<string[]>(["audit.tokens.create"]);
   const [createdSecret, setCreatedSecret] = useState<{ webhook: Webhook; signing_secret: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  // ---- Edit dialog state ----
+  const [editWebhook, setEditWebhook] = useState<Webhook | null>(null);
+  const [editUrl, setEditUrl] = useState("");
+  const [editEvents, setEditEvents] = useState<string[]>([]);
+  const [editTemplate, setEditTemplate] = useState<WebhookTemplateEditorValue>({ event: "", payload_template: "" });
+  const [editErr, setEditErr] = useState<string | null>(null);
+
+  function openEdit(w: Webhook) {
+    setEditWebhook(w);
+    setEditUrl(w.url);
+    setEditEvents(w.events.length > 0 ? w.events : ["audit.tokens.create"]);
+    const wAny = w as unknown as Record<string, unknown>;
+    setEditTemplate({
+      event: w.events[0] ?? "audit.tokens.create",
+      payload_template: typeof wAny["payload_template"] === "string" ? wAny["payload_template"] : "",
+    });
+    setEditErr(null);
+  }
 
   const create = useMutation({
     mutationFn: () =>
       apiFetch<CreatedWebhook>("/webhooks", {
         method: "POST",
-        body: JSON.stringify({ name, url, events: ["audit.tokens.create"] }),
+        body: JSON.stringify({ name, url, events: addEvents }),
       }),
     onSuccess: (res) => {
       setCreatedSecret(res);
@@ -42,10 +120,30 @@ export default function Webhooks() {
       setAddOpen(false);
       setName("");
       setUrl("");
+      setAddEvents(["audit.tokens.create"]);
       setErr(null);
     },
     onError: (e: unknown) =>
       setErr(e instanceof ApiError ? e.message : "Couldn't create webhook."),
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      apiFetch<void>(`/webhooks/${editWebhook!.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          url: editUrl,
+          events: editEvents,
+          payload_template: editTemplate.payload_template,
+        }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["webhooks"] });
+      setEditWebhook(null);
+      toast.success("Webhook updated.");
+    },
+    onError: (e: unknown) =>
+      setEditErr(e instanceof ApiError ? e.message : "Couldn't update webhook."),
   });
 
   const pause = useMutation({
@@ -74,6 +172,21 @@ export default function Webhooks() {
       return;
     }
     create.mutate();
+  }
+
+  function submitEdit() {
+    setEditErr(null);
+    try {
+      const u = new URL(editUrl);
+      if (u.protocol !== "https:") {
+        setEditErr("URL must use https://");
+        return;
+      }
+    } catch {
+      setEditErr("URL must use https://");
+      return;
+    }
+    update.mutate();
   }
 
   function statusOf(w: Webhook): { kind: string; text: string } {
@@ -131,6 +244,7 @@ export default function Webhooks() {
                           <DropdownMenu
                             trigger={<button type="button" className="icon-btn" aria-label={`Actions for ${w.name}`}>⋯</button>}
                             items={[
+                              { label: "Edit", onSelect: () => openEdit(w) },
                               w.paused
                                 ? { label: "Resume", onSelect: () => resume.mutate(w.id) }
                                 : { label: "Pause", onSelect: () => pause.mutate(w.id) },
@@ -168,6 +282,7 @@ export default function Webhooks() {
         </div>
       </section>
 
+      {/* Add webhook dialog */}
       <Dialog
         open={addOpen}
         onOpenChange={(o) => { setAddOpen(o); if (!o) setErr(null); }}
@@ -187,9 +302,54 @@ export default function Webhooks() {
           <label htmlFor="wh-url">URL</label>
           <Input id="wh-url" className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" />
         </div>
+        <div className="field">
+          <label>Events</label>
+          <EventsPicker selected={addEvents} onChange={setAddEvents} />
+        </div>
         {err && <p role="alert" className="notice-inline error">{err}</p>}
       </Dialog>
 
+      {/* Edit webhook dialog */}
+      <Dialog
+        open={editWebhook !== null}
+        onOpenChange={(o) => { if (!o) { setEditWebhook(null); setEditErr(null); } }}
+        title={`Edit webhook: ${editWebhook?.name ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditWebhook(null)}>Cancel</Button>
+            <Button variant="primary" disabled={update.isPending} onClick={submitEdit}>Save</Button>
+          </>
+        }
+      >
+        <div className="field">
+          <label htmlFor="edit-wh-url">URL</label>
+          <Input
+            id="edit-wh-url"
+            className="mono"
+            value={editUrl}
+            onChange={(e) => setEditUrl(e.target.value)}
+            placeholder="https://example.com/hook"
+          />
+        </div>
+        <div className="field">
+          <label>Events</label>
+          <EventsPicker selected={editEvents} onChange={setEditEvents} />
+        </div>
+        {editWebhook && (
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Payload template</label>
+            <WebhookTemplateEditor
+              webhookId={editWebhook.id}
+              value={editTemplate}
+              onChange={setEditTemplate}
+              availableEvents={editEvents.length > 0 ? editEvents : WEBHOOK_EVENTS}
+            />
+          </div>
+        )}
+        {editErr && <p role="alert" className="notice-inline error">{editErr}</p>}
+      </Dialog>
+
+      {/* Signing secret reveal dialog */}
       <Dialog
         open={createdSecret !== null}
         onOpenChange={(o) => { if (!o) setCreatedSecret(null); }}

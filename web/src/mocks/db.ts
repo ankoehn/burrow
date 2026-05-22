@@ -208,7 +208,7 @@ function seed(): MockDb {
       { id: "ae_003", ts: "2026-05-19T08:02:00Z", actor_id: meId, actor_email: "alice@acme.io", action: "tokens.create", subject_id: "tok_1", subject_label: "office-box-1", result: "ok", source_ip: "203.0.113.7", user_agent: "Mozilla/5.0", request_id: "req_003", payload: { name: "office-box-1" }, prev_hash: "22", hash: "33" },
     ],
     webhooks: [
-      { id: "wh_ops", name: "ops-pager", url: "https://example.com/hook", events: ["audit.tokens.create"], paused: false, consecutive_failures: 3, first_failure_at: "2026-05-19T07:00:00Z", created_at: "2026-05-01T00:00:00Z" },
+      { id: "wh_ops", name: "ops-pager", url: "https://example.com/hook", events: ["audit.tokens.create"], paused: false, consecutive_failures: 3, first_failure_at: "2026-05-19T07:00:00Z", created_at: "2026-05-01T00:00:00Z", payload_template: "" } as unknown as Webhook,
     ],
     webhookDeliveries: [
       { id: "wd_001", webhook_id: "wh_ops", event: "audit.tokens.create", ts: "2026-05-19T07:00:00Z", url: "https://example.com/hook", status_code: 502, attempt: 1, latency_ms: 100, request_body_preview: "{...}", response_body_preview: "gateway" },
