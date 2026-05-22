@@ -55,7 +55,7 @@ export function Layout() {
   const navItem = ({ isActive }: { isActive: boolean }) => cx("nav-item", isActive && "is-active");
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
   return (
-    <div className="shell">
+    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", position: "relative", background: "var(--background)", color: "var(--foreground)" }}>
       <a className="skip-link" href="#main">Skip to content</a>
       <nav className="sidebar" aria-label="Main">
         <div className="sidebar-brand">
@@ -131,7 +131,7 @@ export function Layout() {
           {user?.role === "admin" && (
             <div className="nav-group">
               <div className="nav-group-title">Administration</div>
-              <NavLink to="/settings" className={navItem}>
+              <NavLink to="/settings" end className={navItem}>
                 <span className="nav-icon"><ServerCog size={16} /></span>
                 <span className="nav-label">Settings</span>
               </NavLink>
@@ -152,7 +152,7 @@ export function Layout() {
 
           <div className="nav-group">
             <div className="nav-group-title">Account</div>
-            <NavLink to="/account" className={navItem}>
+            <NavLink to="/account" end className={navItem}>
               <span className="nav-icon"><UserCircle size={16} /></span>
               <span className="nav-label">Account</span>
             </NavLink>
