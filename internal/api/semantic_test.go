@@ -131,9 +131,9 @@ func TestSemanticCacheStatsHasSemanticFields(t *testing.T) {
 		promotions24h:      5,
 	}
 	d := Deps{
-		Log:           discardLog(),
-		Users:         &fakeUserStore{role: "user"},
-		Settings:      &fakeCacheSettingsStore{},
+		Log:            discardLog(),
+		Users:          &fakeUserStore{role: "user"},
+		Settings:       &fakeCacheSettingsStore{},
 		SemanticEngine: fse,
 	}
 	srv := httptest.NewServer(NewRouter(d))
@@ -258,11 +258,11 @@ func TestPutServiceAIConfigValidatesSemanticBlock(t *testing.T) {
 			configs: map[string][]byte{svcID: []byte(`{}`)},
 		}
 		return Deps{
-			Log:               discardLog(),
-			Users:             &fakeUserStore{role: role},
-			Settings:          &fakeCacheSettingsStore{},
-			ServiceAIConfigs:  svcStore,
-			CacheServices:     &fakeCacheServiceLookup{owners: map[string]string{svcID: "u-self"}},
+			Log:              discardLog(),
+			Users:            &fakeUserStore{role: role},
+			Settings:         &fakeCacheSettingsStore{},
+			ServiceAIConfigs: svcStore,
+			CacheServices:    &fakeCacheServiceLookup{owners: map[string]string{svcID: "u-self"}},
 		}
 	}
 
@@ -400,6 +400,38 @@ func TestPutServiceAIConfigValidatesSemanticBlock(t *testing.T) {
 		}
 		r.Body.Close()
 	}
+}
+
+// TestPutServiceAIConfigRejectsOwnerWithoutAIConfigureOwnPerm asserts that a
+// user who owns the service but holds a custom role that has NO ai:configure:*
+// permissions is rejected with 403. Previously the owner branch skipped the
+// ai:configure:own check, diverging from the "ai:configure:own|any" mapping in
+// the spec (Task 2 / Task 4). The fix mirrors DeleteServiceCacheEntries exactly.
+func TestPutServiceAIConfigRejectsOwnerWithoutAIConfigureOwnPerm(t *testing.T) {
+	const svcID = "svc-perm-test"
+	// "no-ai-perms" is not a builtin role and has no entry in the custom-roles
+	// cache (authz.SetRoles was never called in this test), so authz.Can returns
+	// false for every permission — including ai:configure:own.
+	svcStore := &fakeServiceAIConfigStore{
+		configs: map[string][]byte{svcID: []byte(`{}`)},
+	}
+	d := Deps{
+		Log:              discardLog(),
+		Users:            &fakeUserStore{role: "no-ai-perms"},
+		Settings:         &fakeCacheSettingsStore{},
+		ServiceAIConfigs: svcStore,
+		// Service is owned by "u-self" — the same ID authedClient logs in as.
+		CacheServices: &fakeCacheServiceLookup{owners: map[string]string{svcID: "u-self"}},
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.put(t, "/api/v1/services/"+svcID+"/ai-config", map[string]any{})
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("owner-without-ai:configure:own status=%d want 403", r.StatusCode)
+	}
+	r.Body.Close()
 }
 
 // jsonKeys returns the sorted key names of a map[string]json.RawMessage

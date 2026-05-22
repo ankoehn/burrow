@@ -123,8 +123,13 @@ func (d Deps) PutServiceAIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := userID(r.Context())
 
-	if role != "admin" && !authz.Can(role, authz.PermAIConfigureAny) {
-		// Must own the service.
+	// :any short-circuits ownership.
+	if !authz.Can(role, authz.PermAIConfigureAny) {
+		// Must be an :own caller and own the service.
+		if !authz.Can(role, authz.PermAIConfigureOwn) {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
 		if d.CacheServices == nil {
 			writeErr(w, http.StatusInternalServerError, "service lookup unavailable")
 			return
@@ -143,7 +148,8 @@ func (d Deps) PutServiceAIConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if d.CacheServices != nil {
-		// Even :any callers get a clean 404 when the service doesn't exist.
+		// Even for :any callers, surface 404 cleanly when the service does
+		// not exist so the client gets a meaningful error.
 		if _, err := d.CacheServices.GetServiceOwner(r.Context(), serviceID); errors.Is(err, db.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "service not found")
 			return
