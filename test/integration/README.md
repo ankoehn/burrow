@@ -110,3 +110,89 @@ run starts clean.
 - **Dashboard is plain HTTP under `--dev-certs`.** Setting
   `BURROW_HTTP_TLS_CERT` / `BURROW_HTTP_TLS_KEY` switches it to HTTPS but
   the harness intentionally doesn't — keep it minimal.
+
+## Playwright UI mini-suite (this directory)
+
+In addition to the curl-only `smoke.sh` data-plane gate, this directory
+also hosts a small Playwright suite that exercises the dashboard UI
+against the live 2-docker stack.
+
+### What it catches that `smoke.sh` doesn't
+
+- Dashboard renders against real cross-container TLS handshake.
+- The seeded tunnel from `client-entrypoint.sh` appears in `/tunnels`
+  with status `connected`.
+- Real bytes through the tunnel make the `bytes_in`/`bytes_out` counters
+  on `/tunnels` increment via SSE (covers the SSE event pipeline
+  end-to-end).
+- The `/tokens` UI mint flow succeeds and reveals a `bur_*` plaintext.
+- A UI-initiated token mint reaches the audit chain (`token.mint`).
+- The client reconnects after a `docker compose restart relay`, and the
+  dashboard reflects the recovery via SSE.
+
+These are surfaces that the in-process Playwright suite in `web/e2e/`
+cannot exercise — it boots `burrowd` in the same process as the test
+runner, so there is no real network and no real container boundary.
+
+### How to run
+
+Full suite (brings stack up, runs 5 specs, tears down):
+
+```bash
+task e2e:ui
+# or directly:
+bash test/integration/smoke-ui.sh
+```
+
+Fast local iteration (leave stack up, run specs repeatedly):
+
+```bash
+task e2e:up                         # leave stack up in a foreground window
+# in another shell:
+cd test/integration
+npx playwright test                 # all 5 specs
+npx playwright test 03-token-mint   # single spec
+npx playwright test --headed --workers=1   # with a visible browser
+npx playwright show-report          # open the HTML report
+```
+
+Tear down:
+
+```bash
+task e2e:down
+```
+
+### CI
+
+A GitHub Actions job `e2e-compose-ui` (in `.github/workflows/ci.yml`)
+runs the full pipeline on every PR. On failure, it uploads the
+`playwright-report/` and `test-results/` directories as the
+`e2e-compose-ui-playwright-report` artifact for post-mortem.
+
+### Troubleshooting
+
+- **`Container burrow-e2e-relay-1 Unhealthy` during `--wait`** — the
+  dashboard `/healthz` polled in the relay healthcheck is **plain
+  HTTP**, not HTTPS. See `relay-entrypoint.sh` and `compose.e2e.yml`
+  for the canonical shape. The fix is committed under `eb8a375`.
+- **A spec times out waiting for `connected`** — the seeded client may
+  have failed to dial the relay. Check `docker compose logs client`.
+- **`bytes_in` counter doesn't move in spec 02** — verify the SSE
+  stream is open: `curl http://localhost:8080/api/v1/events` should
+  emit `event: tunnels` lines as traffic flows. Note: the spec
+  deliberately sends a `connection: close` header per request so
+  `bridge.Pipe`'s deferred byte counter flushes between requests.
+- **Spec 04 fails with "0 rows with Action=token.mint"** — the audit
+  emit site may have moved. Search:
+  `git grep -n "ActionTokenMint" internal/`. The constant lives in
+  `internal/audit/actions.go`.
+
+### Pinned constraints
+
+This entire directory follows the strict scope discipline of the
+parent harness: ONLY `test/integration/**` and additive entries in
+`Taskfile.yml` and `.github/workflows/ci.yml`. No production code is
+touched. No new Go module dependencies. Three new npm devDependencies
+in `test/integration/package.json`: `@playwright/test` (version-aligned
+with `web/`), plus `typescript` and `@types/node` required by the
+tsconfig's `types` field and the `tsc --noEmit` gate.
