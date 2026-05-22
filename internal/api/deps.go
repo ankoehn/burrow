@@ -390,6 +390,19 @@ type Deps struct {
 	// {enabled:false,…} and tools/inventory renders []. Operators NEVER see
 	// the BURROW_MCP_TOKEN plaintext via the API — only the row id.
 	MCP MCPInfo
+
+	// v0.5.0 Task 4: semantic cache JSON API (spec Part A.4).
+	// SemanticEngine is the aggregate semantic cache surface consumed by the
+	// JSON API (global clear + global stats). The concrete implementation is
+	// build-tag-gated; in the default build a NoopSemanticEngine satisfying
+	// the interface returns zeros and nil errors. May be nil before Task 12
+	// wires the concrete implementation; all handlers degrade gracefully.
+	SemanticEngine SemanticEngine
+	// ServiceAIConfigs is the read/write surface for the service_ai_config
+	// table, consumed by PUT /services/{id}/ai-config. *db.DB satisfies it
+	// via GetServiceAIConfigRaw + UpsertServiceAIConfig. Nil disables the
+	// PUT route (handler returns 500 "ai config store unavailable").
+	ServiceAIConfigs ServiceAIConfigStore
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

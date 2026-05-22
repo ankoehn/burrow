@@ -1,0 +1,229 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/ankoehn/burrow/internal/authz"
+	"github.com/ankoehn/burrow/internal/db"
+)
+
+// SemanticEngine is the narrow interface the semantic cache handlers consume.
+// The concrete semantic.Cache satisfies it via an adapter; tests provide a
+// fake. Deliberately a subset — only the two operations the JSON surface
+// needs (global clear + aggregate stats). Lookup/Promote live on the proxy
+// hot path and are wired separately.
+type SemanticEngine interface {
+	// ClearAll removes every semantic index entry across all services.
+	// The chromem-go in-memory collections are also dropped so stale state
+	// does not survive until next process restart.
+	ClearAll(ctx context.Context) error
+	// AggregateStats sums occupancy/hit-rate across all services and
+	// returns a global view. NoopEngine returns zeros; the chromem backend
+	// sums across its in-memory per-service collections.
+	AggregateStats(ctx context.Context) (SemanticStats, error)
+}
+
+// SemanticStats is the aggregate view returned by SemanticEngine.AggregateStats
+// and mapped to the five semantic_* JSON fields of GET /cache/stats (spec A.4).
+type SemanticStats struct {
+	Entries            int
+	OnDiskBytes        int64
+	HitRate24h         float64
+	SimilarReturned24h int
+	Promotions24h      int
+}
+
+// ServiceAIConfigStore is the narrow read/write surface for the
+// service_ai_config table used by PUT /services/{id}/ai-config.
+type ServiceAIConfigStore interface {
+	// GetServiceAIConfigRaw returns the raw JSON blob for the service, and
+	// ok=false (nil error) when no row exists.
+	GetServiceAIConfigRaw(ctx context.Context, serviceID string) (raw []byte, ok bool, err error)
+	// UpsertServiceAIConfig writes (or replaces) the JSON blob for the
+	// service. The config is expected to be valid JSON.
+	UpsertServiceAIConfig(ctx context.Context, serviceID string, config []byte) error
+}
+
+// semanticSettingsJSON is the wire shape of the semantic cache settings block
+// returned in the top-level "semantic" key of GET /api/v1/cache/settings
+// (spec A.4 / spec A.3 defaults).
+type semanticSettingsJSON struct {
+	Enabled         bool    `json:"enabled"`
+	MinSimilarity   float64 `json:"min_similarity"`
+	EmbeddingMode   string  `json:"embedding_mode"`
+	EmbeddingURL    string  `json:"embedding_url"`
+	EmbeddingModel  string  `json:"embedding_model"`
+	FallbackPolicy  string  `json:"fallback_policy"`
+	PromoteOnMiss   bool    `json:"promote_on_miss"`
+	MaxIndexEntries int     `json:"max_index_entries"`
+}
+
+// semanticDefaultSettings are the spec A.3 global defaults for the semantic
+// cache. Returned when no per-service override is configured and also used
+// as the fallback when the stored blob is missing/malformed.
+var semanticDefaultSettings = semanticSettingsJSON{
+	Enabled:         false,
+	MinSimilarity:   0.85,
+	EmbeddingMode:   "local",
+	EmbeddingURL:    "http://localhost:11434/v1/embeddings",
+	EmbeddingModel:  "nomic-embed-text",
+	FallbackPolicy:  "treat_as_miss",
+	PromoteOnMiss:   true,
+	MaxIndexEntries: 10000,
+}
+
+// DeleteSemanticCacheEntries handles DELETE /api/v1/cache/semantic/entries.
+// Admin or ai:configure:any only — gating is enforced by the router via
+// requireAdminOrAIConfigureAny (same guard as DELETE /cache/entries). 204
+// on success. This endpoint clears only the semantic tier; the exact-match
+// tier is unaffected.
+func (d Deps) DeleteSemanticCacheEntries(w http.ResponseWriter, r *http.Request) {
+	if d.SemanticEngine == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := d.SemanticEngine.ClearAll(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "clear semantic cache failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// PutServiceAIConfig handles PUT /api/v1/services/{serviceID}/ai-config.
+//
+// Permission: service owner OR ai:configure:any (admin). The ownership check
+// reuses the CacheServiceLookup.GetServiceOwner surface (same as the per-
+// service cache-clear handler).
+//
+// Validation (spec A.3):
+//   - cache.semantic.min_similarity must be in [0.0, 1.0] inclusive.
+//   - cache.semantic.embedding_mode must be "local" or "none".
+//
+// All other fields in the blob are stored as-is (no schema enforcement).
+// Returns 204 on success.
+func (d Deps) PutServiceAIConfig(w http.ResponseWriter, r *http.Request) {
+	serviceID := chi.URLParam(r, "serviceID")
+	if serviceID == "" {
+		writeErr(w, http.StatusBadRequest, "service id is required")
+		return
+	}
+
+	// Auth: owner OR ai:configure:any (same pattern as DeleteServiceCacheEntries).
+	role, err := d.callerRole(r)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	uid := userID(r.Context())
+
+	if role != "admin" && !authz.Can(role, authz.PermAIConfigureAny) {
+		// Must own the service.
+		if d.CacheServices == nil {
+			writeErr(w, http.StatusInternalServerError, "service lookup unavailable")
+			return
+		}
+		owner, err := d.CacheServices.GetServiceOwner(r.Context(), serviceID)
+		if errors.Is(err, db.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "service not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "service lookup failed")
+			return
+		}
+		if owner != uid {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+	} else if d.CacheServices != nil {
+		// Even :any callers get a clean 404 when the service doesn't exist.
+		if _, err := d.CacheServices.GetServiceOwner(r.Context(), serviceID); errors.Is(err, db.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "service not found")
+			return
+		}
+	}
+
+	// Decode the incoming blob.
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(raw) == 0 {
+		raw = []byte("{}")
+	}
+
+	// Validate JSON structure.
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	// Validate cache.semantic sub-block if present.
+	if cacheRaw, ok := outer["cache"]; ok && len(cacheRaw) > 0 && string(cacheRaw) != "null" {
+		if err := validateServiceAIConfigCacheBlock(cacheRaw); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	if d.ServiceAIConfigs == nil {
+		writeErr(w, http.StatusInternalServerError, "ai config store unavailable")
+		return
+	}
+	if err := d.ServiceAIConfigs.UpsertServiceAIConfig(r.Context(), serviceID, raw); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save ai config failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// validateServiceAIConfigCacheBlock validates the cache sub-object of an
+// ai-config blob. It checks only the semantic sub-block fields that have
+// spec-mandated validation rules (A.3). All other fields pass through.
+func validateServiceAIConfigCacheBlock(cacheRaw json.RawMessage) error {
+	var cacheOuter map[string]json.RawMessage
+	if err := json.Unmarshal(cacheRaw, &cacheOuter); err != nil {
+		return fmt.Errorf("invalid cache block")
+	}
+
+	semRaw, ok := cacheOuter["semantic"]
+	if !ok || len(semRaw) == 0 || string(semRaw) == "null" {
+		return nil
+	}
+
+	var sem struct {
+		MinSimilarity *float64 `json:"min_similarity"`
+		EmbeddingMode *string  `json:"embedding_mode"`
+	}
+	if err := json.Unmarshal(semRaw, &sem); err != nil {
+		return fmt.Errorf("invalid cache.semantic block")
+	}
+
+	if sem.MinSimilarity != nil {
+		v := *sem.MinSimilarity
+		if v < 0.0 || v > 1.0 {
+			return fmt.Errorf("semantic.min_similarity out of range")
+		}
+	}
+
+	if sem.EmbeddingMode != nil {
+		switch *sem.EmbeddingMode {
+		case "local", "none":
+			// valid
+		default:
+			return fmt.Errorf("unknown embedding_mode %q", *sem.EmbeddingMode)
+		}
+	}
+
+	return nil
+}

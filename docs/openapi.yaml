@@ -700,6 +700,29 @@ paths:
                   deleted: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/v1/services/{serviceID}/ai-config:
+    put:
+      tags: [services, cache]
+      summary: Store per-service AI gateway configuration
+      description: >
+        Persists the service-level AI config blob. Validates
+        cache.semantic.min_similarity (must be in [0.0, 1.0]) and
+        cache.semantic.embedding_mode (must be "local" or "none"). All
+        other fields are stored as-is. Permission: service owner OR
+        ai:configure:any (admin).
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Saved. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ────────────────────────────────────────────────────────────────────────
   # Inspector (per-service ring buffer + replay + SSE)
   # ────────────────────────────────────────────────────────────────────────
@@ -843,6 +866,19 @@ paths:
                 type: object
                 properties:
                   deleted: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/cache/semantic/entries:
+    delete:
+      tags: [cache]
+      summary: Purge ALL semantic cache entries (admin / ai:configure:any)
+      description: >
+        Clears the semantic similarity tier only; the exact-match cache is
+        unaffected. In-memory chromem-go collections are also dropped so
+        stale state does not survive until next process restart.
+      responses:
+        '204': { description: Cleared. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 

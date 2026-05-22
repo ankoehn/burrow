@@ -42,3 +42,27 @@ func (x *DB) GetServiceAIConfigRaw(ctx context.Context, serviceID string) (raw [
 	}
 	return []byte(s.String), true, nil
 }
+
+// UpsertServiceAIConfig inserts or replaces the JSON config blob for the
+// given service. The service must already exist in the services table (the
+// foreign key constraint enforces this). The config blob is expected to be
+// valid JSON but is not decoded here — validation lives at the API layer.
+//
+// v0.5.0 Task 4: used by PUT /api/v1/services/{id}/ai-config.
+func (x *DB) UpsertServiceAIConfig(ctx context.Context, serviceID string, config []byte) error {
+	if len(config) == 0 {
+		config = []byte("{}")
+	}
+	_, err := x.sqlDB.ExecContext(ctx,
+		`INSERT INTO service_ai_config(service_id, config, updated_at)
+		 VALUES(?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(service_id) DO UPDATE SET
+		   config     = excluded.config,
+		   updated_at = CURRENT_TIMESTAMP`,
+		serviceID, string(config),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert service ai config: %w", err)
+	}
+	return nil
+}

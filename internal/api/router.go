@@ -176,6 +176,14 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireAdminOrAIConfigureAny).Put("/cache/settings", d.PutCacheSettings)
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/entries", d.DeleteCacheEntries)
 			r.Delete("/services/{serviceID}/cache/entries", d.DeleteServiceCacheEntries)
+			// v0.5.0 Task 4: semantic cache JSON API (spec Part A.4).
+			// DELETE /cache/semantic/entries clears only the semantic tier
+			// (exact-match tier unaffected). Gated by
+			// requireAdminOrAIConfigureAny (admin OR ai:configure:any).
+			// PUT /services/{id}/ai-config stores the per-service AI config
+			// blob, validating cache.semantic.{min_similarity,embedding_mode}.
+			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/semantic/entries", d.DeleteSemanticCacheEntries)
+			r.Put("/services/{serviceID}/ai-config", d.PutServiceAIConfig)
 			// v0.4.0 Task 5: redaction rules + settings + preview JSON API.
 			// GET endpoints are session-authed (any user may read); mutations
 			// (POST/PUT/DELETE rules, PUT settings, POST preview) are gated

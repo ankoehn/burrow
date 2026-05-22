@@ -61,11 +61,13 @@ type CacheServiceConfigRow struct {
 const cacheSettingsKey = "cache.settings"
 
 // cacheSettingsResp is the JSON shape of GET /api/v1/cache/settings (spec
-// Part B.3). global is the typed cache.Settings JSON; per_service is one
-// row per service that has a stored AI-config blob, with the override flag
-// set when the per-service cache block is non-empty.
+// Part B.3 + v0.5.0 spec A.4). global is the typed cache.Settings JSON;
+// semantic is the top-level semantic defaults block (spec A.4);
+// per_service is one row per service that has a stored AI-config blob,
+// with the override flag set when the per-service cache block is non-empty.
 type cacheSettingsResp struct {
 	Global     cacheSettingsJSON         `json:"global"`
+	Semantic   semanticSettingsJSON      `json:"semantic"`
 	PerService []cachePerServiceSettings `json:"per_service"`
 }
 
@@ -94,10 +96,18 @@ type cachePerServiceSettings struct {
 }
 
 // cacheStatsResp is the JSON shape of GET /api/v1/cache/stats.
+// The five semantic_* fields are added by v0.5.0 (spec A.4).
 type cacheStatsResp struct {
+	// Exact-cache fields (v0.4.0).
 	Entries     int     `json:"entries"`
 	OnDiskBytes int64   `json:"on_disk_bytes"`
 	HitRate24h  float64 `json:"hit_rate_24h"`
+	// Semantic-cache fields (v0.5.0, spec A.4).
+	SemanticEntries            int     `json:"semantic_entries"`
+	SemanticDiskBytes          int64   `json:"semantic_disk_bytes"`
+	SemanticHitRate24h         float64 `json:"semantic_hit_rate_24h"`
+	SemanticSimilarReturned24h int     `json:"semantic_similar_returned_24h"`
+	SemanticPromotions24h      int     `json:"semantic_promotions_24h"`
 }
 
 // settingsFromJSON converts the wire JSON blob (or an empty/nil row) into the
@@ -125,13 +135,15 @@ func toCacheSettingsJSON(s exact.Settings) cacheSettingsJSON {
 }
 
 // GetCacheSettings handles GET /api/v1/cache/settings.
-// Any session-authed user may read settings (spec Part B.3); the response
-// shape is {global: {...}, per_service: [...]}. Per-service rows are derived
-// from service_ai_config.config[.cache] for every service that has an AI
-// config row (Task 24 will write these; for v0.4.0 task 4 the list may be
-// empty, which is correct).
+// Any session-authed user may read settings (spec Part B.3 + v0.5.0 spec
+// A.4); the response shape is {global: {...}, semantic: {...},
+// per_service: [...]}. The semantic block carries global defaults only
+// (per-service semantic overrides are not yet exposed in v0.5.0).
+// Per-service rows are derived from service_ai_config.config[.cache] for
+// every service that has an AI config row.
 func (d Deps) GetCacheSettings(w http.ResponseWriter, r *http.Request) {
 	resp := cacheSettingsResp{
+		Semantic:   semanticDefaultSettings, // spec A.3 defaults; always populated
 		PerService: []cachePerServiceSettings{},
 	}
 
@@ -238,22 +250,36 @@ func (d Deps) PutCacheSettings(w http.ResponseWriter, r *http.Request) {
 // Session-authed (any user may see aggregate stats). hit_rate_24h is derived
 // from in-process atomic counters in the engine — they reset on process
 // restart (documented limitation; the field name is preserved for wire
-// stability).
+// stability). The five semantic_* fields (spec A.4) are sourced from
+// SemanticEngine.AggregateStats; a nil engine returns zeros (no 500).
 func (d Deps) GetCacheStats(w http.ResponseWriter, r *http.Request) {
-	if d.CacheEngine == nil {
-		writeJSON(w, http.StatusOK, cacheStatsResp{})
-		return
+	var resp cacheStatsResp
+
+	if d.CacheEngine != nil {
+		entries, bytes, rate, err := d.CacheEngine.Stats(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cache stats failed")
+			return
+		}
+		resp.Entries = entries
+		resp.OnDiskBytes = bytes
+		resp.HitRate24h = rate
 	}
-	entries, bytes, rate, err := d.CacheEngine.Stats(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "cache stats failed")
-		return
+
+	if d.SemanticEngine != nil {
+		ss, err := d.SemanticEngine.AggregateStats(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "semantic cache stats failed")
+			return
+		}
+		resp.SemanticEntries = ss.Entries
+		resp.SemanticDiskBytes = ss.OnDiskBytes
+		resp.SemanticHitRate24h = ss.HitRate24h
+		resp.SemanticSimilarReturned24h = ss.SimilarReturned24h
+		resp.SemanticPromotions24h = ss.Promotions24h
 	}
-	writeJSON(w, http.StatusOK, cacheStatsResp{
-		Entries:     entries,
-		OnDiskBytes: bytes,
-		HitRate24h:  rate,
-	})
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DeleteCacheEntries handles DELETE /api/v1/cache/entries (clear all).
