@@ -1898,6 +1898,84 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ────────────────────────────────────────────────────────────────────────
+  # Upstream credentials (spec Part B.2, v0.5.0 Task 5)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/upstream-credentials/slots:
+    get:
+      tags: [services]
+      summary: List available vault slot handles (admin or ai:configure:any)
+      responses:
+        '200':
+          description: Sorted list of slot handles registered in the env vault.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/services/{serviceID}/upstream-credential:
+    get:
+      tags: [services]
+      summary: Read the upstream-credential binding for a service
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Binding (when bound) or {slot_present:false} (when unbound).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [services]
+      summary: Bind an upstream credential slot to a service
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot]
+              properties:
+                slot: { type: string }
+                header_name: { type: string }
+                header_format: { type: string }
+      responses:
+        '204': { description: Bound. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [services]
+      summary: Unbind the upstream credential from a service
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Unbound (also returned when no binding existed). }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
   # Events (SSE)
   # ────────────────────────────────────────────────────────────────────────
   /api/v1/events:

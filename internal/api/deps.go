@@ -403,6 +403,22 @@ type Deps struct {
 	// via GetServiceAIConfigRaw + UpsertServiceAIConfig. Nil disables the
 	// PUT route (handler returns 500 "ai config store unavailable").
 	ServiceAIConfigs ServiceAIConfigStore
+
+	// v0.5.0 Task 5: upstream-credential injection (spec Part B.2).
+	// CredentialVault is the env-only vault scanned once at startup. When nil
+	// the GET /upstream-credentials/slots route returns []; PUT binding always
+	// returns 400 "unknown slot" (every slot is unknown when there is no vault).
+	CredentialVault CredentialVaultIface
+	// CredentialDB is the CRUD surface for the service_upstream_credentials
+	// table. *db.DB satisfies it. Nil degrades gracefully: GET returns
+	// {slot_present:false}; PUT/DELETE return 204 (no-op).
+	CredentialDB CredentialStore
+	// CredentialServices is the service-ownership lookup used by the :own
+	// permission gate for the per-service credential routes. Falls back to
+	// IPGeoServices when nil (both point to *db.DB in production).
+	CredentialServices ServiceOwnerLookup
+	// NOTE: audit events for bind/unbind use the existing Deps.AuditAppender
+	// field (same *audit.Logger adapter used by backup_handlers.go).
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

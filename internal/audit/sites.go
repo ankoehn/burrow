@@ -251,3 +251,30 @@ func LogGuardrailRefused(ctx context.Context, l *Logger, c LogContext, serviceID
 		SourceIP: c.SourceIP, UserAgent: c.UserAgent, RequestID: c.RequestID,
 	})
 }
+
+// LogServiceUpstreamCredentialBind logs ActionServiceUpstreamCredentialBind.
+// Payload carries {slot} only — the credential value is never logged.
+func LogServiceUpstreamCredentialBind(ctx context.Context, l *Logger, c LogContext, serviceID, slot string) {
+	if l == nil {
+		return
+	}
+	_ = l.Append(ctx, Event{
+		ActorID: c.ActorID, ActorEmail: c.ActorEmail, Action: ActionServiceUpstreamCredentialBind,
+		SubjectID: serviceID, SubjectLabel: serviceID, Result: "ok",
+		SourceIP: c.SourceIP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+		Payload: mustJSON(map[string]string{"slot": slot}),
+	})
+}
+
+// LogServiceUpstreamCredentialUnbind logs ActionServiceUpstreamCredentialUnbind.
+func LogServiceUpstreamCredentialUnbind(ctx context.Context, l *Logger, c LogContext, serviceID, slot string) {
+	if l == nil {
+		return
+	}
+	_ = l.Append(ctx, Event{
+		ActorID: c.ActorID, ActorEmail: c.ActorEmail, Action: ActionServiceUpstreamCredentialUnbind,
+		SubjectID: serviceID, SubjectLabel: serviceID, Result: "ok",
+		SourceIP: c.SourceIP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+		Payload: mustJSON(map[string]string{"slot": slot}),
+	})
+}

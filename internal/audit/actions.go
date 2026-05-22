@@ -83,6 +83,10 @@ const (
 	ActionAutomationTokenRevoke = "automation.token.revoke"
 
 	ActionMCPToolCall = "mcp.tool.call"
+
+	// v0.5.0 Task 5: upstream-credential binding / unbinding.
+	ActionServiceUpstreamCredentialBind   = "service.upstream_credential.bind"
+	ActionServiceUpstreamCredentialUnbind = "service.upstream_credential.unbind"
 )
 
 // AllActions is the closed set of every audit action Burrow defines, in a
@@ -111,6 +115,7 @@ var AllActions = []string{
 	ActionWebAuthnLoginSuccess, ActionWebAuthnLoginFailure,
 	ActionAutomationTokenMint, ActionAutomationTokenRevoke,
 	ActionMCPToolCall,
+	ActionServiceUpstreamCredentialBind, ActionServiceUpstreamCredentialUnbind,
 }
 
 // aggregatedActions is the set of actions that are sample-rated at 1/hour

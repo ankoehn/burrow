@@ -189,6 +189,10 @@ func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
 			TokenID: "atk_stub",
 			Server:  stub,
 		},
+		// v0.5.0 surfaces.
+		CredentialVault:    &stubCredVaultForOpenAPI{},
+		CredentialDB:       stub,
+		CredentialServices: stub,
 	}
 	r := NewRouter(deps)
 	mux, ok := r.(chi.Router)
@@ -744,6 +748,28 @@ func (*fullDepsStub) WriteText(http.ResponseWriter) error {
 // MCPToolsLister.
 func (*fullDepsStub) Tools() []mcpserv.ToolDescriptor {
 	stubPanic("Tools")
+	return nil
+}
+
+// stubCredVaultForOpenAPI satisfies CredentialVaultIface for the full-deps
+// route-enumeration walk. chi.Walk does not invoke handlers, so these methods
+// are never called; they satisfy the interface type-check only.
+type stubCredVaultForOpenAPI struct{}
+
+func (*stubCredVaultForOpenAPI) Get(string) (string, bool) { return "", false }
+func (*stubCredVaultForOpenAPI) Slots() []string            { return nil }
+
+// CredentialStore (v0.5.0 Task 5).
+func (*fullDepsStub) GetUpstreamCredential(context.Context, string) (db.ServiceUpstreamCredential, error) {
+	stubPanic("CredentialStore.GetUpstreamCredential")
+	return db.ServiceUpstreamCredential{}, nil
+}
+func (*fullDepsStub) UpsertUpstreamCredential(context.Context, db.ServiceUpstreamCredential) error {
+	stubPanic("CredentialStore.UpsertUpstreamCredential")
+	return nil
+}
+func (*fullDepsStub) DeleteUpstreamCredential(context.Context, string) error {
+	stubPanic("CredentialStore.DeleteUpstreamCredential")
 	return nil
 }
 

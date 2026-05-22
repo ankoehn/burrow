@@ -184,6 +184,15 @@ func NewRouter(d Deps) http.Handler {
 			// blob, validating cache.semantic.{min_similarity,embedding_mode}.
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/semantic/entries", d.DeleteSemanticCacheEntries)
 			r.Put("/services/{serviceID}/ai-config", d.PutServiceAIConfig)
+			// v0.5.0 Task 5: upstream-credential injection (spec Part B.2).
+			// GET slots is gated by admin OR ai:configure:any (global resource).
+			// Per-service GET/PUT/DELETE gate on admin OR ai:configure:any OR
+			// (owner AND ai:configure:own) — enforced inside the handlers via
+			// ensureCredentialAccess.
+			r.With(d.requireSlotsRead).Get("/upstream-credentials/slots", d.GetUpstreamCredentialSlots)
+			r.Get("/services/{serviceID}/upstream-credential", d.GetServiceUpstreamCredential)
+			r.Put("/services/{serviceID}/upstream-credential", d.PutServiceUpstreamCredential)
+			r.Delete("/services/{serviceID}/upstream-credential", d.DeleteServiceUpstreamCredential)
 			// v0.4.0 Task 5: redaction rules + settings + preview JSON API.
 			// GET endpoints are session-authed (any user may read); mutations
 			// (POST/PUT/DELETE rules, PUT settings, POST preview) are gated
