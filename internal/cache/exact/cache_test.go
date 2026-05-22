@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -370,5 +371,103 @@ func TestStats(t *testing.T) {
 	}
 	if rate < 0.49 || rate > 0.51 {
 		t.Fatalf("rate=%f want ~0.5", rate)
+	}
+}
+
+// TestOnMissHookFiredAfterStore verifies that the OnMiss callback is invoked
+// with the correct key and body after a successful Store. Uses an atomic
+// counter to assert the goroutine fires without data races.
+func TestOnMissHookFiredAfterStore(t *testing.T) {
+	ctx := context.Background()
+	c := testCache(t)
+
+	var called atomic.Int32
+	var gotKey string
+	var gotBody []byte
+
+	c.SetOnMiss(func(_ context.Context, key string, body []byte) {
+		gotKey = key
+		gotBody = body
+		called.Add(1)
+	})
+
+	key := "global:onmiss"
+	body := []byte(`{"result":"42"}`)
+	if err := c.Store(ctx, key, Entry{
+		Body:       body,
+		Status:     200,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		CreatedAt:  time.Now().UTC(),
+		TTLSeconds: 3600,
+	}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	// The callback fires in a goroutine — poll for up to 500 ms.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if called.Load() > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if called.Load() == 0 {
+		t.Fatal("OnMiss callback was not called after Store")
+	}
+	if gotKey != key {
+		t.Errorf("OnMiss key: got %q want %q", gotKey, key)
+	}
+	if string(gotBody) != string(body) {
+		t.Errorf("OnMiss body: got %q want %q", gotBody, body)
+	}
+}
+
+// TestOnMissNilSafe asserts that a nil OnMiss callback (default) does not
+// panic on Store — the hook must be nil-safe.
+func TestOnMissNilSafe(t *testing.T) {
+	ctx := context.Background()
+	c := testCache(t)
+	// No SetOnMiss call — callback is nil by default.
+
+	if err := c.Store(ctx, "global:nilsafe", Entry{
+		Body:       []byte(`{"x":1}`),
+		Status:     200,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		CreatedAt:  time.Now().UTC(),
+		TTLSeconds: 3600,
+	}); err != nil {
+		t.Fatalf("Store with nil OnMiss: %v", err)
+	}
+	// No panic = pass. Give any goroutine a moment to not-fire.
+	time.Sleep(20 * time.Millisecond)
+}
+
+// TestSetOnMissClearCallback asserts that SetOnMiss(nil) disables the hook
+// after it was previously set.
+func TestSetOnMissClearCallback(t *testing.T) {
+	ctx := context.Background()
+	c := testCache(t)
+
+	var called atomic.Int32
+	c.SetOnMiss(func(_ context.Context, _ string, _ []byte) {
+		called.Add(1)
+	})
+	// Immediately clear the hook.
+	c.SetOnMiss(nil)
+
+	if err := c.Store(ctx, "global:cleared", Entry{
+		Body:       []byte(`{"x":2}`),
+		Status:     200,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		CreatedAt:  time.Now().UTC(),
+		TTLSeconds: 3600,
+	}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if called.Load() != 0 {
+		t.Errorf("OnMiss fired after being cleared: called %d times", called.Load())
 	}
 }

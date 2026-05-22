@@ -100,6 +100,12 @@ type Cache struct {
 	// evictMu prevents two overlapping eviction goroutines (one running
 	// trims, the other queued no-op).
 	evictMu sync.Mutex
+
+	// onMissMu guards onMissFn. Using a mutex (rather than atomic.Value) so
+	// the function value is safely swappable without the nil-function type
+	// assertion gymnastics that atomic.Value requires.
+	onMissMu sync.RWMutex
+	onMissFn func(ctx context.Context, key string, body []byte)
 }
 
 // New constructs a Cache over an open, migrated *db.DB. The logger is used
@@ -125,6 +131,25 @@ func (c *Cache) SetMaxEntries(n int) {
 		n = 0
 	}
 	c.maxEntries.Store(int64(n))
+}
+
+// SetOnMiss registers a callback that is invoked AFTER a successful Store
+// completes — i.e. the proxy hot path has just inserted a new exact-cache row
+// for a previously-missed key. The semantic tier (Task 16) wires this to its
+// Promote() call so the new row is indexed for vector search.
+//
+// The callback runs in a detached goroutine (context.Background()) so that
+// caller-context cancellation (e.g. the visitor's stream closing) cannot kill
+// the promote step. Nil is safe: passing nil disables the hook.
+//
+// Calling SetOnMiss concurrently with Store is safe.
+func (c *Cache) SetOnMiss(fn func(ctx context.Context, key string, body []byte)) {
+	if c == nil {
+		return
+	}
+	c.onMissMu.Lock()
+	c.onMissFn = fn
+	c.onMissMu.Unlock()
 }
 
 // Lookup checks for a cached entry under the given fully-prefixed key. On
@@ -250,6 +275,19 @@ func (c *Cache) Store(ctx context.Context, key string, e Entry) error {
 	if err != nil {
 		return fmt.Errorf("cache store: %w", err)
 	}
+
+	// Fire the OnMiss callback in a detached goroutine so the semantic tier
+	// can index the new entry without blocking the caller (proxy hot path).
+	// Uses context.Background() so the callback outlives the caller's request.
+	c.onMissMu.RLock()
+	cb := c.onMissFn
+	c.onMissMu.RUnlock()
+	if cb != nil {
+		bodyCopy := make([]byte, len(e.Body))
+		copy(bodyCopy, e.Body)
+		go cb(context.Background(), key, bodyCopy)
+	}
+
 	// Trigger LRU eviction when the configured cap is non-zero. Eviction
 	// itself is async (EvictIfOverflow spawns a goroutine), so this never
 	// blocks the caller path.
