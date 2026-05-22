@@ -859,4 +859,42 @@ export const handlers = [
     }
     return noContent();
   }),
+
+  // ---- v0.5.0 upstream credentials (spec Part B) ----
+  http.get("/api/v1/upstream-credentials/slots", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return json({ slots: db.upstreamSlots });
+  }),
+  http.get("/api/v1/services/:id/upstream-credential", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const binding = db.upstreamBindings[String(params.id)];
+    if (!binding) return json({ slot_present: false });
+    return json({
+      ...binding,
+      slot_present: !db.absentSlots.has(binding.slot),
+    });
+  }),
+  http.put("/api/v1/services/:id/upstream-credential", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const b = await body<{ slot?: string; header_name?: string; header_format?: string }>(request);
+    if (!b?.slot) return err(400, "slot is required");
+    if (!db.upstreamSlots.includes(b.slot)) return err(400, "unknown slot");
+    const fmt = b.header_format ?? "Bearer {key}";
+    if (!fmt.includes("{key}")) return err(400, "invalid header_format");
+    db.upstreamBindings[String(params.id)] = {
+      service_id: String(params.id),
+      slot: b.slot,
+      header_name: b.header_name ?? "Authorization",
+      header_format: fmt,
+      slot_present: !db.absentSlots.has(b.slot),
+    };
+    return noContent();
+  }),
+  http.delete("/api/v1/services/:id/upstream-credential", ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    delete db.upstreamBindings[String(params.id)];
+    return noContent();
+  }),
 ];

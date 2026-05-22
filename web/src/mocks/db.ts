@@ -5,7 +5,7 @@ import type {
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
-  ModelAliasV5,
+  ModelAliasV5, UpstreamCredentialBinding,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -67,6 +67,10 @@ export interface MockDb {
   provisioningPending: ProvisioningPending[];
   automationTokens: AutomationToken[];
   backups: BackupRow[];
+  // v0.5.0 upstream credentials (spec Part B).
+  upstreamSlots: string[];
+  absentSlots: Set<string>;
+  upstreamBindings: Record<string, UpstreamCredentialBinding>;
 }
 
 function seed(): MockDb {
@@ -223,6 +227,19 @@ function seed(): MockDb {
     backups: [
       { id: "bk_20260515", taken_at: "2026-05-15T03:00:00Z", version: "v0.3.0", size_bytes: 5 * 1024 * 1024, db_sha256: "deadbeef1234567890abcdef1234567890abcdef1234567890abcdef1234beef", path: "/var/burrow/backups/bk_20260515.tar.gz" },
     ],
+    // v0.5.0 upstream credentials (spec Part B).
+    // Slots sorted alphabetically; ANTHROPIC_TEAM_A is "absent" by default in tests that need it.
+    upstreamSlots: ["ANTHROPIC_TEAM_A", "OPENAI"],
+    absentSlots: new Set<string>(),
+    upstreamBindings: {
+      svc_ai001: {
+        service_id: "svc_ai001",
+        slot: "OPENAI",
+        header_name: "Authorization",
+        header_format: "Bearer {key}",
+        slot_present: true,
+      },
+    },
   };
 }
 
