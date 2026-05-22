@@ -74,6 +74,17 @@ func (d *fakeDialer) Lookup(_ context.Context, subdomain string) (*proxy.Resolve
 	return res, nil
 }
 
+func (d *fakeDialer) LookupByServiceID(_ context.Context, serviceID string) (*proxy.Resolved, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, res := range d.tunnels {
+		if res.ServiceID == serviceID {
+			return res, nil
+		}
+	}
+	return nil, proxy.ErrNotFound
+}
+
 func (d *fakeDialer) DialTunnelStream(_ context.Context, subdomain string) (net.Conn, error) {
 	d.mu.Lock()
 	_, ok := d.tunnels[subdomain]
@@ -95,13 +106,38 @@ func (d *fakeDialer) DialTunnelStream(_ context.Context, subdomain string) (net.
 	return proxyConn, nil
 }
 
+func (d *fakeDialer) DialTunnelStreamByServiceID(_ context.Context, serviceID string) (net.Conn, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Find a subdomain with matching serviceID and delegate to the normal pipe path.
+	for sub, res := range d.tunnels {
+		if res.ServiceID == serviceID {
+			_ = sub // found it; use the upstream handler
+			proxyConn, serverConn := net.Pipe()
+			go func() {
+				srv := &http.Server{Handler: d.upstream}
+				ln := &singleConnListener{conn: serverConn}
+				_ = srv.Serve(ln)
+			}()
+			return proxyConn, nil
+		}
+	}
+	return nil, proxy.ErrNotFound
+}
+
 // deadDialer is a StreamDialer that always returns ErrNotFound.
 type deadDialer struct{}
 
 func (deadDialer) Lookup(_ context.Context, _ string) (*proxy.Resolved, error) {
 	return nil, proxy.ErrNotFound
 }
+func (deadDialer) LookupByServiceID(_ context.Context, _ string) (*proxy.Resolved, error) {
+	return nil, proxy.ErrNotFound
+}
 func (deadDialer) DialTunnelStream(_ context.Context, _ string) (net.Conn, error) {
+	return nil, proxy.ErrNotFound
+}
+func (deadDialer) DialTunnelStreamByServiceID(_ context.Context, _ string) (net.Conn, error) {
 	return nil, proxy.ErrNotFound
 }
 

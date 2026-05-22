@@ -78,6 +78,13 @@ type Proxy struct {
 	// requires + verifies the client cert, and the standard library uses
 	// the listener's own certificates for the server side.
 	tlsBase *tls.Config
+
+	// v0.5.0 Task 7: custom-domain host routing. When non-nil, ServeHTTP
+	// falls back to this lookup when the incoming Host header does not match
+	// the subdomain pattern. The function returns the serviceID whose backend
+	// should receive the request, or ok=false when no custom domain matches.
+	// cmd/server wiring is deferred to Task 17.
+	customDomainLookup func(ctx context.Context, host string) (serviceID string, ok bool, err error)
 }
 
 // New constructs a Proxy.
@@ -125,6 +132,16 @@ func WithTrustedProxies(cidrs []*net.IPNet) Option {
 // upstream. When empty (the default) the header is omitted.
 func WithIngressPort(port string) Option {
 	return func(p *Proxy) { p.ingressPort = port }
+}
+
+// WithCustomDomainLookup registers the v0.5.0 custom-domain routing hook.
+// When non-nil, ServeHTTP falls back to fn when the Host header does not match
+// the subdomain pattern (i.e. the host doesn't end with ".<authDomain>").
+// fn(ctx, host) returns the serviceID that owns the custom domain, or ok=false
+// when no mapping exists. Callers that do not use custom domains (v0.4.0 and
+// earlier) should leave this nil — existing ServeHTTP behaviour is unchanged.
+func WithCustomDomainLookup(fn func(ctx context.Context, host string) (serviceID string, ok bool, err error)) Option {
+	return func(p *Proxy) { p.customDomainLookup = fn }
 }
 
 // WithAIChain registers the v0.4.0 middleware chain. When set, the proxy
@@ -182,6 +199,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Expect <label>.<authDomain>.
 	suffix := "." + p.authDomain
 	if !strings.HasSuffix(host, suffix) {
+		// v0.5.0 Task 7: custom-domain fallback. If a CustomDomainLookup is
+		// registered, check whether this host is a bound custom domain.
+		if p.customDomainLookup != nil {
+			ctx := r.Context()
+			serviceID, ok, err := p.customDomainLookup(ctx, host)
+			if err != nil {
+				p.log.Warn("proxy custom domain lookup error", "host", host, "err", err)
+				http.Error(w, "upstream unavailable", http.StatusBadGateway)
+				return
+			}
+			if ok {
+				p.serveCustomDomain(w, r, host, serviceID)
+				return
+			}
+		}
 		p.notFound(w)
 		return
 	}
@@ -205,6 +237,107 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
+
+	p.serveResolved(w, r, res, label, suffix)
+}
+
+// serveCustomDomain handles a request whose Host matches a registered custom
+// domain (v0.5.0 Task 7). It looks up the service by serviceID, runs the
+// access checker, and proxies to the tunnel upstream — identical to the
+// subdomain path but using the service-ID-based dialer methods.
+func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, serviceID string) {
+	ctx := r.Context()
+
+	res, err := p.dialer.LookupByServiceID(ctx, serviceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			p.notFound(w)
+			return
+		}
+		p.log.Warn("proxy custom domain upstream lookup error", "host", host, "service_id", serviceID, "err", err)
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		return
+	}
+
+	// Step 2: enforce access mode BEFORE opening a stream.
+	ok, status, body, hdr := p.checker.Allow(ctx, res, r)
+	if !ok {
+		for k, vs := range hdr {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		}
+		w.WriteHeader(status)
+		_, _ = fmt.Fprint(w, body)
+		return
+	}
+
+	upstreamHost := res.LocalHost
+	if upstreamHost == "" {
+		upstreamHost = host
+	}
+
+	resolvedClientIP := clientip.Resolve(
+		r.RemoteAddr,
+		r.Header.Get("X-Forwarded-For"),
+		r.Header.Get("X-Real-IP"),
+		p.trustedProxies,
+	)
+
+	ingressPort := p.ingressPort
+	capturedServiceID := serviceID
+
+	rp := &httputil.ReverseProxy{
+		FlushInterval: -1,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.Header.Del("X-Forwarded-Port")
+			pr.Out.Header.Set("X-Forwarded-For", resolvedClientIP)
+			pr.Out.Header.Set("X-Forwarded-Proto", "https")
+			pr.Out.Header.Set("X-Forwarded-Host", host)
+			if ingressPort != "" {
+				pr.Out.Header.Set("X-Forwarded-Port", ingressPort)
+			}
+			pr.Out.URL = &url.URL{
+				Scheme:   "http",
+				Host:     upstreamHost,
+				Path:     pr.In.URL.Path,
+				RawQuery: pr.In.URL.RawQuery,
+			}
+			pr.Out.Host = upstreamHost
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return p.dialer.DialTunnelStreamByServiceID(ctx, capturedServiceID)
+			},
+			DisableCompression: true,
+			ForceAttemptHTTP2:  false,
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			p.log.Warn("proxy custom domain upstream error", "host", host, "err", err)
+			if errors.Is(err, ErrNotFound) {
+				p.notFound(w)
+				return
+			}
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		},
+	}
+
+	p.log.Debug("proxy custom domain request", "host", host, "service_id", serviceID, "method", r.Method, "path", r.URL.Path)
+
+	if p.aiChain != nil {
+		p.aiChain.Dispatch(w, r, res.ServiceID, res.LocalHost, res.APIKeyHeader, rp)
+		return
+	}
+	rp.ServeHTTP(w, r)
+}
+
+// serveResolved handles a request after subdomain-based dialer.Lookup has
+// succeeded. Shared between the normal subdomain path and future extensions.
+func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resolved, label, suffix string) {
+	ctx := r.Context()
 
 	// Step 2: enforce access mode BEFORE opening a stream.
 	ok, status, body, hdr := p.checker.Allow(ctx, res, r)

@@ -413,3 +413,18 @@ func (s *Server) HTTPTunnels() []*Tunnel {
 	}
 	return out
 }
+
+// LookupHTTPTunnelByServiceID finds the live http tunnel with the given
+// serviceID. Returns (nil, false) when not found. Used by the custom-domain
+// routing path (v0.5.0 Task 7) where the request Host is not a subdomain of
+// authDomain.
+func (s *Server) LookupHTTPTunnelByServiceID(serviceID string) (*Tunnel, bool) {
+	for _, cs := range s.reg.Sessions() {
+		for _, tn := range s.reg.snapshotTunnels(cs) {
+			if tn.IsHTTP && tn.ServiceID == serviceID {
+				return tn, true
+			}
+		}
+	}
+	return nil, false
+}

@@ -107,6 +107,7 @@ type subdomainStore interface {
 // a fake, and to avoid a direct import cycle.
 type tunnelStreamOpener interface {
 	LookupHTTPTunnel(sub string) (*server.Tunnel, bool)
+	LookupHTTPTunnelByServiceID(serviceID string) (*server.Tunnel, bool)
 	OpenTunnelStream(ctx context.Context, tn *server.Tunnel) (net.Conn, error)
 }
 
@@ -158,6 +159,48 @@ func (a proxyDialerAdapter) DialTunnelStream(ctx context.Context, sub string) (n
 	conn, err := a.srv.OpenTunnelStream(ctx, tn)
 	if err != nil {
 		return nil, fmt.Errorf("proxy dial stream: %w", err)
+	}
+	return conn, nil
+}
+
+// LookupByServiceID implements proxy.StreamDialer.LookupByServiceID.
+// Used by the custom-domain routing path (v0.5.0 Task 7) where the request
+// Host is not a subdomain of authDomain.
+func (a proxyDialerAdapter) LookupByServiceID(ctx context.Context, serviceID string) (*proxy.Resolved, error) {
+	tn, ok := a.srv.LookupHTTPTunnelByServiceID(serviceID)
+	if !ok {
+		return nil, proxy.ErrNotFound
+	}
+	// We need the service row for access mode / api-key header. Use a fresh DB
+	// lookup by service ID (tolerate a miss — the tunnel may be gone).
+	svc, err := a.st.ServiceForSubdomain(ctx, tn.Subdomain)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, proxy.ErrNotFound
+		}
+		return nil, fmt.Errorf("proxy lookup by service id: service for subdomain: %w", err)
+	}
+	r := &proxy.Resolved{
+		ServiceID:    svc.ID,
+		AccessMode:   svc.AccessMode,
+		APIKeyHeader: svc.APIKeyHeader,
+		LocalHost:    tn.LocalAddr,
+	}
+	if svc.MTLSCAPEM != "" {
+		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
+	}
+	return r, nil
+}
+
+// DialTunnelStreamByServiceID implements proxy.StreamDialer.DialTunnelStreamByServiceID.
+func (a proxyDialerAdapter) DialTunnelStreamByServiceID(ctx context.Context, serviceID string) (net.Conn, error) {
+	tn, ok := a.srv.LookupHTTPTunnelByServiceID(serviceID)
+	if !ok {
+		return nil, proxy.ErrNotFound
+	}
+	conn, err := a.srv.OpenTunnelStream(ctx, tn)
+	if err != nil {
+		return nil, fmt.Errorf("proxy dial stream by service id: %w", err)
 	}
 	return conn, nil
 }

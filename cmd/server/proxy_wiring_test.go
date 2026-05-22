@@ -188,6 +188,10 @@ func (f *fakeHTTPTunnelLookup) LookupHTTPTunnel(_ string) (*server.Tunnel, bool)
 	return f.tn, f.ok
 }
 
+func (f *fakeHTTPTunnelLookup) LookupHTTPTunnelByServiceID(_ string) (*server.Tunnel, bool) {
+	return f.tn, f.ok
+}
+
 func (f *fakeHTTPTunnelLookup) OpenTunnelStream(_ context.Context, _ *server.Tunnel) (net.Conn, error) {
 	// Not used in Lookup tests; DialTunnelStream is tested separately.
 	return nil, errors.New("not implemented in fake")

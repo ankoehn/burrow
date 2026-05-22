@@ -72,10 +72,22 @@ type StreamDialer interface {
 	// Returns ErrNotFound when no live HTTP tunnel with that subdomain exists.
 	Lookup(ctx context.Context, subdomain string) (*Resolved, error)
 
+	// LookupByServiceID returns the service metadata for the given serviceID.
+	// Returns ErrNotFound when no live HTTP tunnel with that service ID exists.
+	// Used by the custom-domain routing path (v0.5.0 Task 7) where the Host
+	// header is not a subdomain of authDomain.
+	LookupByServiceID(ctx context.Context, serviceID string) (*Resolved, error)
+
 	// DialTunnelStream opens a new yamux stream for an individual HTTP
 	// request to the tunnel identified by subdomain.
 	// Returns ErrNotFound if the tunnel has gone away since Lookup.
 	// The returned net.Conn is the stream; the caller is responsible for
 	// closing it after the request completes.
 	DialTunnelStream(ctx context.Context, subdomain string) (net.Conn, error)
+
+	// DialTunnelStreamByServiceID opens a new yamux stream for an individual
+	// HTTP request to the tunnel identified by serviceID. Used by the
+	// custom-domain routing path. Returns ErrNotFound if the tunnel has gone
+	// away since LookupByServiceID.
+	DialTunnelStreamByServiceID(ctx context.Context, serviceID string) (net.Conn, error)
 }
