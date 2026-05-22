@@ -39,9 +39,9 @@ type serviceCollection struct {
 	coll *chromem.Collection
 
 	// In-process best-effort counters (reset on restart).
-	hits       atomic.Int64
-	lookups    atomic.Int64
-	promoted   atomic.Int64
+	hits     atomic.Int64
+	lookups  atomic.Int64
+	promoted atomic.Int64
 }
 
 // New constructs the chromem-backed Cache when the semantic_cache build tag

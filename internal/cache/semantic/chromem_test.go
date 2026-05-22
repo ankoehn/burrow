@@ -15,26 +15,6 @@ import (
 	"github.com/ankoehn/burrow/internal/db"
 )
 
-// seedParents inserts the user+service rows required by the semantic_index FK
-// constraints. The serviceID is used as both the DB row's id column and the
-// service identifier passed to the Cache methods.
-func seedParents(t *testing.T, sqlDB interface {
-	ExecContext(ctx context.Context, query string, args ...any) (interface{ LastInsertId() (int64, error) }, error)
-}, d *db.DB, ctx context.Context, serviceID string) {
-	t.Helper()
-	rawDB := d.DB()
-	if _, err := rawDB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO users(id,email,password_hash,role) VALUES('u1','test@test.invalid','h','user')`); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	if _, err := rawDB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO services(id,user_id,name,type,subdomain,access_mode,api_key_header)
-		   VALUES(?,  'u1', ?, 'http', ?, 'open', 'Authorization')`,
-		serviceID, serviceID, serviceID); err != nil {
-		t.Fatalf("seed service %s: %v", serviceID, err)
-	}
-}
-
 // testSemanticCache opens a fresh SQLite DB, applies all migrations (so the
 // semantic_index table from 0011 exists), seeds the required FK parent rows,
 // and returns the wired Cache engine.
