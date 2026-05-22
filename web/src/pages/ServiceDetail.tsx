@@ -6,6 +6,7 @@ import { Badge, ErrorNotice, SkeletonRows, Tabs } from "@/components/ds";
 import { AccessModePanel } from "@/components/AccessModePanel";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { UpstreamCredentialsPanel } from "@/pages/UpstreamCredentials";
+import { CustomDomainsPanel } from "@/pages/CustomDomains";
 import type { ServiceDetail as ServiceDetailType, AccessMode } from "@/lib/contract";
 
 const ACCESS_LABEL: Record<AccessMode, string> = {
@@ -107,6 +108,11 @@ export default function ServiceDetail() {
                 serviceName={svc.name}
               />
             ),
+          },
+          {
+            value: "domains",
+            label: "Custom domains",
+            content: <CustomDomainsPanel serviceId={svc.id} />,
           },
         ]}
       />

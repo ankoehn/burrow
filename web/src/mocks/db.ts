@@ -5,7 +5,7 @@ import type {
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
-  ModelAliasV5, UpstreamCredentialBinding,
+  ModelAliasV5, UpstreamCredentialBinding, CustomDomain,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -71,6 +71,8 @@ export interface MockDb {
   upstreamSlots: string[];
   absentSlots: Set<string>;
   upstreamBindings: Record<string, UpstreamCredentialBinding>;
+  // v0.5.0 custom domains (spec Part D).
+  customDomains: CustomDomain[];
 }
 
 function seed(): MockDb {
@@ -240,6 +242,20 @@ function seed(): MockDb {
         slot_present: true,
       },
     },
+    // v0.5.0 custom domains (spec Part D).
+    customDomains: [
+      {
+        id: "dom_001",
+        service_id: "svc_ai001",
+        hostname: "foo.example.com",
+        cert_sha256: "deadbeef0123456789abcdef",
+        not_before: "2026-05-01T00:00:00Z",
+        not_after: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+        created_at: "2026-05-19T00:00:00Z",
+        updated_at: "2026-05-19T00:00:00Z",
+        status: "active",
+      },
+    ],
   };
 }
 

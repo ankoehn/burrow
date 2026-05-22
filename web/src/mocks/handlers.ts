@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb, type CacheSettingsPayload } from "@/mocks/db";
-import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, WebAuthnCredential } from "@/lib/contract";
+import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, WebAuthnCredential, CustomDomain, CreateCustomDomainInput } from "@/lib/contract";
 
 const VALID_PROVIDERS = new Set<string>(["ollama", "vllm", "openai-compat", "openai", "anthropic", "other"]);
 
@@ -857,6 +857,72 @@ export const handlers = [
       if (b.provider != null && VALID_PROVIDERS.has(b.provider)) entry.provider = b.provider as Provider;
       if (b.priority != null) entry.priority = b.priority;
     }
+    return noContent();
+  }),
+
+  // ---- v0.5.0 custom domains (spec Part D) ----
+  http.get("/api/v1/services/:id/domains", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const rows = db.customDomains
+      .filter((d) => d.service_id === params.id)
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+    return json(rows);
+  }),
+  http.post("/api/v1/services/:id/domains", async ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const svc = db.services.find((s) => s.id === params.id);
+    if (!svc) return err(404, "service not found");
+    const b = await body<CreateCustomDomainInput>(request);
+    if (!b) return err(400, "invalid body");
+
+    // Mock-validator (plan §Task 6 Step 1).
+    if (b.hostname === "san-mismatch.example.com")
+      return json({ error: "san_mismatch", reason: "san_mismatch" }, 400);
+    if (b.cert_pem === "")
+      return json({ error: "chain invalid", reason: "chain_invalid" }, 400);
+    if (b.hostname === "expired.example.com")
+      return json({ error: "expired", reason: "expired" }, 400);
+    if (b.hostname === "key-mismatch.example.com")
+      return json({ error: "key mismatch", reason: "key_mismatch" }, 400);
+
+    const now = Date.now();
+    const notAfter = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const notBefore = new Date(now).toISOString();
+    const status: CustomDomain["status"] = "active";
+    const row: CustomDomain = {
+      id: `dom_${Math.random().toString(36).slice(2, 9)}`,
+      service_id: String(params.id),
+      hostname: b.hostname,
+      cert_sha256: `mock_${b.hostname.replace(/\W/g, "_")}`,
+      not_before: notBefore,
+      not_after: notAfter,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      status,
+    };
+    db.customDomains.push(row);
+    return json(row, 201);
+  }),
+  http.get("/api/v1/services/:id/domains/:did", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const d = db.customDomains.find((x) => x.id === params.did && x.service_id === params.id);
+    if (!d) return err(404, "domain not found");
+    return json(d);
+  }),
+  http.put("/api/v1/services/:id/domains/:did", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const d = db.customDomains.find((x) => x.id === params.did && x.service_id === params.id);
+    if (!d) return err(404, "domain not found");
+    return noContent();
+  }),
+  http.delete("/api/v1/services/:id/domains/:did", ({ request, params }) => {
+    const g = gate(request); if (g) return g;
+    const i = db.customDomains.findIndex((x) => x.id === params.did && x.service_id === params.id);
+    if (i < 0) return err(404, "domain not found");
+    db.customDomains.splice(i, 1);
     return noContent();
   }),
 

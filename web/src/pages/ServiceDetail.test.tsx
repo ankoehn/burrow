@@ -21,7 +21,7 @@ describe("ServiceDetail page", () => {
     expect(heading.textContent).toMatch(/ollama/i);
   });
 
-  it("shows three tabs: Access, API keys, Upstream key", async () => {
+  it("shows four tabs: Access, API keys, Upstream key, Custom domains", async () => {
     mount();
     await screen.findByRole("heading", { name: /ollama/i });
     const tablist = screen.getByRole("tablist");
@@ -30,6 +30,7 @@ describe("ServiceDetail page", () => {
     expect(labels).toContain("Access");
     expect(labels).toContain("API keys");
     expect(labels).toContain("Upstream key");
+    expect(labels).toContain("Custom domains");
   });
 
   it("Upstream key tab renders the binding fields when a binding exists", async () => {
