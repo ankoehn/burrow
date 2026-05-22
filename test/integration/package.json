@@ -1,0 +1,16 @@
+{
+  "name": "burrow-e2e-compose-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "test-only — Playwright UI suite for the 2-docker e2e stack. Never deploy.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed --workers=1",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^24.12.3",
+    "typescript": "~6.0.2"
+  }
+}
