@@ -432,7 +432,7 @@ func (d Deps) PostCustomDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, status, errBody := validateCertAndKey(in.CertPEM, in.KeyPEM, in.Hostname, nil)
+	result, status, errBody := validateCertAndKey(in.CertPEM, in.KeyPEM, in.Hostname, d.CertValidationRoots)
 	if errBody != nil {
 		writeJSON(w, status, errBody)
 		return
@@ -554,7 +554,7 @@ func (d Deps) PutCustomDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, status, errBody := validateCertAndKey(in.CertPEM, in.KeyPEM, in.Hostname, nil)
+	result, status, errBody := validateCertAndKey(in.CertPEM, in.KeyPEM, in.Hostname, d.CertValidationRoots)
 	if errBody != nil {
 		writeJSON(w, status, errBody)
 		return
@@ -617,6 +617,18 @@ func (d Deps) PutCustomDomain(w http.ResponseWriter, r *http.Request) {
 	if d.Metrics != nil {
 		days := float64(time.Until(result.notAfter)) / float64(24*time.Hour)
 		d.Metrics.SetCertExpiryDays(in.Hostname, days)
+	}
+
+	// Emit cert.expiring webhook event when the renewed cert lands within the
+	// 14-day expiry window. Mirrors the POST path. Rate-limiting is a TODO
+	// (Task 9/12 carry-over — the dispatcher has no per-domain once-per-day
+	// limiter).
+	if result.notAfter.Before(time.Now().Add(14*24*time.Hour)) && d.WebhookDispatcher != nil {
+		d.WebhookDispatcher.Publish(r.Context(), "cert.expiring", map[string]any{
+			"hostname":   in.Hostname,
+			"service_id": serviceID,
+			"not_after":  result.notAfter.UTC().Format(time.RFC3339),
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)

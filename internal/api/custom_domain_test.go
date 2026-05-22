@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -238,6 +239,32 @@ func TestCertValidatorWildcardSAN(t *testing.T) {
 	}
 }
 
+// ─── Webhook stub ────────────────────────────────────────────────────────────
+
+// stubDispatcher records Publish calls for assertion in tests.
+type stubDispatcher struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (s *stubDispatcher) Publish(_ context.Context, event string, _ any) {
+	s.mu.Lock()
+	s.events = append(s.events, event)
+	s.mu.Unlock()
+}
+
+func (s *stubDispatcher) DeliverNow(_ context.Context, _, _ string, _ any) (int, int, error) {
+	return 0, 0, nil
+}
+
+func (s *stubDispatcher) published() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
 // ─── In-memory stub for handler tests ─────────────────────────────────────────
 
 type stubCustomDomainStore struct {
@@ -310,12 +337,19 @@ func (s *stubCustomDomainStore) ListAllCustomDomains(_ context.Context) ([]db.Se
 // ─── Handler tests ────────────────────────────────────────────────────────────
 
 // newDomainDeps returns a Deps pre-wired for custom domain handler tests.
+// Pass a non-nil roots to trust a custom CA (for tests that need the handler
+// path to succeed with a test-generated certificate chain).
 func newDomainDeps(ds *stubCustomDomainStore) Deps {
+	return newDomainDepsWithRoots(ds, nil)
+}
+
+func newDomainDepsWithRoots(ds *stubCustomDomainStore, roots *x509.CertPool) Deps {
 	return Deps{
-		Users:         &fakeUserStore{role: "admin"},
-		Log:           discardLog(),
-		IPGeoServices: &stubSvcLookup{ownerID: "u-self"},
-		CustomDomains: ds,
+		Users:               &fakeUserStore{role: "admin"},
+		Log:                 discardLog(),
+		IPGeoServices:       &stubSvcLookup{ownerID: "u-self"},
+		CustomDomains:       ds,
+		CertValidationRoots: roots,
 	}
 }
 
@@ -371,28 +405,23 @@ func TestPostCustomDomain_SANMismatch(t *testing.T) {
 	}
 }
 
-// TestPostCustomDomain_Valid verifies that posting a valid cert returns 201.
-// NOTE: the cert chain check uses a custom root pool in validateCertAndKey
-// when non-nil — in production, nil uses system roots. This test uses a nil
-// roots pool on the internal function, so we test the HTTP path with a
-// self-signed cert that would be rejected by system roots. To exercise a
-// successful POST, we seed the store directly.
+// TestPostCustomDomain_DuplicateHostname verifies that posting a cert for a
+// hostname that is already registered returns 409 Conflict. The test injects
+// the test CA into Deps.CertValidationRoots so the chain validation step
+// trusts our test-generated cert, letting the request reach the store which
+// is pre-loaded with ErrDuplicateHostname.
 func TestPostCustomDomain_DuplicateHostname(t *testing.T) {
 	ca, caKey, pool, _ := genCA(t)
 	certPEM, keyPEM := genCert(t, ca, caKey, []string{"foo.example.com"})
-	_ = pool // pool not passed via HTTP — production uses system roots
 
 	ds := newStubDomainStore()
 	ds.insertErr = db.ErrDuplicateHostname
 
-	d := newDomainDeps(ds)
+	d := newDomainDepsWithRoots(ds, pool)
 	srv := httptest.NewServer(NewRouter(d))
 	defer srv.Close()
 	ac := authedClient(t, srv)
 
-	// We need a cert that will pass SAN + key check but chain check fails
-	// against system roots. For the duplicate test we just force insertErr.
-	// Use a self-signed cert with matching SAN so we get past the validator.
 	body := map[string]any{
 		"hostname": "foo.example.com",
 		"cert_pem": certPEM,
@@ -400,15 +429,123 @@ func TestPostCustomDomain_DuplicateHostname(t *testing.T) {
 	}
 	resp := ac.post(t, "/api/v1/services/svc1/domains", body)
 	defer resp.Body.Close()
-	// Chain validation will fail (system roots don't trust our test CA),
-	// so we get 400 with chain_invalid — that's the expected behaviour for this
-	// code path when using the production validator (system roots).
-	// For the duplicate test, pre-seed a row instead.
-	if resp.StatusCode == http.StatusBadRequest {
-		t.Skip("system roots rejected test CA — expected in CI; test coverage via validateCertAndKey unit tests")
-	}
 	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status=%d; want 409", resp.StatusCode)
+		t.Fatalf("status=%d; want 409 (body=%s)", resp.StatusCode, readBody(t, resp))
+	}
+}
+
+// TestPutCustomDomain_EmitsCertExpiringWebhook verifies that PUT emits a
+// cert.expiring event when the renewed cert is within the 14-day expiry window.
+// This covers the spec gap fixed in the review: POST emitted it but PUT did not.
+func TestPutCustomDomain_EmitsCertExpiringWebhook(t *testing.T) {
+	ca, caKey, pool, _ := genCA(t)
+
+	// Generate a cert that expires in 3 days (< 14 days → must trigger webhook).
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(77),
+		Subject:      pkix.Name{CommonName: "foo.example.com"},
+		DNSNames:     []string{"foo.example.com"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(3 * 24 * time.Hour), // expiring soon
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tpl, ca, &priv.PublicKey, caKey)
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyDER, _ := x509.MarshalECPrivateKey(priv)
+	keyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+
+	ds := newStubDomainStore()
+	// Pre-seed so GET (old hostname fetch) + UPDATE both succeed.
+	ds.rows["did-1"] = db.ServiceCustomDomain{
+		ID: "did-1", ServiceID: "svc1", Hostname: "foo.example.com",
+		NotAfter: time.Now().Add(30 * 24 * time.Hour),
+	}
+
+	disp := &stubDispatcher{}
+	d := newDomainDepsWithRoots(ds, pool)
+	d.WebhookDispatcher = disp
+
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	ac := authedClient(t, srv)
+
+	body := map[string]any{
+		"hostname": "foo.example.com",
+		"cert_pem": certPEM,
+		"key_pem":  keyPEM,
+	}
+	resp := ac.put(t, "/api/v1/services/svc1/domains/did-1", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status=%d; want 204 (body=%s)", resp.StatusCode, readBody(t, resp))
+	}
+
+	events := disp.published()
+	found := false
+	for _, e := range events {
+		if e == "cert.expiring" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("cert.expiring webhook not emitted on PUT with expiring cert; events=%v", events)
+	}
+}
+
+// TestPutCustomDomain_NoWebhookWhenNotExpiring verifies that PUT does NOT emit
+// cert.expiring when the renewed cert has plenty of time left.
+func TestPutCustomDomain_NoWebhookWhenNotExpiring(t *testing.T) {
+	ca, caKey, pool, _ := genCA(t)
+	certPEM, keyPEM := genCert(t, ca, caKey, []string{"foo.example.com"}) // 24h expiry > 14d? no — 24h < 14d
+	// genCert gives NotAfter = now+24h which IS within 14 days. Use a cert valid for 30 days instead.
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(88),
+		Subject:      pkix.Name{CommonName: "bar.example.com"},
+		DNSNames:     []string{"bar.example.com"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(30 * 24 * time.Hour), // 30 days — NOT expiring soon
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tpl, ca, &priv.PublicKey, caKey)
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyDER, _ := x509.MarshalECPrivateKey(priv)
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+
+	ds := newStubDomainStore()
+	ds.rows["did-2"] = db.ServiceCustomDomain{
+		ID: "did-2", ServiceID: "svc1", Hostname: "bar.example.com",
+		NotAfter: time.Now().Add(30 * 24 * time.Hour),
+	}
+
+	disp := &stubDispatcher{}
+	d := newDomainDepsWithRoots(ds, pool)
+	d.WebhookDispatcher = disp
+
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	ac := authedClient(t, srv)
+
+	body := map[string]any{
+		"hostname": "bar.example.com",
+		"cert_pem": certPEM,
+		"key_pem":  keyPEM,
+	}
+	resp := ac.put(t, "/api/v1/services/svc1/domains/did-2", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status=%d; want 204 (body=%s)", resp.StatusCode, readBody(t, resp))
+	}
+
+	events := disp.published()
+	for _, e := range events {
+		if e == "cert.expiring" {
+			t.Errorf("cert.expiring should NOT be emitted for a 30-day cert; events=%v", events)
+		}
 	}
 }
 
@@ -560,16 +697,69 @@ func readBodyJSON(t *testing.T, r *http.Response) string {
 	return sb.String()
 }
 
-// ─── Proxy routing test ───────────────────────────────────────────────────────
+// genBareCNCert generates a leaf cert with NO SANs and CommonName=hostname,
+// signed by the given CA. Used to test the bare-CN fallback path (spec D.3).
+func genBareCNCert(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, hostname string) (certPEM, keyPEM string) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("genBareCNCert: gen key: %v", err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(42),
+		Subject:      pkix.Name{CommonName: hostname},
+		// Intentionally empty DNSNames and IPAddresses → no SANs.
+		NotBefore:   time.Now().Add(-time.Minute),
+		NotAfter:    time.Now().Add(24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, ca, &priv.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("genBareCNCert: create cert: %v", err)
+	}
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("genBareCNCert: marshal key: %v", err)
+	}
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+	return certPEM, keyPEM
+}
 
-// TestProxyRoutesByCustomDomainHost verifies that WithCustomDomainLookup routes
-// a request with a non-authDomain Host header to the correct backend.
+// TestPostCustomDomain_BareCNWarns verifies spec D.3 step 2: when the cert has
+// no SANs, the hostname is matched via CommonName, the request is accepted
+// (201), and the response includes Burrow-Warning: cert-no-san.
+func TestPostCustomDomain_BareCNWarns(t *testing.T) {
+	ca, caKey, pool, _ := genCA(t)
+	certPEM, keyPEM := genBareCNCert(t, ca, caKey, "foo.example.com")
+
+	ds := newStubDomainStore()
+	d := newDomainDepsWithRoots(ds, pool)
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	ac := authedClient(t, srv)
+
+	body := map[string]any{
+		"hostname": "foo.example.com",
+		"cert_pem": certPEM,
+		"key_pem":  keyPEM,
+	}
+	resp := ac.post(t, "/api/v1/services/svc1/domains", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status=%d; want 201 (body=%s)", resp.StatusCode, readBody(t, resp))
+	}
+	warn := resp.Header.Get("Burrow-Warning")
+	if warn != "cert-no-san" {
+		t.Errorf("Burrow-Warning=%q; want cert-no-san", warn)
+	}
+}
+
+// TestProxyRoutesByCustomDomainHost is exercised in internal/proxy/proxy_test.go
+// (TestProxyCustomDomainRouting). This is a compile-time marker only.
 func TestProxyRoutesByCustomDomainHost(t *testing.T) {
-	// This test uses the proxy package which is imported by cmd/server, not api.
-	// It is documented as a spec step but is exercised in internal/proxy/proxy_test.go.
-	// Here we just verify the test function exists and the concept works at the
-	// type level by ensuring the custom domain handler wires up correctly.
-	t.Log("proxy custom domain routing is tested in internal/proxy/proxy_test.go")
+	t.Log("custom domain vhost routing is covered by TestProxyCustomDomainRouting in internal/proxy/proxy_test.go")
 }
 
 // ─── TLS key-pair quick sanity ────────────────────────────────────────────────

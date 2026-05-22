@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 
@@ -430,6 +431,12 @@ type Deps struct {
 	// invalidated on mutation — correct after the next process restart).
 	// cmd/server wiring is deferred to Task 17.
 	CustomDomainCache CustomDomainCacheInvalidator
+	// CertValidationRoots overrides the system root pool used by
+	// validateCertAndKey when non-nil. In production this is always nil
+	// (system roots are used). Tests inject a pool containing the test CA
+	// so the chain validation step trusts the test-issued cert without
+	// requiring a real CA-signed certificate.
+	CertValidationRoots *x509.CertPool
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

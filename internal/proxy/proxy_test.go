@@ -46,9 +46,10 @@ func (denyChecker) Allow(_ context.Context, _ *proxy.Resolved, _ *http.Request) 
 // handler on the server side. This lets a real httptest.Server act as the
 // tunnel upstream without requiring actual network addresses.
 type fakeDialer struct {
-	mu       sync.Mutex
-	tunnels  map[string]*proxy.Resolved // subdomain → metadata
-	upstream http.Handler               // the "local" server the tunnel wraps
+	mu            sync.Mutex
+	tunnels       map[string]*proxy.Resolved // subdomain → metadata
+	upstream      http.Handler               // the "local" server the tunnel wraps
+	lastServiceID string                     // last serviceID passed to DialTunnelStreamByServiceID
 }
 
 func newFakeDialer(upstream http.Handler) *fakeDialer {
@@ -109,6 +110,8 @@ func (d *fakeDialer) DialTunnelStream(_ context.Context, subdomain string) (net.
 func (d *fakeDialer) DialTunnelStreamByServiceID(_ context.Context, serviceID string) (net.Conn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// Record which serviceID was dialed (for custom-domain routing assertions).
+	d.lastServiceID = serviceID
 	// Find a subdomain with matching serviceID and delegate to the normal pipe path.
 	for sub, res := range d.tunnels {
 		if res.ServiceID == serviceID {
@@ -625,5 +628,89 @@ func TestProxyXFFClientIP(t *testing.T) {
 	// XFF entry "5.6.7.8" should be used as the client IP.
 	if gotXFF != "5.6.7.8" {
 		t.Errorf("X-Forwarded-For sent upstream: want '5.6.7.8', got %q", gotXFF)
+	}
+}
+
+// TestProxyCustomDomainRouting verifies that WithCustomDomainLookup routes a
+// request with a non-authDomain Host header to the correct backend service.
+// This covers the ~90-line serveCustomDomain path that was previously uncovered.
+func TestProxyCustomDomainRouting(t *testing.T) {
+	const customHost = "foo.example.com"
+	const targetServiceID = "svc-custom-1"
+
+	// Upstream records the Host header it receives.
+	var gotHost string
+	var gotPath string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("custom-domain-ok"))
+	})
+
+	d := newFakeDialer(upstream)
+	// Register the service under a subdomain key so LookupByServiceID can find it.
+	d.register("custom", &proxy.Resolved{ServiceID: targetServiceID, AccessMode: "open", LocalHost: "127.0.0.1:9000"})
+
+	// customDomainLookup returns targetServiceID for foo.example.com only.
+	lookup := func(_ context.Context, host string) (string, bool, error) {
+		if host == customHost {
+			return targetServiceID, true, nil
+		}
+		return "", false, nil
+	}
+
+	p := proxy.New(d, openChecker{}, authDomain, testLog(),
+		proxy.WithCustomDomainLookup(lookup))
+
+	ts := httptest.NewServer(p)
+	defer ts.Close()
+
+	req, _ := http.NewRequest("GET", ts.URL+"/hello/world", nil)
+	req.Host = customHost
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d (body=%q)", resp.StatusCode, body)
+	}
+	if string(body) != "custom-domain-ok" {
+		t.Errorf("unexpected body: %q", body)
+	}
+	if gotPath != "/hello/world" {
+		t.Errorf("upstream path: want /hello/world, got %q", gotPath)
+	}
+	_ = gotHost // upstreamHost is set to res.LocalHost, not the custom domain — that's expected
+
+	// Verify that DialTunnelStreamByServiceID was called with targetServiceID.
+	d.mu.Lock()
+	dialedID := d.lastServiceID
+	d.mu.Unlock()
+	if dialedID != targetServiceID {
+		t.Errorf("DialTunnelStreamByServiceID called with %q; want %q", dialedID, targetServiceID)
+	}
+}
+
+// TestProxyCustomDomainNotFound verifies that a host not matching any custom
+// domain (and not matching the authDomain subdomain pattern) returns 404.
+func TestProxyCustomDomainNotFound(t *testing.T) {
+	lookup := func(_ context.Context, host string) (string, bool, error) {
+		return "", false, nil // nothing registered
+	}
+	p := proxy.New(deadDialer{}, openChecker{}, authDomain, testLog(),
+		proxy.WithCustomDomainLookup(lookup))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "http://unknown.example.com/", nil)
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rec.Code)
+	}
+	if rec.Body.String() != "tunnel not found" {
+		t.Errorf("want body 'tunnel not found', got %q", rec.Body.String())
 	}
 }
