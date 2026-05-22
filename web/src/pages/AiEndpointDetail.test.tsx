@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
 import { Route, Routes } from "react-router-dom";
 import AiEndpointDetail from "@/pages/AiEndpointDetail";
+import { db } from "@/mocks/db";
 
 function mount() {
   return renderApp(
@@ -134,6 +135,34 @@ describe("AI endpoint detail (§4.20)", () => {
     const table = await screen.findByRole("table", { name: /backends/i });
     expect(within(table).getByRole("columnheader", { name: /provider/i })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: /priority/i })).toBeInTheDocument();
+  });
+
+  it("Priority input is editable and PUT /models/aliases/:alias fires on blur", async () => {
+    // Seed a backend row so the Backends table has a row to interact with.
+    const origBackends = db.aiConfigs["svc_ai001"]!.routing.backends;
+    db.aiConfigs["svc_ai001"]!.routing.backends = [
+      { service_id: "svc_ai001", weight: 1, concrete_model: "llama3.1:8b" },
+    ];
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    mount();
+    await screen.findByLabelText("requests per minute, last 24h");
+    // The alias "fast" maps to svc_ai001 with priority 100.
+    const priorityInput = await screen.findByLabelText(/priority for fast/i);
+    expect(priorityInput).not.toBeDisabled();
+    await userEvent.clear(priorityInput);
+    await userEvent.type(priorityInput, "50");
+    await userEvent.tab(); // blur triggers onBlur PUT
+    await waitFor(() => {
+      const putCalls = fetchSpy.mock.calls.filter(([url, init]) =>
+        String(url).endsWith("/api/v1/models/aliases/fast")
+        && (init as RequestInit | undefined)?.method === "PUT",
+      );
+      expect(putCalls.length).toBeGreaterThanOrEqual(1);
+      const b = JSON.parse(String((putCalls.at(-1)![1] as RequestInit).body));
+      expect(b.priority).toBe(50);
+    });
+    // Restore db state for other tests.
+    db.aiConfigs["svc_ai001"]!.routing.backends = origBackends;
   });
 
   it("Add alias button opens dialog and POST /models/aliases creates the alias", async () => {

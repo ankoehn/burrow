@@ -168,7 +168,7 @@ export interface InspectorSettings {
   max_requests: number;
 }
 export interface RoutingPolicy {
-  strategy: "single" | "failover" | "weighted" | "header_based" | "sticky";
+  strategy: "single" | "failover" | "weighted" | "header_based" | "sticky" | "multi_provider";
   model_alias: string;
   header_name: string;
   paused: boolean;

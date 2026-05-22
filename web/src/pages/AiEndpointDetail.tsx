@@ -199,6 +199,21 @@ export default function AiEndpointDetail() {
     },
   });
 
+  const updatePriority = useMutation({
+    mutationFn: ({ alias, priority }: { alias: string; priority: number }) =>
+      apiFetch<void>(`/models/aliases/${alias}`, {
+        method: "PUT",
+        body: JSON.stringify({ priority }),
+      }),
+    onSuccess: () => {
+      toast.success("Priority updated.");
+      qc.invalidateQueries({ queryKey: ["models", "aliases"] });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof ApiError ? e.message : "Couldn't update priority.");
+    },
+  });
+
   const aiRow = (endpoints.data ?? []).find((e) => e.service_id === id);
   const alias = (aliases.data ?? []).find((a) => a.service_id === id);
   const resolvedAlias =
@@ -344,7 +359,7 @@ export default function AiEndpointDetail() {
               options={STRATEGY_OPTIONS}
             />
           </div>
-          {(routing.strategy as string) === "multi_provider" && (
+          {routing.strategy === "multi_provider" && (
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <p
                 data-testid="multi-provider-banner"
@@ -432,8 +447,26 @@ export default function AiEndpointDetail() {
                       {getProviderForBackend(b.service_id)}
                     </span>
                   </td>
-                  <td className="mono">
-                    {(aliases.data ?? []).find((a) => a.service_id === b.service_id)?.priority ?? "—"}
+                  <td>
+                    {(() => {
+                      const matched = (aliases.data ?? []).find((a) => a.service_id === b.service_id);
+                      return (
+                        <Input
+                          type="number"
+                          min={0}
+                          max={999}
+                          className="mono"
+                          aria-label={`Priority for ${matched?.alias ?? b.service_id}`}
+                          defaultValue={String(matched?.priority ?? 100)}
+                          disabled={!matched}
+                          onBlur={(e) => {
+                            if (matched) {
+                              updatePriority.mutate({ alias: matched.alias, priority: Number(e.target.value) });
+                            }
+                          }}
+                        />
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}
