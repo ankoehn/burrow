@@ -10,8 +10,12 @@ import type {
   CustomRoleInput, PermissionDef, CacheSettings, RedactionRule,
   RedactionSettings, GuardrailSettings, InspectorSettings, RoutingPolicy,
   ProvisioningKey, ProvisioningPending, CostSummary,
+  SemanticCacheSettings, CacheStatsV5, UpstreamSlot, UpstreamCredentialBinding,
+  ModelAliasV5, RoutingPolicyV5, CustomDomain, CreateCustomDomainInput,
+  ConnectionLog, ConnectionLogRollup, RetentionSettings,
+  WebhookV5, WebhookPreviewResponse, DatabaseStatus,
 } from "@/lib/contract";
-import { ACCESS_MODES, isAccessMode } from "@/lib/contract";
+import { ACCESS_MODES, isAccessMode, WEBHOOK_EVENT_FIELDS } from "@/lib/contract";
 
 describe("contract", () => {
   it("exposes the access-mode enum and guard", () => {
@@ -100,5 +104,140 @@ describe("contract", () => {
     const pp: ProvisioningPending = { id: "pp1", hostname: "node-1", os: "linux", arch: "amd64", remote_ip: "1.2.3.4", provisioning_key_id: "pk1", first_seen: "2026-05-19T00:00:00Z" };
 
     expect([ai, cfg, usage, pt, cs, budget, rl, ie, audit, fp, wh, cwh, wd, pd, cri, at, cat, ma, br, wc, rr, pk, pp]).toHaveLength(23);
+  });
+
+  it("v0.5.0 shapes compile against representative wire objects", () => {
+    const scs: SemanticCacheSettings = {
+      enabled: true,
+      similarity_threshold: 0.92,
+      embedding_model: "text-embedding-3-small",
+      embedding_dim: 1536,
+      max_entries: 5000,
+      max_per_entry_kb: 128,
+      ttl_seconds: 3600,
+      applies_per: "per_endpoint",
+    };
+    const stats: CacheStatsV5 = {
+      hit_rate_24h: 0.45,
+      hit_count_24h: 900,
+      miss_count_24h: 1100,
+      saved_tokens_24h: 400000,
+      saved_usd_24h: 2.0,
+      semantic_hit_rate_24h: 0.12,
+      semantic_hit_count_24h: 240,
+      avg_similarity_score: 0.94,
+    };
+    const slot: UpstreamSlot = "openai";
+    const binding: UpstreamCredentialBinding = {
+      slot: "openai",
+      label: "prod-openai",
+      provider: "openai",
+      created_at: "2026-05-22T00:00:00Z",
+      slot_present: true,
+    };
+    const alias5: ModelAliasV5 = {
+      alias: "fast",
+      concrete_model: "gpt-4o-mini",
+      service_id: "svc_ai001",
+      created_at: "2026-05-22T00:00:00Z",
+      provider: "openai",
+      priority: 1,
+    };
+    const routing5: RoutingPolicyV5 = {
+      strategy: "multi_provider",
+      model_alias: "fast",
+      header_name: "X-Burrow-Model",
+      paused: false,
+      circuit_breaker: { failure_pct: 50, window_seconds: 30, cool_down_seconds: 60 },
+      backends: [],
+      translate_to: "openai",
+    };
+    const domain: CustomDomain = {
+      id: "cd1",
+      service_id: "svc_ai001",
+      fqdn: "api.example.com",
+      tls_mode: "managed",
+      status: "active",
+      cert_expires_at: "2027-05-22T00:00:00Z",
+      verified_at: "2026-05-22T00:00:00Z",
+      created_at: "2026-05-22T00:00:00Z",
+      txt_challenge: "_burrow-verify.api.example.com=abc123",
+    };
+    const createDomain: CreateCustomDomainInput = {
+      service_id: "svc_ai001",
+      fqdn: "api.example.com",
+      tls_mode: "managed",
+    };
+    const log: ConnectionLog = {
+      id: "cl1",
+      service_id: "svc_ai001",
+      kind: "http",
+      status: "success",
+      ts: "2026-05-22T00:00:00Z",
+      duration_ms: 120,
+      bytes_in: 1000,
+      bytes_out: 2000,
+      source_ip: "1.2.3.4",
+      api_key_id: "sak_ci01",
+      user_id: null,
+      trace_id: "tr1",
+      error_code: null,
+      upstream_slot: "openai",
+      cache_result: "MISS",
+    };
+    const rollup: ConnectionLogRollup = {
+      service_id: "svc_ai001",
+      window_start: "2026-05-22T00:00:00Z",
+      window_end: "2026-05-22T01:00:00Z",
+      kind: "http",
+      sessions: 100,
+      bytes_in: 100000,
+      bytes_out: 200000,
+      avg_duration_ms: 115,
+    };
+    const retention: RetentionSettings = {
+      connection_log_days: 90,
+      inspector_days: 30,
+      audit_days: 365,
+      usage_event_days: 180,
+      backup_keep_count: 10,
+      auto_purge_enabled: true,
+      purge_schedule_cron: "0 2 * * *",
+      audit_retention_note: "Audit log retention is governed by compliance policy.",
+    };
+    const wh5: WebhookV5 = {
+      id: "w1",
+      name: "hook",
+      url: "https://example.com/hook",
+      events: ["ai.upstream_error"],
+      paused: false,
+      consecutive_failures: 0,
+      first_failure_at: null,
+      created_at: "2026-05-22T00:00:00Z",
+      signing_algorithm: "sha256",
+      payload_template: null,
+    };
+    const preview: WebhookPreviewResponse = {
+      payload: '{"event":"ai.upstream_error","service_id":"svc_ai001"}',
+      content_type: "application/json",
+    };
+    const dbStatus: DatabaseStatus = {
+      driver: "sqlite",
+      version: "3.45.0",
+      postgres_alpha: false,
+    };
+
+    // Type-level assertion: UpstreamSlot is string
+    expectTypeOf(slot).toEqualTypeOf<string>();
+
+    expect([scs, stats, binding, alias5, routing5, domain, createDomain, log, rollup, retention, wh5, preview, dbStatus]).toHaveLength(13);
+
+    // Verify WEBHOOK_EVENT_FIELDS constant shape
+    expect(WEBHOOK_EVENT_FIELDS["ai.upstream_error"]).toContain("service_id");
+    expect(WEBHOOK_EVENT_FIELDS["ai.cache_promotion"]).toContain("prompt_fingerprint");
+    expect(WEBHOOK_EVENT_FIELDS["audit.policy_change"]).toContain("actor_email");
+    expect(WEBHOOK_EVENT_FIELDS["service.created"]).toContain("access_mode");
+    expect(WEBHOOK_EVENT_FIELDS["service.deleted"]).toContain("name");
+    expect(WEBHOOK_EVENT_FIELDS["connection.session_summary"]).toContain("p95_duration_ms");
   });
 });

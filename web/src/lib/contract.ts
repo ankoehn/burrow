@@ -412,3 +412,171 @@ export interface RedactionRule {
   scope: "request_body" | "response_body" | "both";
   builtin?: boolean;
 }
+
+// ---- v0.5.0: semantic cache, upstream credentials, multi-provider routing, ----
+// ---- custom domains, connection logs, retention, webhooks v5, database status ----
+// Mirror of docs/superpowers/specs/2026-05-20-v0.5.0-api-contract.md.
+
+export interface SemanticCacheSettings {
+  enabled: boolean;
+  similarity_threshold: number;
+  embedding_model: string;
+  embedding_dim: number;
+  max_entries: number;
+  max_per_entry_kb: number;
+  ttl_seconds: number;
+  applies_per: "global" | "per_endpoint" | "per_api_key";
+}
+
+// CacheStatsV5 is a superset of v0.4.0 CacheStats.
+export interface CacheStatsV5 {
+  hit_rate_24h: number;
+  hit_count_24h: number;
+  miss_count_24h: number;
+  saved_tokens_24h: number;
+  saved_usd_24h: number;
+  semantic_hit_rate_24h: number;
+  semantic_hit_count_24h: number;
+  avg_similarity_score: number;
+}
+
+// Upstream credential binding (spec Part B — upstream slot management).
+export type UpstreamSlot = string;
+
+export type Provider = "openai" | "anthropic" | "cohere" | "mistral" | "gemini" | "custom";
+
+export interface UpstreamCredentialBinding {
+  slot: UpstreamSlot;
+  label: string;
+  provider: Provider;
+  created_at: string;
+  slot_present: boolean;
+}
+
+// ModelAliasV5 extends ModelAlias with provider + priority.
+export interface ModelAliasV5 {
+  alias: string;
+  concrete_model: string;
+  service_id: string;
+  created_at: string;
+  provider: Provider;
+  priority: number;
+}
+
+// RoutingPolicyV5 adds "multi_provider" to the strategy union.
+export interface RoutingPolicyV5 {
+  strategy: "single" | "failover" | "weighted" | "header_based" | "sticky" | "multi_provider";
+  model_alias: string;
+  header_name: string;
+  paused: boolean;
+  circuit_breaker: { failure_pct: number; window_seconds: number; cool_down_seconds: number };
+  backends: { service_id: string; weight: number; concrete_model: string }[];
+  translate_to: "none" | "openai" | "anthropic";
+}
+
+// Custom domains (spec Part D).
+export type CustomDomainStatus = "active" | "expiring_soon" | "expired";
+
+export interface CustomDomain {
+  id: string;
+  service_id: string;
+  fqdn: string;
+  tls_mode: "managed" | "custom" | "passthrough";
+  status: CustomDomainStatus;
+  cert_expires_at: string | null;
+  verified_at: string | null;
+  created_at: string;
+  txt_challenge: string;
+}
+
+export interface CreateCustomDomainInput {
+  service_id: string;
+  fqdn: string;
+  tls_mode: "managed" | "custom" | "passthrough";
+}
+
+export interface CustomDomainRejection {
+  fqdn: string;
+  reason: "already_taken" | "invalid_fqdn" | "verification_failed" | "tls_provision_failed";
+}
+
+// Connection logs (spec Part E).
+export type ConnectionLogKind = "http" | "tcp" | "ws" | "mcp";
+export type ConnectionLogStatus = "success" | "error" | "timeout" | "rejected";
+
+export interface ConnectionLog {
+  id: string;
+  service_id: string;
+  kind: ConnectionLogKind;
+  status: ConnectionLogStatus;
+  ts: string;
+  duration_ms: number;
+  bytes_in: number;
+  bytes_out: number;
+  source_ip: string;
+  api_key_id: string | null;
+  user_id: string | null;
+  trace_id: string;
+  error_code: string | null;
+  upstream_slot: UpstreamSlot | null;
+  cache_result: "HIT" | "MISS" | "SKIP" | null;
+}
+
+export interface ConnectionLogRollup {
+  service_id: string;
+  window_start: string;
+  window_end: string;
+  kind: ConnectionLogKind;
+  sessions: number;
+  bytes_in: number;
+  bytes_out: number;
+  avg_duration_ms: number;
+}
+
+// Retention settings (spec Part F).
+export interface RetentionSettings {
+  connection_log_days: number;
+  inspector_days: number;
+  audit_days: number;
+  usage_event_days: number;
+  backup_keep_count: number;
+  auto_purge_enabled: boolean;
+  purge_schedule_cron: string;
+  audit_retention_note: string;
+}
+
+// WebhookV5 — superset of v0.4.0 Webhook + payload_template (spec Part H).
+export interface WebhookV5 {
+  id: string;
+  name: string;
+  url: string;
+  events: string[];
+  paused: boolean;
+  consecutive_failures: number;
+  first_failure_at: string | null;
+  created_at: string;
+  signing_algorithm: "sha256" | "sha512";
+  payload_template: string | null;
+}
+
+export interface WebhookPreviewResponse {
+  payload: string;
+  content_type: string;
+}
+
+// Database status (spec Part G — Postgres alpha).
+export interface DatabaseStatus {
+  driver: "sqlite" | "postgres";
+  version: string;
+  postgres_alpha: boolean;
+}
+
+// WEBHOOK_EVENT_FIELDS: maps v0.5.0 event names to their available field names (spec H.2).
+export const WEBHOOK_EVENT_FIELDS: Record<string, string[]> = {
+  "ai.upstream_error": ["service_id", "backend_service_id", "status", "error", "retry_count"],
+  "ai.cache_promotion": ["service_id", "exact_key_hash", "prompt_fingerprint", "similarity_to_first"],
+  "audit.policy_change": ["actor_email", "action", "before", "after"],
+  "service.created": ["service_id", "name", "type", "access_mode"],
+  "service.deleted": ["service_id", "name"],
+  "connection.session_summary": ["service_id", "kind", "window_start", "window_end", "sessions", "bytes_in", "bytes_out", "avg_duration_ms", "p95_duration_ms", "top_source_ips"],
+};
