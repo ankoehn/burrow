@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Input, Select } from "@/components/ds";
 import type { SettingsMap } from "@/lib/contract";
@@ -32,6 +33,34 @@ export default function Settings() {
   return (
     <div className="account-page">
       <div className="page-head"><div><h1>Settings</h1><p className="sub">Admin-only configuration for this Burrow relay.</p></div></div>
+
+      {/* ---- v0.5.0 nav cards ---- */}
+      <section className="account-section" aria-labelledby="sec-configuration">
+        <div className="section-head"><div className="left"><h2 id="sec-configuration">Configuration</h2></div></div>
+        <div className="settings-nav-grid">
+          <Link to="/settings/retention" className="settings-nav-card">
+            <div className="settings-nav-card-title">Retention &amp; compliance</div>
+            <div className="settings-nav-card-desc muted">Audit log, usage events, inspector ring buffer, and other retention knobs.</div>
+          </Link>
+          <Link to="/settings/database" className="settings-nav-card">
+            <div className="settings-nav-card-title">Database backend</div>
+            <div className="settings-nav-card-desc muted">Driver in use (SQLite default; Postgres alpha).</div>
+          </Link>
+          <Link to="/settings/backups" className="settings-nav-card">
+            <div className="settings-nav-card-title">Backup &amp; restore</div>
+            <div className="settings-nav-card-desc muted">Snapshots of the relay&apos;s SQLite database.</div>
+          </Link>
+          <a href="/api/v1/openapi/viewer" target="_blank" rel="noreferrer" className="settings-nav-card">
+            <div className="settings-nav-card-title">OpenAPI viewer</div>
+            <div className="settings-nav-card-desc muted">Browse the JSON/HTTP API docs.</div>
+          </a>
+          <Link to="/services" className="settings-nav-card">
+            <div className="settings-nav-card-title">Custom domains</div>
+            <div className="settings-nav-card-desc muted">Per-service CNAME + cert pairs (managed per service).</div>
+          </Link>
+        </div>
+      </section>
+
       <section className="account-section" aria-labelledby="sec-smtp">
         <div className="section-head"><div className="left"><h2 id="sec-smtp">Email / SMTP</h2></div></div>
         {!configured && <p role="status" className="notice-inline">Email isn't set up yet. User invites are disabled until you configure and test SMTP.</p>}

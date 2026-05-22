@@ -28,3 +28,24 @@ describe("Settings / SMTP", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/not configured/i);
   });
 });
+
+describe("Settings / nav cards", () => {
+  it("renders the five new nav cards (Retention, Database, Backup, OpenAPI viewer, Custom domains)", async () => {
+    renderApp(<Settings />);
+    // Wait for the page to be ready
+    await screen.findByLabelText(/SMTP server/i);
+    expect(screen.getByText("Retention & compliance")).toBeInTheDocument();
+    expect(screen.getByText("Database backend")).toBeInTheDocument();
+    expect(screen.getByText("Backup & restore")).toBeInTheDocument();
+    expect(screen.getByText("OpenAPI viewer")).toBeInTheDocument();
+    expect(screen.getByText("Custom domains")).toBeInTheDocument();
+    // OpenAPI viewer must be an <a> with target="_blank"
+    const openApiLink = screen.getByRole("link", { name: /openapi viewer/i });
+    expect(openApiLink).toHaveAttribute("target", "_blank");
+  });
+
+  it("existing SMTP form is still rendered below the nav cards", async () => {
+    renderApp(<Settings />);
+    expect(await screen.findByLabelText(/SMTP server/i)).toBeInTheDocument();
+  });
+});
