@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Badge, ErrorNotice, SkeletonRows, Tabs } from "@/components/ds";
@@ -18,7 +18,9 @@ const ACCESS_LABEL: Record<AccessMode, string> = {
 
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
-  const [tab, setTab] = useState("access");
+  const location = useLocation();
+  const initialTab = location.pathname.endsWith("/domains") ? "domains" : "access";
+  const [tab, setTab] = useState(initialTab);
 
   const { data: svc, isLoading, error, refetch } = useQuery({
     queryKey: ["service", id],

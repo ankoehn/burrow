@@ -24,6 +24,9 @@ import ProvisioningKeys from "@/pages/ProvisioningKeys";
 import AutomationTokens from "@/pages/AutomationTokens";
 import BackupRestore from "@/pages/BackupRestore";
 import ConnectionLogs from "@/pages/ConnectionLogs";
+import ServiceDetail from "@/pages/ServiceDetail";
+import Retention from "@/pages/Retention";
+import DatabaseBackend from "@/pages/DatabaseBackend";
 
 export default function App() {
   return (
@@ -53,6 +56,10 @@ export default function App() {
         <Route path="/roles" element={<Roles />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/connection-logs" element={<ConnectionLogs />} />
+        <Route path="/services/:id" element={<ServiceDetail />} />
+        <Route path="/services/:id/domains" element={<ServiceDetail />} />
+        <Route path="/settings/retention" element={<Retention />} />
+        <Route path="/settings/database" element={<DatabaseBackend />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
