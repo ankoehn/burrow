@@ -7,6 +7,7 @@ import type {
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
   ModelAliasV5, UpstreamCredentialBinding, CustomDomain,
   RetentionSettings, DatabaseStatus,
+  ConnectionLog, ConnectionLogRollup,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -78,6 +79,9 @@ export interface MockDb {
   retentionSettings: RetentionSettings;
   // v0.5.0 database status (spec Part G).
   databaseStatus: DatabaseStatus;
+  // v0.5.0 connection logs (spec Part E).
+  connectionLogs: ConnectionLog[];
+  connectionLogRollups: ConnectionLogRollup[];
 }
 
 function seed(): MockDb {
@@ -278,6 +282,9 @@ function seed(): MockDb {
       postgres_alpha: false,
       url_redacted: "",
     },
+    // v0.5.0 connection logs (spec Part E).
+    connectionLogs: seedConnectionLogs(),
+    connectionLogRollups: seedConnectionLogRollups(),
   };
 }
 
@@ -343,6 +350,80 @@ function seedInspector(serviceId: string): InspectorEntry[] {
     });
   }
   return out;
+}
+
+// 25 connection log rows — 10 http_proxy, 10 control, 5 tcp_proxy.
+function seedConnectionLogs(): ConnectionLog[] {
+  const base = Date.parse("2026-05-22T12:00:00Z");
+  const kinds: ConnectionLog["kind"][] = [
+    "http_proxy", "http_proxy", "http_proxy", "http_proxy", "http_proxy",
+    "http_proxy", "http_proxy", "http_proxy", "http_proxy", "http_proxy",
+    "control", "control", "control", "control", "control",
+    "control", "control", "control", "control", "control",
+    "tcp_proxy", "tcp_proxy", "tcp_proxy", "tcp_proxy", "tcp_proxy",
+  ];
+  const statuses: ConnectionLog["status"][] = [
+    "closed_clean", "closed_clean", "closed_clean", "closed_error", "closed_idle",
+    "closed_clean", "closed_clean", "rejected", "closed_clean", "closed_error",
+    "closed_clean", "closed_clean", "closed_clean", "closed_clean", "closed_clean",
+    "closed_clean", "closed_clean", "closed_clean", "closed_error", "closed_idle",
+    "closed_clean", "closed_clean", "closed_clean", "closed_error", "closed_clean",
+  ];
+  const ips = [
+    "203.0.113.7", "198.51.100.4", "192.0.2.55", "10.0.0.1", "172.16.0.22",
+    "203.0.113.42", "198.51.100.9", "192.0.2.100", "10.0.1.7", "172.16.1.5",
+    "203.0.113.7", "198.51.100.4", "192.0.2.55", "10.0.0.1", "172.16.0.22",
+    "203.0.113.42", "198.51.100.9", "192.0.2.100", "10.0.1.7", "172.16.1.5",
+    "203.0.113.7", "198.51.100.4", "192.0.2.55", "10.0.0.1", "172.16.0.22",
+  ];
+  const svcIds = [
+    "svc_web01", "svc_ai001", "svc_graf01", "svc_pg001", "svc_web01",
+    "svc_ai001", "svc_graf01", "svc_pg001", "svc_web01", "svc_ai001",
+    "svc_web01", "svc_ai001", "svc_graf01", "svc_pg001", "svc_web01",
+    "svc_ai001", "svc_graf01", "svc_pg001", "svc_web01", "svc_ai001",
+    "svc_pg001", "svc_web01", "svc_ai001", "svc_pg001", "svc_web01",
+  ];
+  const logs: ConnectionLog[] = [];
+  for (let i = 0; i < 25; i++) {
+    const startedMs = base - i * 3600_000; // spread over 24h
+    const durMs = 500 + i * 200;
+    const endedMs = startedMs + durMs;
+    logs.push({
+      id: `cl_${String(i + 1).padStart(3, "0")}`,
+      kind: kinds[i]!,
+      service_id: svcIds[i]!,
+      tunnel_id: `tnl_${String(i + 1).padStart(3, "0")}`,
+      user_id: "bur_usr_admin01",
+      client_session_id: `sess_${String(i + 1).padStart(3, "0")}`,
+      source_ip: ips[i]!,
+      user_agent: "burrow-client/0.5.0",
+      started_at: new Date(startedMs).toISOString(),
+      ended_at: new Date(endedMs).toISOString(),
+      duration_ms: durMs,
+      bytes_in: 1024 * (i + 1),
+      bytes_out: 512 * (i + 1),
+      status: statuses[i]!,
+      reason: "",
+    });
+  }
+  return logs;
+}
+
+// 3 rollup rows — one per day for the last 3 days, each a different service+kind.
+function seedConnectionLogRollups(): ConnectionLogRollup[] {
+  const days = ["2026-05-20", "2026-05-21", "2026-05-22"];
+  const kinds: ConnectionLogRollup["kind"][] = ["http_proxy", "control", "tcp_proxy"];
+  const svcIds = ["svc_web01", "svc_ai001", "svc_pg001"];
+  return days.map((day, i) => ({
+    day,
+    service_id: svcIds[i]!,
+    kind: kinds[i]!,
+    sessions: 100 + i * 50,
+    bytes_in: 1_000_000 * (i + 1),
+    bytes_out: 500_000 * (i + 1),
+    avg_duration_ms: 300 + i * 100,
+    p95_duration_ms: 900 + i * 200,
+  }));
 }
 
 export let db: MockDb = seed();

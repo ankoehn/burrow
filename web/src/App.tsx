@@ -23,6 +23,7 @@ import Webhooks from "@/pages/Webhooks";
 import ProvisioningKeys from "@/pages/ProvisioningKeys";
 import AutomationTokens from "@/pages/AutomationTokens";
 import BackupRestore from "@/pages/BackupRestore";
+import ConnectionLogs from "@/pages/ConnectionLogs";
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/users" element={<Users />} />
         <Route path="/roles" element={<Roles />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/connection-logs" element={<ConnectionLogs />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

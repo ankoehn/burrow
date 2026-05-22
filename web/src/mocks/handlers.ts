@@ -1065,4 +1065,77 @@ export const handlers = [
   // ---- v0.5.0 database status (spec Part G) ----
   http.get("/api/v1/database", ({ request }) =>
     gate(request, { admin: true }) ?? json(db.databaseStatus)),
+
+  // ---- v0.5.0 connection logs (spec Part E) ----
+  http.get("/api/v1/connection-logs", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const url = new URL(request.url);
+    const kindFilter = url.searchParams.get("kind") ?? "";
+    const serviceId = url.searchParams.get("service_id") ?? "";
+    const since = url.searchParams.get("since") ?? "";
+    const until = url.searchParams.get("until") ?? "";
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 50));
+    const beforeId = url.searchParams.get("before_id") ?? "";
+    let rows = db.connectionLogs
+      .slice()
+      .sort((a, b) => (a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0));
+    if (kindFilter) rows = rows.filter((r) => r.kind === kindFilter);
+    if (serviceId) rows = rows.filter((r) => r.service_id === serviceId);
+    if (since) rows = rows.filter((r) => r.started_at >= since);
+    if (until) rows = rows.filter((r) => r.started_at <= until);
+    if (q) rows = rows.filter((r) =>
+      `${r.source_ip} ${r.kind} ${r.service_id} ${r.status}`.toLowerCase().includes(q),
+    );
+    if (beforeId) {
+      const i = rows.findIndex((r) => r.id === beforeId);
+      if (i >= 0) rows = rows.slice(i + 1);
+    }
+    return json(rows.slice(0, limit));
+  }),
+
+  http.get("/api/v1/connection-logs/rollups", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const url = new URL(request.url);
+    const serviceId = url.searchParams.get("service_id") ?? "";
+    const kindFilter = url.searchParams.get("kind") ?? "";
+    const since = url.searchParams.get("since") ?? "";
+    const until = url.searchParams.get("until") ?? "";
+    let rows = db.connectionLogRollups.slice();
+    if (serviceId) rows = rows.filter((r) => r.service_id === serviceId);
+    if (kindFilter) rows = rows.filter((r) => r.kind === kindFilter);
+    if (since) rows = rows.filter((r) => r.day >= since.slice(0, 10));
+    if (until) rows = rows.filter((r) => r.day <= until.slice(0, 10));
+    return json(rows);
+  }),
+
+  http.get("/api/v1/connection-logs/export", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const lines = db.connectionLogs.map((r) => JSON.stringify(r)).join("\n");
+    return new HttpResponse(lines || '{"stub":true}', {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }),
+
+  // ---- v0.5.0 OpenAPI viewer stubs ----
+  http.get("/api/v1/openapi/viewer", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return new HttpResponse("<!doctype html><h1>OpenAPI</h1>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    });
+  }),
+  http.get("/api/v1/openapi/viewer/static/viewer.js", () =>
+    new HttpResponse("// openapi viewer stub", {
+      status: 200,
+      headers: { "Content-Type": "application/javascript" },
+    }),
+  ),
+  http.get("/api/v1/openapi/viewer/static/viewer.css", () =>
+    new HttpResponse("/* openapi viewer stub */", {
+      status: 200,
+      headers: { "Content-Type": "text/css" },
+    }),
+  ),
 ];
