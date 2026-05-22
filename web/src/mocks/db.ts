@@ -6,6 +6,7 @@ import type {
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
   ModelAliasV5, UpstreamCredentialBinding, CustomDomain,
+  RetentionSettings, DatabaseStatus,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -73,6 +74,10 @@ export interface MockDb {
   upstreamBindings: Record<string, UpstreamCredentialBinding>;
   // v0.5.0 custom domains (spec Part D).
   customDomains: CustomDomain[];
+  // v0.5.0 retention settings (spec Part F).
+  retentionSettings: RetentionSettings;
+  // v0.5.0 database status (spec Part G).
+  databaseStatus: DatabaseStatus;
 }
 
 function seed(): MockDb {
@@ -256,6 +261,23 @@ function seed(): MockDb {
         status: "active",
       },
     ],
+    // v0.5.0 retention settings (spec Part F).
+    retentionSettings: {
+      audit_retention_days: 0,
+      usage_retention_days: 90,
+      redaction_retention_days: 30,
+      connection_logs_retention_days: 30,
+      connection_log_rollups_retention_days: 0,
+      webhook_deliveries_retention_days: 30,
+      inspector_retention_count: 100,
+      audit_retention_note: "Audit retention only deletes the six rate-limited leaf event types — see docs.",
+    },
+    // v0.5.0 database status (spec Part G).
+    databaseStatus: {
+      driver: "sqlite",
+      postgres_alpha: false,
+      url_redacted: "",
+    },
   };
 }
 
