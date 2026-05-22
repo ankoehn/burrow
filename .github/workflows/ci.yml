@@ -83,3 +83,26 @@ jobs:
           name: playwright-report
           path: web/playwright-report/
           retention-days: 7
+
+  e2e-compose-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: test/integration/package-lock.json
+      # The existing curl data-plane gate. Cheap and quick; gates the heavier UI suite.
+      - run: bash test/integration/smoke.sh
+      # Playwright suite — brings stack back up, runs 5 specs, tears down.
+      - run: bash test/integration/smoke-ui.sh
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: e2e-compose-ui-playwright-report
+          path: |
+            test/integration/playwright-report/
+            test/integration/test-results/
+          retention-days: 7
