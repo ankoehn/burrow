@@ -158,6 +158,7 @@ type Webhook struct {
 	ConsecutiveFailures int
 	FirstFailureAt      *time.Time
 	CreatedAt           time.Time
+	PayloadTemplate     string // v0.5.0: optional Go template for the payload body
 }
 
 // WebhookDelivery is a row of the webhook_deliveries table.
@@ -186,6 +187,8 @@ type ModelAlias struct {
 	ConcreteModel string
 	ServiceID     string
 	CreatedAt     time.Time
+	Provider      string // v0.5.0: upstream provider name (e.g. "openai", "ollama")
+	Priority      int    // v0.5.0: routing priority (lower = higher priority)
 }
 
 // RateLimit is a row of the rate_limits table.
@@ -233,6 +236,75 @@ type AutomationToken struct {
 	ExpiresAt   *time.Time
 	LastUsed    *time.Time
 	CreatedAt   time.Time
+}
+
+// --- v0.5.0 model structs (migrations 0011-0017) -----------------------------
+
+// SemanticIndexRow is a row of the semantic_index table.
+type SemanticIndexRow struct {
+	ServiceID         string
+	ExactKeyHash      string
+	PromptFingerprint string
+	EmbeddingDim      int
+	EmbeddingBlob     []byte
+	CreatedAt         time.Time
+}
+
+// ServiceUpstreamCredential is a row of the service_upstream_credentials table.
+type ServiceUpstreamCredential struct {
+	ServiceID    string
+	Slot         string
+	HeaderName   string
+	HeaderFormat string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// ServiceCustomDomain is a row of the service_custom_domains table.
+type ServiceCustomDomain struct {
+	ID         string
+	ServiceID  string
+	Hostname   string
+	CertPEM    string
+	KeyPEM     string
+	CertSHA256 string
+	NotBefore  time.Time
+	NotAfter   time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// ConnectionLog is a row of the connection_logs table.
+type ConnectionLog struct {
+	ID              string
+	Kind            string
+	ServiceID       string
+	TunnelID        string
+	UserID          string
+	ClientSessionID string
+	SourceIP        string
+	UserAgent       string
+	StartedAt       time.Time
+	EndedAt         time.Time
+	DurationMs      int
+	BytesIn         int64
+	BytesOut        int64
+	Status          string
+	Reason          string
+	CreatedAt       time.Time
+}
+
+// ConnectionLogRollup is a row of the connection_log_rollups table.
+type ConnectionLogRollup struct {
+	Day           string // DATE stored as TEXT in SQLite (YYYY-MM-DD)
+	ServiceID     string
+	Kind          string
+	Sessions      int64
+	BytesIn       int64
+	BytesOut      int64
+	AvgDurationMs int64
+	P95DurationMs int64
+	CreatedAt     time.Time
 }
 
 // DB wraps *sql.DB and exposes typed CRUD methods for Burrow's tables.

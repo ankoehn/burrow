@@ -9,8 +9,9 @@ func TestSettingsUpsert(t *testing.T) {
 	ctx := context.Background()
 	x := testDB(t)
 
-	if got, err := x.GetAllSettings(ctx); err != nil || len(got) != 0 {
-		t.Fatalf("empty settings: %+v %v", got, err)
+	// Migration 0017 seeds 7 retention settings; no user-configured settings yet.
+	if got, err := x.GetAllSettings(ctx); err != nil || len(got) != 7 {
+		t.Fatalf("want 7 seeded retention settings, got %d: %+v %v", len(got), got, err)
 	}
 	if err := x.SetSettings(ctx, map[string]string{"smtp.host": "mail.example.com", "smtp.port": "587"}); err != nil {
 		t.Fatal(err)
