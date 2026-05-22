@@ -419,6 +419,17 @@ type Deps struct {
 	CredentialServices ServiceOwnerLookup
 	// NOTE: audit events for bind/unbind use the existing Deps.AuditAppender
 	// field (same *audit.Logger adapter used by backup_handlers.go).
+
+	// v0.5.0 Task 7: custom domain CRUD (spec D.2 / D.3).
+	// CustomDomains is the CRUD surface for the service_custom_domains table.
+	// *db.DB satisfies it. Nil degrades gracefully: GET returns []; POST/PUT
+	// return 500 "custom domain store unavailable".
+	CustomDomains CustomDomainStore
+	// CustomDomainCache is the in-memory cert cache invalidation surface.
+	// *customdomain.Store satisfies it. Nil is safe (cache simply not
+	// invalidated on mutation — correct after the next process restart).
+	// cmd/server wiring is deferred to Task 17.
+	CustomDomainCache CustomDomainCacheInvalidator
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

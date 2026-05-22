@@ -1,0 +1,212 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// InsertCustomDomain inserts a new service_custom_domains row and returns the
+// inserted row. Returns ErrDuplicateHostname (wrapping a sqlite UNIQUE error)
+// when the hostname is already bound to another service.
+func (x *DB) InsertCustomDomain(ctx context.Context, d ServiceCustomDomain) (ServiceCustomDomain, error) {
+	d.ID = uuid.NewString()
+	d.Hostname = strings.ToLower(d.Hostname)
+	now := time.Now().UTC()
+	d.CreatedAt = now
+	d.UpdatedAt = now
+
+	_, err := x.sqlDB.ExecContext(ctx,
+		`INSERT INTO service_custom_domains
+		   (id, service_id, hostname, cert_pem, key_pem, cert_sha256, not_before, not_after, created_at, updated_at)
+		   VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.ServiceID, d.Hostname, d.CertPEM, d.KeyPEM, d.CertSHA256,
+		d.NotBefore, d.NotAfter, d.CreatedAt, d.UpdatedAt,
+	)
+	if err != nil {
+		if isDuplicateError(err) {
+			return ServiceCustomDomain{}, ErrDuplicateHostname
+		}
+		return ServiceCustomDomain{}, fmt.Errorf("insert custom domain: %w", err)
+	}
+	return d, nil
+}
+
+// UpdateCustomDomain replaces the cert/key/sha256/not_before/not_after columns
+// for an existing row. Returns ErrNotFound when no row matches (id, service_id).
+// Returns ErrDuplicateHostname when the new hostname conflicts.
+func (x *DB) UpdateCustomDomain(ctx context.Context, d ServiceCustomDomain) error {
+	d.Hostname = strings.ToLower(d.Hostname)
+	now := time.Now().UTC()
+
+	res, err := x.sqlDB.ExecContext(ctx,
+		`UPDATE service_custom_domains
+		    SET hostname=?, cert_pem=?, key_pem=?, cert_sha256=?,
+		        not_before=?, not_after=?, updated_at=?
+		  WHERE id=? AND service_id=?`,
+		d.Hostname, d.CertPEM, d.KeyPEM, d.CertSHA256,
+		d.NotBefore, d.NotAfter, now,
+		d.ID, d.ServiceID,
+	)
+	if err != nil {
+		if isDuplicateError(err) {
+			return ErrDuplicateHostname
+		}
+		return fmt.Errorf("update custom domain: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetCustomDomain returns the domain row matching (id, service_id), or
+// ErrNotFound when no row matches.
+func (x *DB) GetCustomDomain(ctx context.Context, serviceID, id string) (ServiceCustomDomain, error) {
+	var d ServiceCustomDomain
+	err := x.sqlDB.QueryRowContext(ctx,
+		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
+		        not_before, not_after, created_at, updated_at
+		   FROM service_custom_domains WHERE id=? AND service_id=?`,
+		id, serviceID,
+	).Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
+		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return ServiceCustomDomain{}, ErrNotFound
+	}
+	if err != nil {
+		return ServiceCustomDomain{}, fmt.Errorf("get custom domain: %w", err)
+	}
+	return d, nil
+}
+
+// ListCustomDomains returns all domain rows for the given serviceID.
+func (x *DB) ListCustomDomains(ctx context.Context, serviceID string) ([]ServiceCustomDomain, error) {
+	rows, err := x.sqlDB.QueryContext(ctx,
+		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
+		        not_before, not_after, created_at, updated_at
+		   FROM service_custom_domains WHERE service_id=?
+		   ORDER BY created_at`,
+		serviceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list custom domains: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ServiceCustomDomain
+	for rows.Next() {
+		var d ServiceCustomDomain
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan custom domain: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DeleteCustomDomain removes the row matching (id, service_id). It is not an
+// error if no row matched (idempotent delete).
+func (x *DB) DeleteCustomDomain(ctx context.Context, serviceID, id string) error {
+	_, err := x.sqlDB.ExecContext(ctx,
+		`DELETE FROM service_custom_domains WHERE id=? AND service_id=?`,
+		id, serviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete custom domain: %w", err)
+	}
+	return nil
+}
+
+// LookupCustomDomainByHostname returns the domain row matching the given
+// (lower-cased) hostname, or ErrNotFound.
+func (x *DB) LookupCustomDomainByHostname(ctx context.Context, hostname string) (ServiceCustomDomain, error) {
+	hostname = strings.ToLower(hostname)
+	var d ServiceCustomDomain
+	err := x.sqlDB.QueryRowContext(ctx,
+		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
+		        not_before, not_after, created_at, updated_at
+		   FROM service_custom_domains WHERE hostname=?`,
+		hostname,
+	).Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
+		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return ServiceCustomDomain{}, ErrNotFound
+	}
+	if err != nil {
+		return ServiceCustomDomain{}, fmt.Errorf("lookup custom domain by hostname: %w", err)
+	}
+	return d, nil
+}
+
+// ListExpiringCustomDomains returns all rows where not_after < cutoff,
+// for the cert-expiry ticker.
+func (x *DB) ListExpiringCustomDomains(ctx context.Context, cutoff time.Time) ([]ServiceCustomDomain, error) {
+	rows, err := x.sqlDB.QueryContext(ctx,
+		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
+		        not_before, not_after, created_at, updated_at
+		   FROM service_custom_domains WHERE not_after < ?
+		   ORDER BY not_after`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list expiring custom domains: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ServiceCustomDomain
+	for rows.Next() {
+		var d ServiceCustomDomain
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan expiring custom domain: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ListAllCustomDomains returns every row in service_custom_domains. Used by
+// the cert-expiry gauge tick to update metrics for all domains.
+func (x *DB) ListAllCustomDomains(ctx context.Context) ([]ServiceCustomDomain, error) {
+	rows, err := x.sqlDB.QueryContext(ctx,
+		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
+		        not_before, not_after, created_at, updated_at
+		   FROM service_custom_domains ORDER BY hostname`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all custom domains: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ServiceCustomDomain
+	for rows.Next() {
+		var d ServiceCustomDomain
+		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan custom domain: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// isDuplicateError reports whether err is a SQLite UNIQUE constraint violation.
+func isDuplicateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "unique constraint")
+}
+
+// ErrDuplicateHostname is returned when a hostname INSERT conflicts with an
+// existing row (UNIQUE constraint on service_custom_domains.hostname).
+var ErrDuplicateHostname = fmt.Errorf("hostname already bound")

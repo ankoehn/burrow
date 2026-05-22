@@ -27,6 +27,11 @@ type MetricsRecorder interface {
 	// preferable to a fully-buffered render that may OOM on long uptimes);
 	// errors are logged via Deps.Log.
 	WriteText(w http.ResponseWriter) error
+
+	// SetCertExpiryDays sets the burrow_cert_expiry_days{cert} gauge to d.
+	// Used by the custom-domain handlers (v0.5.0 Task 7) to record per-domain
+	// cert expiry after INSERT / UPDATE.
+	SetCertExpiryDays(cert string, d float64)
 }
 
 // metricsRecorderAdapter wraps *metrics.Recorder to satisfy MetricsRecorder.
@@ -45,6 +50,10 @@ func NewMetricsRecorderAdapter(r *metrics.Recorder) MetricsRecorder {
 
 func (a metricsRecorderAdapter) WriteText(w http.ResponseWriter) error {
 	return a.r.WriteText(w)
+}
+
+func (a metricsRecorderAdapter) SetCertExpiryDays(cert string, d float64) {
+	a.r.SetCertExpiryDays(cert, d)
 }
 
 // requireMetricsRead is the admin OR metrics:read gate for /metrics. Cookie

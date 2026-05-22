@@ -158,6 +158,12 @@ func (f *fakeWebhookDispatcher) DeliverNow(_ context.Context, id, event string, 
 	return 1, 200, nil
 }
 
+func (f *fakeWebhookDispatcher) Publish(_ context.Context, event string, payload any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, deliverCall{Event: event, Payload: payload})
+	f.mu.Unlock()
+}
+
 // fakeSecretRegistry records Set/Delete calls.
 type fakeSecretRegistry struct {
 	mu      sync.Mutex
@@ -281,7 +287,10 @@ func TestWebhookHandler_PostReturnsSecretOnce(t *testing.T) {
 
 func TestWebhookHandler_PostValidation(t *testing.T) {
 	_, c, _, _, _ := newWebhookTestServer(t, "admin")
-	cases := []struct{ name string; body map[string]any }{
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
 		{"empty name", map[string]any{
 			"name": "", "url": "https://x.com", "events": []string{"webhook.test"}}},
 		{"empty url", map[string]any{

@@ -193,6 +193,8 @@ func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
 		CredentialVault:    &stubCredVaultForOpenAPI{},
 		CredentialDB:       stub,
 		CredentialServices: stub,
+		// v0.5.0 Task 7: custom domain store (nil OK — routes registered unconditionally).
+		CustomDomains: stub,
 	}
 	r := NewRouter(deps)
 	mux, ok := r.(chi.Router)
@@ -642,6 +644,9 @@ func (*fullDepsStub) DeliverNow(context.Context, string, string, any) (int, int,
 	stubPanic("DeliverNow")
 	return 0, 0, nil
 }
+func (*fullDepsStub) Publish(context.Context, string, any) {
+	stubPanic("Publish")
+}
 
 // WebhookSecretRegistry.
 func (*fullDepsStub) Set(string, string) {
@@ -748,6 +753,9 @@ func (*fullDepsStub) WriteText(http.ResponseWriter) error {
 	stubPanic("WriteText")
 	return nil
 }
+func (*fullDepsStub) SetCertExpiryDays(string, float64) {
+	stubPanic("SetCertExpiryDays")
+}
 
 // MCPToolsLister.
 func (*fullDepsStub) Tools() []mcpserv.ToolDescriptor {
@@ -761,7 +769,7 @@ func (*fullDepsStub) Tools() []mcpserv.ToolDescriptor {
 type stubCredVaultForOpenAPI struct{}
 
 func (*stubCredVaultForOpenAPI) Get(string) (string, bool) { return "", false }
-func (*stubCredVaultForOpenAPI) Slots() []string            { return nil }
+func (*stubCredVaultForOpenAPI) Slots() []string           { return nil }
 
 // CredentialStore (v0.5.0 Task 5).
 func (*fullDepsStub) GetUpstreamCredential(context.Context, string) (db.ServiceUpstreamCredential, error) {
@@ -775,6 +783,32 @@ func (*fullDepsStub) UpsertUpstreamCredential(context.Context, db.ServiceUpstrea
 func (*fullDepsStub) DeleteUpstreamCredential(context.Context, string) error {
 	stubPanic("CredentialStore.DeleteUpstreamCredential")
 	return nil
+}
+
+// CustomDomainStore (v0.5.0 Task 7).
+func (*fullDepsStub) InsertCustomDomain(context.Context, db.ServiceCustomDomain) (db.ServiceCustomDomain, error) {
+	stubPanic("CustomDomainStore.InsertCustomDomain")
+	return db.ServiceCustomDomain{}, nil
+}
+func (*fullDepsStub) UpdateCustomDomain(context.Context, db.ServiceCustomDomain) error {
+	stubPanic("CustomDomainStore.UpdateCustomDomain")
+	return nil
+}
+func (*fullDepsStub) GetCustomDomain(context.Context, string, string) (db.ServiceCustomDomain, error) {
+	stubPanic("CustomDomainStore.GetCustomDomain")
+	return db.ServiceCustomDomain{}, nil
+}
+func (*fullDepsStub) ListCustomDomains(context.Context, string) ([]db.ServiceCustomDomain, error) {
+	stubPanic("CustomDomainStore.ListCustomDomains")
+	return nil, nil
+}
+func (*fullDepsStub) DeleteCustomDomain(context.Context, string, string) error {
+	stubPanic("CustomDomainStore.DeleteCustomDomain")
+	return nil
+}
+func (*fullDepsStub) ListAllCustomDomains(context.Context) ([]db.ServiceCustomDomain, error) {
+	stubPanic("CustomDomainStore.ListAllCustomDomains")
+	return nil, nil
 }
 
 // TestOpenAPI_EmbedFresh asserts the embedded copy at

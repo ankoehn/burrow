@@ -193,6 +193,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/services/{serviceID}/upstream-credential", d.GetServiceUpstreamCredential)
 			r.Put("/services/{serviceID}/upstream-credential", d.PutServiceUpstreamCredential)
 			r.Delete("/services/{serviceID}/upstream-credential", d.DeleteServiceUpstreamCredential)
+			// v0.5.0 Task 7: custom domain CRUD (spec D.2 / D.3).
+			// Permission: admin OR services:configure:any OR (owner AND
+			// services:configure:own). Enforced inside handlers via
+			// ensureCustomDomainAccess.
+			r.Get("/services/{serviceID}/domains", d.ListCustomDomains)
+			r.Post("/services/{serviceID}/domains", d.PostCustomDomain)
+			r.Get("/services/{serviceID}/domains/{did}", d.GetCustomDomain)
+			r.Put("/services/{serviceID}/domains/{did}", d.PutCustomDomain)
+			r.Delete("/services/{serviceID}/domains/{did}", d.DeleteCustomDomain)
 			// v0.4.0 Task 5: redaction rules + settings + preview JSON API.
 			// GET endpoints are session-authed (any user may read); mutations
 			// (POST/PUT/DELETE rules, PUT settings, POST preview) are gated

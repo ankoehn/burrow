@@ -1976,6 +1976,116 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ────────────────────────────────────────────────────────────────────────
+  # Custom domains (v0.5.0 Task 7, spec D.2)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/services/{serviceID}/domains:
+    get:
+      tags: [services]
+      summary: List custom domains bound to a service
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of custom domain objects (no key_pem).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [services]
+      summary: Add a custom domain to a service
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname, cert_pem, key_pem]
+              properties:
+                hostname: { type: string }
+                cert_pem: { type: string }
+                key_pem: { type: string }
+      responses:
+        '201':
+          description: Domain created.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Hostname already bound. }
+  /api/v1/services/{serviceID}/domains/{did}:
+    get:
+      tags: [services]
+      summary: Get a single custom domain by ID
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: did
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Domain object (no key_pem).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [services]
+      summary: Replace the cert/key for a custom domain
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: did
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname, cert_pem, key_pem]
+              properties:
+                hostname: { type: string }
+                cert_pem: { type: string }
+                key_pem: { type: string }
+      responses:
+        '204': { description: Updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Hostname already bound. }
+    delete:
+      tags: [services]
+      summary: Remove a custom domain
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: did
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
   # Events (SSE)
   # ────────────────────────────────────────────────────────────────────────
   /api/v1/events:

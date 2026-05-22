@@ -45,6 +45,11 @@ type WebhookDispatcher interface {
 	// DeliverNow runs one full retry cycle synchronously for the given
 	// webhook. Used by POST /webhooks/{id}/test.
 	DeliverNow(ctx context.Context, webhookID, event string, payload any) (int, int, error)
+
+	// Publish enqueues an event for async fan-out to all subscribed webhooks.
+	// Fire-and-forget; used by the custom-domain handler to emit cert.expiring
+	// events (v0.5.0 Task 7) and by the cost engine for budget.exceeded events.
+	Publish(ctx context.Context, event string, payload any)
 }
 
 // WebhookSecretRegistry is the secret-plaintext side of the dispatcher.
@@ -89,7 +94,7 @@ type webhookResp struct {
 	URL                 string     `json:"url"`
 	Events              []string   `json:"events"`
 	Paused              bool       `json:"paused"`
-	Status              string     `json:"status"`           // "ok" | "failing"
+	Status              string     `json:"status"` // "ok" | "failing"
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	FirstFailureAt      *time.Time `json:"first_failure_at,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`

@@ -61,10 +61,10 @@ const (
 	ActionRateLimitDelete   = "ratelimit.delete"
 	ActionRateLimitEnforced = "ratelimit.enforced"
 
-	ActionWebhookCreate          = "webhook.create"
-	ActionWebhookUpdate          = "webhook.update"
-	ActionWebhookDelete          = "webhook.delete"
-	ActionWebhookDeliveryFailed  = "webhook.delivery.failed"
+	ActionWebhookCreate         = "webhook.create"
+	ActionWebhookUpdate         = "webhook.update"
+	ActionWebhookDelete         = "webhook.delete"
+	ActionWebhookDeliveryFailed = "webhook.delivery.failed"
 
 	ActionBackupRun     = "backup.run"
 	ActionBackupRestore = "backup.restore"
@@ -87,6 +87,11 @@ const (
 	// v0.5.0 Task 5: upstream-credential binding / unbinding.
 	ActionServiceUpstreamCredentialBind   = "service.upstream_credential.bind"
 	ActionServiceUpstreamCredentialUnbind = "service.upstream_credential.unbind"
+
+	// v0.5.0 Task 7: custom domain CRUD.
+	ActionServiceCustomDomainAdd    = "service.custom_domain.add"
+	ActionServiceCustomDomainUpdate = "service.custom_domain.update"
+	ActionServiceCustomDomainDelete = "service.custom_domain.delete"
 )
 
 // AllActions is the closed set of every audit action Burrow defines, in a
@@ -116,6 +121,7 @@ var AllActions = []string{
 	ActionAutomationTokenMint, ActionAutomationTokenRevoke,
 	ActionMCPToolCall,
 	ActionServiceUpstreamCredentialBind, ActionServiceUpstreamCredentialUnbind,
+	ActionServiceCustomDomainAdd, ActionServiceCustomDomainUpdate, ActionServiceCustomDomainDelete,
 }
 
 // aggregatedActions is the set of actions that are sample-rated at 1/hour

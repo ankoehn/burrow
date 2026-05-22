@@ -30,6 +30,8 @@ func (f *fakeMetricsRecorder) WriteText(w http.ResponseWriter) error {
 	return nil
 }
 
+func (f *fakeMetricsRecorder) SetCertExpiryDays(_ string, _ float64) {}
+
 // TestMetricsUnauthenticated401 asserts /metrics requires a session. No
 // cookies → 401, and the body MUST NOT leak any metric content.
 func TestMetricsUnauthenticated401(t *testing.T) {
