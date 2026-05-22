@@ -5,9 +5,9 @@ import { MoreHorizontal } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, DropdownMenu, ErrorNotice, Select, SkeletonRows, Switch } from "@/components/ds";
+import { Button, Dialog, DropdownMenu, ErrorNotice, Input, Select, SkeletonRows, Switch } from "@/components/ds";
 import type {
-  AiEndpoint, ModelAlias, Service, ServiceAIConfig,
+  AiEndpoint, ModelAliasV5, Provider, Service, ServiceAIConfig,
 } from "@/lib/contract";
 
 interface EndpointMetrics {
@@ -66,7 +66,25 @@ const STRATEGY_OPTIONS = [
   { value: "weighted", label: "Weighted" },
   { value: "header_based", label: "Header-based" },
   { value: "sticky", label: "Sticky session" },
+  { value: "multi_provider", label: "Multi-provider (cross-backend)" },
 ];
+
+const PROVIDER_OPTIONS: { value: Provider; label: string }[] = [
+  { value: "ollama", label: "Ollama" },
+  { value: "vllm", label: "vLLM" },
+  { value: "openai-compat", label: "OpenAI-compat" },
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "other", label: "Other" },
+];
+
+interface AliasFormState {
+  alias: string;
+  concrete_model: string;
+  service_id: string;
+  provider: Provider;
+  priority: number;
+}
 
 export default function AiEndpointDetail() {
   const { id = "" } = useParams<{ id: string }>();
@@ -99,7 +117,12 @@ export default function AiEndpointDetail() {
   });
   const aliases = useQuery({
     queryKey: ["models", "aliases"],
-    queryFn: () => apiFetch<ModelAlias[]>("/models/aliases"),
+    queryFn: () => apiFetch<ModelAliasV5[]>("/models/aliases"),
+    retry: false,
+  });
+  const services = useQuery({
+    queryKey: ["services"],
+    queryFn: () => apiFetch<Service[]>("/services"),
     retry: false,
   });
   const recent = useQuery({
@@ -114,6 +137,16 @@ export default function AiEndpointDetail() {
   useEffect(() => {
     if (cfg.data && !draft) setDraft(cfg.data);
   }, [cfg.data, draft]);
+
+  // Add alias dialog state
+  const [aliasDialogOpen, setAliasDialogOpen] = useState(false);
+  const [aliasForm, setAliasForm] = useState<AliasFormState>({
+    alias: "",
+    concrete_model: "",
+    service_id: id,
+    provider: "ollama",
+    priority: 100,
+  });
 
   const save = useMutation({
     mutationFn: (next: ServiceAIConfig) =>
@@ -147,6 +180,23 @@ export default function AiEndpointDetail() {
     },
     onError: (e: unknown) =>
       toast.error(e instanceof ApiError ? e.message : "Couldn't disable endpoint."),
+  });
+
+  const createAlias = useMutation({
+    mutationFn: (data: AliasFormState) =>
+      apiFetch<ModelAliasV5>("/models/aliases", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      toast.success("Alias created.");
+      qc.invalidateQueries({ queryKey: ["models", "aliases"] });
+      setAliasDialogOpen(false);
+      setAliasForm({ alias: "", concrete_model: "", service_id: id, provider: "ollama", priority: 100 });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof ApiError ? e.message : "Couldn't create alias.");
+    },
   });
 
   const aiRow = (endpoints.data ?? []).find((e) => e.service_id === id);
@@ -214,6 +264,15 @@ export default function AiEndpointDetail() {
   };
 
   const sticky = routing.strategy === "sticky";
+
+  // Look up provider chip for a backend row
+  function getProviderForBackend(service_id: string): string {
+    const match = (aliases.data ?? []).find((a) => a.service_id === service_id);
+    return match?.provider ?? "—";
+  }
+
+  // Service options for the "Add alias" dialog
+  const serviceOptions = (services.data ?? []).map((s) => ({ value: s.id, label: s.name }));
 
   return (
     <div className="ai-endpoint-detail-page">
@@ -285,6 +344,17 @@ export default function AiEndpointDetail() {
               options={STRATEGY_OPTIONS}
             />
           </div>
+          {(routing.strategy as string) === "multi_provider" && (
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <p
+                data-testid="multi-provider-banner"
+                className="muted"
+                style={{ margin: 0, padding: "0.5rem 0.75rem", border: "1px solid var(--border, #e5e7eb)", borderRadius: 6, fontSize: "0.875rem" }}
+              >
+                Cross-provider failover is allowed only when <code>Idempotency-Key</code> is set and zero bytes have streamed. See routing docs.
+              </p>
+            </div>
+          )}
           <div className="field">
             <label className="row gap-2" htmlFor={`${headingId}-sticky`}>
               <Switch
@@ -313,6 +383,69 @@ export default function AiEndpointDetail() {
           <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>
             {save.isPending ? "Saving…" : "Save routing"}
           </Button>
+        </div>
+      </section>
+
+      <section aria-labelledby={`${headingId}-backends`} className="card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+          <h2 id={`${headingId}-backends`}>Backends</h2>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setAliasForm({ alias: "", concrete_model: "", service_id: id, provider: "ollama", priority: 100 });
+              setAliasDialogOpen(true);
+            }}
+          >
+            Add alias
+          </Button>
+        </div>
+        <div className="table-wrap">
+          <table className="data" aria-label="Backends">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Concrete model</th>
+                <th>Weight</th>
+                <th>Provider</th>
+                <th>Priority</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(routing.backends ?? []).map((b) => (
+                <tr key={b.service_id}>
+                  <td className="mono">{b.service_id}</td>
+                  <td className="mono">{b.concrete_model}</td>
+                  <td className="mono">{b.weight}</td>
+                  <td>
+                    <span
+                      className="chip"
+                      style={{
+                        display: "inline-block",
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                        fontSize: "0.75rem",
+                        background: "var(--surface-2, #f3f4f6)",
+                        fontFamily: "monospace",
+                      }}
+                    >
+                      {getProviderForBackend(b.service_id)}
+                    </span>
+                  </td>
+                  <td className="mono">
+                    {(aliases.data ?? []).find((a) => a.service_id === b.service_id)?.priority ?? "—"}
+                  </td>
+                </tr>
+              ))}
+              {(routing.backends ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1rem 0" }}>
+                    No backends configured. Add an alias to get started.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -352,6 +485,80 @@ export default function AiEndpointDetail() {
           </table>
         </div>
       </section>
+
+      {/* Add alias dialog */}
+      <Dialog
+        open={aliasDialogOpen}
+        onOpenChange={setAliasDialogOpen}
+        title="Add alias"
+        description="Create a new model alias binding for this endpoint."
+        footer={
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="sm" onClick={() => setAliasDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={createAlias.isPending}
+              onClick={() => createAlias.mutate(aliasForm)}
+            >
+              {createAlias.isPending ? "Creating…" : "Create alias"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="form-grid" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div className="field">
+            <label htmlFor="alias-field-alias">Alias</label>
+            <Input
+              id="alias-field-alias"
+              value={aliasForm.alias}
+              onChange={(e) => setAliasForm((f) => ({ ...f, alias: e.target.value }))}
+              placeholder="e.g. fast"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="alias-field-model">Concrete model</label>
+            <Input
+              id="alias-field-model"
+              value={aliasForm.concrete_model}
+              onChange={(e) => setAliasForm((f) => ({ ...f, concrete_model: e.target.value }))}
+              placeholder="e.g. llama3.1:8b"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="alias-field-service">Service</label>
+            <Select
+              id="alias-field-service"
+              value={aliasForm.service_id}
+              onChange={(v) => setAliasForm((f) => ({ ...f, service_id: v }))}
+              options={serviceOptions.length > 0 ? serviceOptions : [{ value: id, label: id }]}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="alias-field-provider">Provider</label>
+            <Select
+              id="alias-field-provider"
+              value={aliasForm.provider}
+              onChange={(v) => setAliasForm((f) => ({ ...f, provider: v as Provider }))}
+              options={PROVIDER_OPTIONS}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="alias-field-priority">Priority</label>
+            <Input
+              id="alias-field-priority"
+              type="number"
+              min={0}
+              max={999}
+              value={String(aliasForm.priority)}
+              onChange={(e) => setAliasForm((f) => ({ ...f, priority: Number(e.target.value) }))}
+            />
+          </div>
+        </div>
+      </Dialog>
+
       <Toaster />
     </div>
   );

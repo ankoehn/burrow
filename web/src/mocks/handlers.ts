@@ -1,6 +1,8 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb, type CacheSettingsPayload } from "@/mocks/db";
-import type { AiEndpoint, CostSummary, ServiceAIConfig, WebAuthnCredential } from "@/lib/contract";
+import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, WebAuthnCredential } from "@/lib/contract";
+
+const VALID_PROVIDERS = new Set<string>(["ollama", "vllm", "openai-compat", "openai", "anthropic", "other"]);
 
 const json = (body: unknown, status = 200) => HttpResponse.json(body as object, { status });
 const err = (status: number, message: string) => HttpResponse.json({ error: message }, { status });
@@ -811,5 +813,50 @@ export const handlers = [
   http.post("/api/v1/backups/restore", ({ request }) => {
     const g = gate(request, { admin: true }); if (g) return g;
     return json({ restore_id: `rs_${Math.random().toString(36).slice(2, 8)}`, started_at: new Date().toISOString() }, 202);
+  }),
+
+  // ---- v0.5.0 model aliases (spec Part C) ----
+  http.get("/api/v1/models/aliases", ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    return json(db.modelAliases);
+  }),
+  http.post("/api/v1/models/aliases", async ({ request }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const b = await body<{
+      alias?: string;
+      concrete_model?: string;
+      service_id?: string;
+      provider?: string;
+      priority?: number;
+    }>(request);
+    if (!b?.alias) return err(400, "alias is required");
+    if (!b?.concrete_model) return err(400, "concrete_model is required");
+    if (!b?.service_id) return err(400, "service_id is required");
+    const svc = db.services.find((s) => s.id === b.service_id);
+    if (!svc) return err(400, "service_id does not exist");
+    if (b.provider && !VALID_PROVIDERS.has(b.provider))
+      return err(400, "provider must be one of: ollama, vllm, openai-compat, openai, anthropic, other");
+    const alias: ModelAliasV5 = {
+      alias: b.alias,
+      concrete_model: b.concrete_model,
+      service_id: b.service_id,
+      provider: (b.provider as Provider) ?? "other",
+      priority: b.priority ?? 100,
+      created_at: new Date().toISOString(),
+    };
+    db.modelAliases.push(alias);
+    return json(alias, 201);
+  }),
+  http.put("/api/v1/models/aliases/:alias", async ({ request, params }) => {
+    const g = gate(request, { admin: true }); if (g) return g;
+    const entries = db.modelAliases.filter((a) => a.alias === params.alias);
+    if (entries.length === 0) return err(404, "alias not found");
+    const b = await body<{ provider?: string; priority?: number }>(request);
+    if (!b) return err(400, "invalid body");
+    for (const entry of entries) {
+      if (b.provider != null && VALID_PROVIDERS.has(b.provider)) entry.provider = b.provider as Provider;
+      if (b.priority != null) entry.priority = b.priority;
+    }
+    return noContent();
   }),
 ];

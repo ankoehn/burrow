@@ -1,10 +1,11 @@
 import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
-  Service, ServiceApiKey, ModelAlias, CostSummary, ServiceAIConfig,
+  Service, ServiceApiKey, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
+  ModelAliasV5,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
@@ -46,7 +47,7 @@ export interface MockDb {
   serviceApiKeys: Record<string, ServiceApiKey[]>;
   serviceAccessPolicy: Record<string, string[]>;
   aiMeta: Record<string, AiMetaRow>;
-  modelAliases: ModelAlias[];
+  modelAliases: ModelAliasV5[];
   costSummary: Record<"today" | "week" | "month" | "year", CostSummary>;
   aiConfigs: Record<string, ServiceAIConfig>;
   inspectorEntries: Record<string, InspectorEntry[]>;
@@ -133,7 +134,7 @@ function seed(): MockDb {
       },
     },
     modelAliases: [
-      { alias: "fast", concrete_model: "llama3.1:8b", service_id: "svc_ai001", created_at: "2026-05-10T08:00:00Z" },
+      { alias: "fast", concrete_model: "llama3.1:8b", service_id: "svc_ai001", provider: "ollama", priority: 100, created_at: "2026-05-19T00:00:00Z" },
     ],
     costSummary: {
       today: { window: "today", total_usd: 1.23, tokens_in: 12000, tokens_out: 8000, top_consumers: [], pct_of_budget: 0.5 },

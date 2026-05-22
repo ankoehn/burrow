@@ -106,4 +106,71 @@ describe("AI endpoint detail (§4.20)", () => {
     await userEvent.click(rows[0]!);
     expect(await screen.findByText("INSPECTOR_PAGE")).toBeInTheDocument();
   });
+
+  it("Routing strategy Select includes 'Multi-provider (cross-backend)' option", async () => {
+    mount();
+    await screen.findByLabelText("requests per minute, last 24h");
+    await userEvent.click(screen.getByLabelText(/routing strategy/i));
+    expect(await screen.findByRole("option", { name: /multi-provider \(cross-backend\)/i })).toBeInTheDocument();
+  });
+
+  it("Selecting Multi-provider shows the cross-provider failover banner verbatim", async () => {
+    mount();
+    await screen.findByLabelText("requests per minute, last 24h");
+    await userEvent.click(screen.getByLabelText(/routing strategy/i));
+    await userEvent.click(await screen.findByRole("option", { name: /multi-provider \(cross-backend\)/i }));
+    const banner = await screen.findByTestId("multi-provider-banner");
+    const text = banner.textContent ?? "";
+    expect(text).toMatch(/Cross-provider failover is allowed only when/);
+    expect(text).toMatch(/Idempotency-Key/);
+    expect(text).toMatch(/and zero bytes have streamed\. See routing docs\./);
+  });
+
+  it("Backends table shows Provider chip and Priority column", async () => {
+    mount();
+    await screen.findByLabelText("requests per minute, last 24h");
+    const backendsSection = await screen.findByRole("heading", { name: /backends/i });
+    expect(backendsSection).toBeInTheDocument();
+    const table = await screen.findByRole("table", { name: /backends/i });
+    expect(within(table).getByRole("columnheader", { name: /provider/i })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /priority/i })).toBeInTheDocument();
+  });
+
+  it("Add alias button opens dialog and POST /models/aliases creates the alias", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    mount();
+    await screen.findByLabelText("requests per minute, last 24h");
+    // Click "Add alias" button
+    await userEvent.click(await screen.findByRole("button", { name: /add alias/i }));
+    // Dialog should open
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    // Fill in alias field
+    const aliasInput = within(dialog).getByLabelText(/alias/i);
+    await userEvent.clear(aliasInput);
+    await userEvent.type(aliasInput, "smart");
+    // Fill in concrete_model
+    const modelInput = within(dialog).getByLabelText(/concrete model/i);
+    await userEvent.clear(modelInput);
+    await userEvent.type(modelInput, "llama3.1:70b");
+    // Set priority to 90
+    const priorityInput = within(dialog).getByLabelText(/priority/i);
+    await userEvent.clear(priorityInput);
+    await userEvent.type(priorityInput, "90");
+    // Submit
+    await userEvent.click(within(dialog).getByRole("button", { name: /create alias/i }));
+    await waitFor(() => {
+      const postCalls = fetchSpy.mock.calls.filter(([url, init]) =>
+        String(url).endsWith("/api/v1/models/aliases")
+        && (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(postCalls.length).toBeGreaterThanOrEqual(1);
+      const b = JSON.parse(String((postCalls.at(-1)![1] as RequestInit).body));
+      expect(b.alias).toBe("smart");
+      expect(b.concrete_model).toBe("llama3.1:70b");
+      expect(b.priority).toBe(90);
+      expect(b.service_id).toBe("svc_ai001");
+    });
+    expect((await screen.findAllByText(/alias created/i)).length).toBeGreaterThan(0);
+  });
 });
