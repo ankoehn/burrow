@@ -4,13 +4,15 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Badge, Button, Dialog, Input, Select, SkeletonRows, Switch, Tabs,
+  Button, Dialog, Input, Select, SkeletonRows, Switch, Tabs,
 } from "@/components/ds";
-import type { CacheSettings } from "@/lib/contract";
+import type { CacheSettings, SemanticCacheSettings, CacheStatsV5, Service, ServiceAIConfig } from "@/lib/contract";
+import { formatBytes } from "@/lib/format";
 
 interface CacheSettingsPayload {
   global: CacheSettings;
   per_service: Record<string, CacheSettings>;
+  semantic?: SemanticCacheSettings;
 }
 
 const APPLIES_OPTIONS = [
@@ -18,6 +20,27 @@ const APPLIES_OPTIONS = [
   { value: "per_endpoint", label: "Per-endpoint" },
   { value: "per_api_key", label: "Per-API-key" },
 ];
+
+const EMBEDDING_MODE_OPTIONS = [
+  { value: "local", label: "Local" },
+  { value: "none", label: "Off" },
+];
+
+const FALLBACK_POLICY_OPTIONS = [
+  { value: "treat_as_miss", label: "Treat as miss (default)" },
+  { value: "return_cached_marked", label: "Return cached + mark" },
+];
+
+const DEFAULT_SEMANTIC: SemanticCacheSettings = {
+  enabled: false,
+  min_similarity: 0.85,
+  embedding_mode: "local",
+  embedding_url: "http://localhost:11434/v1/embeddings",
+  embedding_model: "nomic-embed-text",
+  fallback_policy: "treat_as_miss",
+  promote_on_miss: true,
+  max_index_entries: 10000,
+};
 
 function ExactPanel({
   draft, setDraft, isSaving, onSave,
@@ -90,23 +113,230 @@ function ExactPanel({
   );
 }
 
+function SemanticStatsPanel({ stats }: { stats: CacheStatsV5 }) {
+  return (
+    <div className="semantic-stats">
+      <div className="stat-row"><span>Semantic entries</span><span>{stats.semantic_entries}</span></div>
+      <div className="stat-row"><span>Semantic disk</span><span>{formatBytes(stats.semantic_disk_bytes)}</span></div>
+      <div className="stat-row"><span>Semantic hit rate (24h)</span><span>{(stats.semantic_hit_rate_24h * 100).toFixed(1)}%</span></div>
+      <div className="stat-row"><span>Similar returned (24h)</span><span>{stats.semantic_similar_returned_24h}</span></div>
+      <div className="stat-row"><span>Promotions (24h)</span><span>{stats.semantic_promotions_24h}</span></div>
+    </div>
+  );
+}
+
 function SemanticPanel() {
+  const qc = useQueryClient();
+
+  // Fetch all services so we can offer a per-service picker
+  const servicesQuery = useQuery({
+    queryKey: ["services"],
+    queryFn: () => apiFetch<Service[]>("/services"),
+    retry: false,
+  });
+
+  // AI services — services with access_mode === "api_key"
+  const aiServices = (servicesQuery.data ?? []).filter((s) => s.access_mode === "api_key");
+  const [selectedServiceId, setSelectedServiceId] = useState<string>("");
+
+  // Once services load, default to the first AI service
+  useEffect(() => {
+    if (!selectedServiceId && aiServices.length > 0) {
+      setSelectedServiceId(aiServices[0]!.id);
+    }
+  }, [aiServices, selectedServiceId]);
+
+  // Fetch the per-service AI config for the selected service
+  const aiConfigQuery = useQuery({
+    queryKey: ["service", selectedServiceId, "ai-config"],
+    queryFn: () => apiFetch<ServiceAIConfig>(`/services/${selectedServiceId}/ai-config`),
+    enabled: !!selectedServiceId,
+    retry: false,
+  });
+
+  // Fetch cache stats (CacheStatsV5)
+  const statsQuery = useQuery({
+    queryKey: ["cache", "stats"],
+    queryFn: () => apiFetch<CacheStatsV5>("/cache/stats"),
+    retry: false,
+  });
+
+  // Draft semantic settings — initialized from the per-service ai-config
+  const [semanticDraft, setSemanticDraft] = useState<SemanticCacheSettings | null>(null);
+
+  useEffect(() => {
+    if (aiConfigQuery.data && !semanticDraft) {
+      setSemanticDraft(aiConfigQuery.data.cache.semantic ?? { ...DEFAULT_SEMANTIC });
+    }
+  }, [aiConfigQuery.data, semanticDraft]);
+
+  // When the service picker changes, reset the draft so we re-initialize from the new config
+  const handleServiceChange = (id: string) => {
+    setSelectedServiceId(id);
+    setSemanticDraft(null);
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!selectedServiceId || !aiConfigQuery.data || !semanticDraft) {
+        return Promise.reject(new Error("Not ready"));
+      }
+      const payload: ServiceAIConfig = {
+        ...aiConfigQuery.data,
+        cache: {
+          ...aiConfigQuery.data.cache,
+          semantic: semanticDraft,
+        },
+      };
+      return apiFetch<void>(`/services/${selectedServiceId}/ai-config`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Semantic cache settings saved.");
+      qc.invalidateQueries({ queryKey: ["service", selectedServiceId, "ai-config"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof ApiError ? e.message : "Couldn't save semantic cache settings."),
+  });
+
+  const draft = semanticDraft;
+  const simOutOfRange =
+    draft !== null &&
+    draft.enabled &&
+    (draft.min_similarity < 0 || draft.min_similarity > 1);
+
+  const serviceOptions = aiServices.map((s) => ({ value: s.id, label: s.name }));
+
   return (
     <div className="semantic-cache">
       <p className="muted">
         Semantic caching is off by default. Enable only after reading the docs — vector
         similarity can return stale or near-miss answers.
       </p>
+
+      {statsQuery.data && <SemanticStatsPanel stats={statsQuery.data} />}
+
+      {serviceOptions.length > 0 && (
+        <div className="field" style={{ maxWidth: 280, marginBottom: 12 }}>
+          <label htmlFor="semantic-service-picker">Service</label>
+          <Select
+            id="semantic-service-picker"
+            value={selectedServiceId}
+            onChange={handleServiceChange}
+            options={serviceOptions}
+          />
+        </div>
+      )}
+
       <div className="row gap-2" style={{ alignItems: "center" }}>
         <Switch
           aria-label="Enable semantic cache"
-          checked={false}
-          aria-disabled
-          disabled
-          title="Available in v0.5"
+          checked={draft?.enabled ?? false}
+          onChange={(v) => draft && setSemanticDraft({ ...draft, enabled: v })}
         />
         <span>Enable semantic cache</span>
-        <Badge nodot kind="badge-preview">v0.5 preview</Badge>
+      </div>
+
+      {draft?.enabled && (
+        <div className="form-grid" style={{ marginTop: 16 }}>
+          <div className="field">
+            <label htmlFor="sem-min-similarity">Min similarity</label>
+            <Input
+              id="sem-min-similarity"
+              type="number"
+              className="mono"
+              min={0}
+              max={1}
+              step={0.01}
+              value={draft.min_similarity}
+              onChange={(e) =>
+                setSemanticDraft({ ...draft, min_similarity: Number(e.target.value) })
+              }
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="sem-embedding-mode">Embedding mode</label>
+            <Select
+              id="sem-embedding-mode"
+              value={draft.embedding_mode}
+              onChange={(v) =>
+                setSemanticDraft({ ...draft, embedding_mode: v as SemanticCacheSettings["embedding_mode"] })
+              }
+              options={EMBEDDING_MODE_OPTIONS}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="sem-embedding-url">Embedding URL</label>
+            <Input
+              id="sem-embedding-url"
+              className="mono"
+              value={draft.embedding_url}
+              onChange={(e) => setSemanticDraft({ ...draft, embedding_url: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="sem-embedding-model">Embedding model</label>
+            <Input
+              id="sem-embedding-model"
+              className="mono"
+              value={draft.embedding_model}
+              onChange={(e) => setSemanticDraft({ ...draft, embedding_model: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="sem-fallback-policy">Fallback policy</label>
+            <Select
+              id="sem-fallback-policy"
+              value={draft.fallback_policy}
+              onChange={(v) =>
+                setSemanticDraft({ ...draft, fallback_policy: v as SemanticCacheSettings["fallback_policy"] })
+              }
+              options={FALLBACK_POLICY_OPTIONS}
+            />
+          </div>
+          <div className="field">
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <Switch
+                aria-label="Promote on miss"
+                checked={draft.promote_on_miss}
+                onChange={(v) => setSemanticDraft({ ...draft, promote_on_miss: v })}
+              />
+              <label>Promote on miss</label>
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="sem-max-index-entries">Max index entries</label>
+            <Input
+              id="sem-max-index-entries"
+              type="number"
+              className="mono"
+              min={1}
+              value={draft.max_index_entries}
+              onChange={(e) =>
+                setSemanticDraft({ ...draft, max_index_entries: Number(e.target.value) })
+              }
+            />
+          </div>
+        </div>
+      )}
+
+      {simOutOfRange && (
+        <p role="alert" className="alert-danger" style={{ marginTop: 8 }}>
+          Similarity must be between 0 and 1.
+        </p>
+      )}
+
+      <div className="actions" style={{ marginTop: 16 }}>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={save.isPending || simOutOfRange || !draft}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Saving…" : "Save semantic settings"}
+        </Button>
       </div>
     </div>
   );

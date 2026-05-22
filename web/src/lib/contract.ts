@@ -149,6 +149,8 @@ export interface CacheSettings {
   ttl_seconds: number;
   max_entries: number;
   max_per_entry_kb: number;
+  // v0.5.0 additive — present only when the build tag is on.
+  semantic?: SemanticCacheSettings;
 }
 export interface RedactionSettings {
   enabled: boolean;

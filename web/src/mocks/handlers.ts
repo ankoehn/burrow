@@ -461,8 +461,11 @@ export const handlers = [
     return noContent();
   }),
   http.get("/api/v1/cache/stats", ({ request }) =>
-    gate(request, { admin: true }) ?? json({ entries: 47, on_disk_bytes: 3 * 1024 * 1024, hit_rate_24h: 0.31 })),
+    gate(request, { admin: true }) ?? json(db.cacheStats)),
   http.delete("/api/v1/cache/entries", ({ request }) =>
+    gate(request, { admin: true }) ?? noContent()),
+  // v0.5.0: admin-only wipe of semantic index
+  http.delete("/api/v1/cache/semantic/entries", ({ request }) =>
     gate(request, { admin: true }) ?? noContent()),
 
   // ---- v0.4.0 per-service IP/geo (spec Part J) ----

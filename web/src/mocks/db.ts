@@ -4,12 +4,14 @@ import type {
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
-  AutomationToken, BackupRow,
+  AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
 } from "@/lib/contract";
 
 export interface CacheSettingsPayload {
   global: CacheSettings;
   per_service: Record<string, CacheSettings>;
+  // v0.5.0 additive — top-level global semantic block.
+  semantic?: SemanticCacheSettings;
 }
 
 // Internal service row: the wire Service plus the owning user_id (stripped
@@ -49,6 +51,7 @@ export interface MockDb {
   aiConfigs: Record<string, ServiceAIConfig>;
   inspectorEntries: Record<string, InspectorEntry[]>;
   cacheSettings: CacheSettingsPayload;
+  cacheStats: CacheStatsV5;
   redactionRules: { built_in: RedactionRule[]; custom: RedactionRule[] };
   redactionSettings: RedactionSettings;
   guardrailSettings: GuardrailSettings;
@@ -147,6 +150,22 @@ function seed(): MockDb {
     cacheSettings: {
       global: { enabled: true, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64 },
       per_service: {},
+      semantic: {
+        enabled: false,
+        min_similarity: 0.85,
+        embedding_mode: "local",
+        embedding_url: "http://localhost:11434/v1/embeddings",
+        embedding_model: "nomic-embed-text",
+        fallback_policy: "treat_as_miss",
+        promote_on_miss: true,
+        max_index_entries: 10000,
+      },
+    },
+    cacheStats: {
+      entries: 47, on_disk_bytes: 3145728, hit_rate_24h: 0.31,
+      semantic_entries: 12, semantic_disk_bytes: 524288,
+      semantic_hit_rate_24h: 0.04,
+      semantic_similar_returned_24h: 7, semantic_promotions_24h: 3,
     },
     redactionRules: {
       built_in: [
@@ -209,7 +228,20 @@ function seed(): MockDb {
 // Default-filled ServiceAIConfig — every section disabled, sensible defaults.
 function defaultAiConfig(): ServiceAIConfig {
   return {
-    cache: { enabled: false, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64 },
+    cache: {
+      enabled: false, applies_per: "per_endpoint", ttl_seconds: 600, max_entries: 1000, max_per_entry_kb: 64,
+      // v0.5.0 additive — present only when the build tag is on.
+      semantic: {
+        enabled: false,
+        min_similarity: 0.85,
+        embedding_mode: "local",
+        embedding_url: "http://localhost:11434/v1/embeddings",
+        embedding_model: "nomic-embed-text",
+        fallback_policy: "treat_as_miss",
+        promote_on_miss: true,
+        max_index_entries: 10000,
+      },
+    },
     redaction: { enabled: false, redact_for_logs_only: false, rule_ids: [], presidio_enabled: false },
     guardrails: { enabled: false, action: "log_only" },
     inspector: { enabled: true, max_requests: 100 },
