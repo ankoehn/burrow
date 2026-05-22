@@ -1,6 +1,9 @@
 package authz
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestPermsV040(t *testing.T) {
 	for _, p := range []Permission{
@@ -113,5 +116,41 @@ func TestCanScopes(t *testing.T) {
 		if got := Can(c.role, c.p); got != c.want {
 			t.Errorf("Can(%q,%q)=%v want %v", c.role, c.p, got, c.want)
 		}
+	}
+}
+
+// TestPermissionSetUnchangedFromV040 is a golden-list guard: v0.5.0 must NOT
+// add new permission strings (every new endpoint maps to an existing v0.4.0
+// perm — see plan Part 0). If AllPermissions() grows, this test fails loudly
+// so the integration plan can be updated deliberately rather than silently
+// accepting drift.
+func TestPermissionSetUnchangedFromV040(t *testing.T) {
+	// Hard-coded v0.4.0 permission list in declaration order (authz.go:158-177).
+	// Do NOT replace the literal with AllPermissions() — that would be tautological.
+	expected := []Permission{
+		// v0.2.0 / v0.3.0
+		PermTunnelsReadOwn, PermTunnelsReadAny,
+		PermTunnelsManageOwn, PermTunnelsManageAny,
+		PermTokensManageOwn, PermTokensManageAny,
+		PermServicesConfigureOwn, PermServicesConfigureAny,
+		PermSessionsManageOwn, PermSessionsManageAny,
+		PermUsersRead, PermUsersManage,
+		PermRolesRead, PermSettingsManage,
+		// v0.4.0
+		PermAIReadOwn, PermAIReadAny,
+		PermAIConfigureOwn, PermAIConfigureAny,
+		PermQuotasReadOwn, PermQuotasReadAny, PermQuotasManageAny,
+		PermInspectorReadOwn, PermInspectorReadAny,
+		PermInspectorReplayOwn, PermInspectorReplayAny,
+		PermAuditRead, PermWebhooksManage, PermRolesManage,
+		PermAutomationTokensManageOwn, PermAutomationTokensManageAny,
+		PermBackupRun, PermMetricsRead, PermMcpToolsRead,
+		PermMtlsManageOwn, PermMtlsManageAny,
+		PermIPGeoManageOwn, PermIPGeoManageAny,
+	}
+	got := AllPermissions()
+	if !slices.Equal(got, expected) {
+		t.Errorf("v0.5.0 must not add or reorder permissions\n  got  (%d): %v\n  want (%d): %v",
+			len(got), got, len(expected), expected)
 	}
 }
