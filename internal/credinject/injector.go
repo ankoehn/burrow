@@ -35,10 +35,13 @@ type Injector struct {
 	s   Store
 	log *slog.Logger
 
+	// OnInject is fired on every successful injection with (serviceID, slot).
+	// Task 12 wires this to burrow_ai_credential_injections_total{service,slot}.
+	OnInject func(serviceID, slot string)
+
 	// OnMiss is called when a binding exists but the slot env var is absent.
-	// The hook receives the serviceID. Defaults to a no-op; cmd/server (Task
-	// 17) wires it to the metrics recorder.
-	// TODO(Task 12/17): wire burrow_ai_credential_misses_total counter here.
+	// The hook receives the serviceID. Task 12 wires this to
+	// burrow_ai_credential_misses_total{service}.
 	OnMiss func(serviceID string)
 }
 
@@ -90,5 +93,8 @@ func (i *Injector) Apply(ctx context.Context, serviceID string, r *http.Request)
 	// Strip the visitor-supplied header value, then inject the real credential.
 	r.Header.Del(bind.HeaderName)
 	r.Header.Set(bind.HeaderName, strings.Replace(bind.HeaderFormat, "{key}", val, 1))
+	if i.OnInject != nil {
+		i.OnInject(serviceID, bind.Slot)
+	}
 	return true, nil
 }

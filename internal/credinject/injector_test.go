@@ -13,7 +13,7 @@ import (
 type stubVault struct{ m map[string]string }
 
 func (s stubVault) Get(slot string) (string, bool) { v, ok := s.m[slot]; return v, ok }
-func (s stubVault) Slots() []string                 { return nil }
+func (s stubVault) Slots() []string                { return nil }
 
 // stubStore is an in-test Store that returns a fixed Binding (or none).
 type stubStore struct {
@@ -65,6 +65,8 @@ func TestInjectorUnboundPassThrough(t *testing.T) {
 	v := stubVault{map[string]string{"OPENAI": "sk-real"}}
 	s := &stubStore{bound: false}
 	i := credinject.New(v, s, slog.Default())
+	var injectFired bool
+	i.OnInject = func(_, _ string) { injectFired = true }
 	r, _ := http.NewRequest("GET", "/v1/models", nil)
 	r.Header.Set("Authorization", "Bearer visitor-key")
 	ok, err := i.Apply(context.Background(), "svc-none", r)
@@ -77,6 +79,9 @@ func TestInjectorUnboundPassThrough(t *testing.T) {
 	// Header must be untouched.
 	if got := r.Header.Get("Authorization"); got != "Bearer visitor-key" {
 		t.Errorf("pass-through should leave header unchanged; got %q", got)
+	}
+	if injectFired {
+		t.Error("OnInject must NOT fire on unbound path")
 	}
 }
 
@@ -93,8 +98,10 @@ func TestInjectorMissingSlotEnvFiresMissCounter(t *testing.T) {
 		bound: true,
 	}
 	var missFired bool
+	var injectFired bool
 	i := credinject.New(v, s, slog.Default())
 	i.OnMiss = func(serviceID string) { missFired = true }
+	i.OnInject = func(_, _ string) { injectFired = true }
 
 	r, _ := http.NewRequest("POST", "/v1/chat", nil)
 	ok, err := i.Apply(context.Background(), "svc2", r)
@@ -106,6 +113,40 @@ func TestInjectorMissingSlotEnvFiresMissCounter(t *testing.T) {
 	}
 	if !missFired {
 		t.Error("OnMiss hook should have been called")
+	}
+	if injectFired {
+		t.Error("OnInject must NOT fire on missing-slot path")
+	}
+}
+
+func TestInjectorSuccessFiresInjectCounter(t *testing.T) {
+	v := stubVault{map[string]string{"OPENAI": "sk-real"}}
+	s := &stubStore{
+		bind: credinject.Binding{
+			ServiceID:    "svc5",
+			Slot:         "OPENAI",
+			HeaderName:   "Authorization",
+			HeaderFormat: "Bearer {key}",
+		},
+		bound: true,
+	}
+	type call struct{ serviceID, slot string }
+	var calls []call
+	i := credinject.New(v, s, slog.Default())
+	i.OnInject = func(serviceID, slot string) {
+		calls = append(calls, call{serviceID, slot})
+	}
+
+	r, _ := http.NewRequest("POST", "/v1/chat/completions", nil)
+	ok, err := i.Apply(context.Background(), "svc5", r)
+	if err != nil || !ok {
+		t.Fatalf("Apply returned (%v, %v); want (true, nil)", ok, err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("OnInject called %d times; want 1", len(calls))
+	}
+	if calls[0].serviceID != "svc5" || calls[0].slot != "OPENAI" {
+		t.Errorf("OnInject args = (%q, %q); want (svc5, OPENAI)", calls[0].serviceID, calls[0].slot)
 	}
 }
 
