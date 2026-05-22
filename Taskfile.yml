@@ -65,3 +65,8 @@ tasks:
     desc: Stop the e2e stack and remove its named volumes
     cmds:
       - docker compose -f test/integration/compose.e2e.yml down --volumes
+
+  e2e:ui:
+    desc: Run the Playwright UI mini-suite (brings stack up, runs 5 specs, tears down)
+    cmds:
+      - bash test/integration/smoke-ui.sh
