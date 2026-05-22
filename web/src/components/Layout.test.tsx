@@ -137,4 +137,21 @@ describe("Layout nav role-gating", () => {
     renderLayout();
     expect(screen.getByRole("link", { name: /^tunnels$/i }).className).toContain("nav-item");
   });
+
+  it("renders Connection logs nav entry for admin", async () => {
+    renderLayout("admin");
+    expect(
+      await screen.findByRole("link", { name: /connection logs/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders OpenAPI nav entry as an external link with target=_blank", async () => {
+    renderLayout("admin");
+    // Wait for admin links to appear
+    await screen.findByRole("link", { name: /connection logs/i });
+    const link = screen.getByRole("link", { name: /openapi/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", "/api/v1/openapi/viewer");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
 });

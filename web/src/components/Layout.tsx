@@ -4,6 +4,7 @@ import {
   Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck,
   ServerCog, Globe, Sparkles, DollarSign, Database, ShieldAlert, Search, ScrollText,
   Webhook as WebhookIcon, Archive, Bot, KeyRound as KeyRoundIcon2,
+  Activity, FileCode,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
@@ -147,6 +148,19 @@ export function Layout() {
                 <span className="nav-icon"><Archive size={16} /></span>
                 <span className="nav-label">Backup</span>
               </NavLink>
+              <NavLink to="/connection-logs" className={navItem}>
+                <span className="nav-icon"><Activity size={16} /></span>
+                <span className="nav-label">Connection logs</span>
+              </NavLink>
+              <a
+                href="/api/v1/openapi/viewer"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="nav-item"
+              >
+                <span className="nav-icon"><FileCode size={16} /></span>
+                <span className="nav-label">OpenAPI</span>
+              </a>
             </div>
           )}
 
