@@ -450,6 +450,14 @@ func main() {
 					IPGeo:             db.Wrap(database),
 					IPGeoServices:     db.Wrap(database),
 					GeoLookup:         v04.GeoLookup,
+					// v0.5.0 Task 15: database backend status surface.
+					// For SQLite, URLRedacted is the on-disk path (no credentials);
+					// for Postgres it is the DSN with user:pass redacted.
+					Database: api.DBInfo{
+						Driver:      backend.Driver(),
+						URLRedacted: dbURLForStatus(cfg, backend),
+						Alpha:       cfg.ExperimentalPostgres && backend.Driver() == "postgres",
+					},
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}

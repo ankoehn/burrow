@@ -113,6 +113,16 @@ func NewRouter(d Deps) http.Handler {
 			r.Route("/openapi/viewer", vh.Routes)
 		})
 
+		// v0.5.0 Task 15: database-backend status endpoint.
+		// Gated by admin OR metrics:read (same as /metrics and /openapi/viewer).
+		// Returns driver name, redacted URL, and postgres_alpha flag.
+		r.Group(func(r chi.Router) {
+			r.Use(RequireBearerOrSession(d.Bearer, d.Users))
+			r.Use(d.RequireSession)
+			r.Use(d.requireDatabaseRead)
+			r.Get("/database", d.GetDatabaseStatus)
+		})
+
 		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
 		// v0.4.0 Task 19: WebAuthn passkey login endpoints. begin +
 		// finish are public (no session yet) and share the same per-IP

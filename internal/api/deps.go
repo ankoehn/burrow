@@ -444,6 +444,14 @@ type Deps struct {
 	// Nil disables all three routes (handlers return 500 "connection log store
 	// unavailable"). cmd/server wiring is deferred to Task 17.
 	ConnLogDB ConnectionLogStore
+
+	// v0.5.0 Task 15: database backend status surface.
+	// Database carries the driver name, redacted URL, and alpha flag populated
+	// by cmd/server at startup (from the Backend selected by openBackend).
+	// Zero value is safe: GET /api/v1/database returns {driver:"", ...} rather
+	// than 500, which makes the endpoint available even before Task 17 wires
+	// the full v0.5 stack in the integration compose job.
+	Database DBInfo
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

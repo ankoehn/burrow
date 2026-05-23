@@ -74,6 +74,8 @@ tags:
     description: Prometheus 0.0.4 scrape endpoint.
   - name: openapi
     description: OpenAPI spec discovery and embedded browser viewer.
+  - name: database
+    description: Database backend status (driver, connection URL, alpha flag).
 
 components:
   securitySchemes:
@@ -2338,3 +2340,42 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Database backend status (v0.5.0 Task 15)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/database:
+    get:
+      tags: [database]
+      summary: Database backend status (driver, URL, alpha flag)
+      description: |
+        Returns the active database driver ("sqlite" or "postgres"), a
+        credential-redacted form of the connection string, and whether the
+        Postgres alpha flag is in effect. Gated by admin OR metrics:read.
+        No I/O — reads the startup-time configuration captured in Deps.
+      responses:
+        '200':
+          description: Database backend status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [driver, postgres_alpha, url_redacted]
+                properties:
+                  driver:
+                    type: string
+                    enum: [sqlite, postgres]
+                    description: Active database backend driver.
+                  postgres_alpha:
+                    type: boolean
+                    description: >
+                      True when the Postgres backend is running in
+                      experimental/alpha mode (BURROW_EXPERIMENTAL_POSTGRES_BACKEND=true).
+                  url_redacted:
+                    type: string
+                    description: >
+                      Credential-redacted connection string. For SQLite this is
+                      the on-disk file path; for Postgres user:pass is replaced
+                      with ****:****.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }

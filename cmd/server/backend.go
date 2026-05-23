@@ -11,8 +11,8 @@ package main
 
 import (
 	"log/slog"
-	"net/url"
 
+	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/config"
 	"github.com/ankoehn/burrow/internal/db"
 )
@@ -39,7 +39,7 @@ func openBackend(cfg *config.ServerConfig, log *slog.Logger) (BackendCloser, err
 		if err != nil {
 			return nil, err
 		}
-		log.Info("database", "backend", b.Driver(), "url_redacted", redactDatabaseURL(cfg.DatabaseURL))
+		log.Info("database", "backend", b.Driver(), "url_redacted", api.RedactDatabaseURL(cfg.DatabaseURL))
 		return b, nil
 	}
 	b, err := db.OpenSQLite(cfg.DatabasePath)
@@ -50,23 +50,13 @@ func openBackend(cfg *config.ServerConfig, log *slog.Logger) (BackendCloser, err
 	return b, nil
 }
 
-// redactDatabaseURL strips the user:password from a Postgres DSN for safe
-// logging. If the URL is not parseable the raw string is not logged; instead
-// a fixed redaction placeholder is returned.
-//
-// Examples:
-//
-//	postgres://user:s3cr3t@host/db?sslmode=verify-full
-//	→ postgres://****:****@host/db?sslmode=verify-full
-//
-//	not-a-url → <unparseable URL>
-func redactDatabaseURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "<unparseable URL>"
+// dbURLForStatus returns the connection string appropriate for the
+// GET /api/v1/database url_redacted field:
+//   - Postgres: redacted DSN (user:pass replaced with ****:****).
+//   - SQLite: the on-disk file path (no credentials to redact).
+func dbURLForStatus(cfg *config.ServerConfig, b BackendCloser) string {
+	if b.Driver() == "postgres" {
+		return api.RedactDatabaseURL(cfg.DatabaseURL)
 	}
-	if u.User != nil {
-		u.User = url.UserPassword("****", "****")
-	}
-	return u.String()
+	return cfg.DatabasePath
 }
