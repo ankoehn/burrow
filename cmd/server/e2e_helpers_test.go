@@ -44,6 +44,7 @@ import (
 	"github.com/ankoehn/burrow/internal/aimeter"
 	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/cache/exact"
+	"github.com/ankoehn/burrow/internal/cache/semantic"
 	"github.com/ankoehn/burrow/internal/client"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
@@ -171,6 +172,11 @@ type bootE2ECfg struct {
 	// proxy.New (after WithGate / WithIngressPort / WithAIChain). Used by the
 	// connection-log seam test to install proxy.WithConnLogSink.
 	extraProxyOpts []proxy.Option
+	// semCache, when non-nil, is installed as the aigw.Chain's Semantic field.
+	// Default (nil) leaves the chain with no semantic tier — preserving the
+	// existing e2e contract for tests that never enable cache.semantic. The
+	// v0.5.0 semantic cache e2e test passes a chromem-backed cache here.
+	semCache semantic.Cache
 }
 
 // withConnLogSink returns a bootE2EStack option that registers a proxy
@@ -181,6 +187,18 @@ type bootE2ECfg struct {
 func withConnLogSink(sink proxy.ConnLogSink) bootE2EStackOption {
 	return func(c *bootE2ECfg) {
 		c.extraProxyOpts = append(c.extraProxyOpts, proxy.WithConnLogSink(sink))
+	}
+}
+
+// withSemanticCache returns a bootE2EStack option that wires the given
+// semantic.Cache into the aigw.Chain. Used by the v0.5.0 semantic cache e2e
+// test to install a chromem-backed cache (under -tags=semantic_cache) so the
+// chain's vector-similarity tier exercises real Lookup/Promote against the
+// test DB. Default (no option) leaves Semantic=nil → tests that don't enable
+// cache.semantic in service_ai_config see the v0.4.0 chain behaviour intact.
+func withSemanticCache(c semantic.Cache) bootE2EStackOption {
+	return func(cfg *bootE2ECfg) {
+		cfg.semCache = c
 	}
 }
 
@@ -335,7 +353,7 @@ func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 	// never query usage_events are unaffected.
 	meterSink := aimeter.NewSQLSink(db.Wrap(d))
 	meterSink.Log = s.log
-	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, nil, nil, meterSink, s.log)
+	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, nil, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	proxyOpts := []proxy.Option{
 		proxy.WithGate(gate),
