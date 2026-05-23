@@ -158,10 +158,40 @@ func (s *e2eStack) visitorClient(t *testing.T) *http.Client {
 	}
 }
 
+// bootE2EStackOption configures optional behaviour of bootE2EStack. The
+// variadic pattern keeps the default zero-config call sites (most e2e tests)
+// unchanged while letting a single test (F-13 connection-log seam) inject an
+// extra proxy option.
+type bootE2EStackOption func(*bootE2ECfg)
+
+// bootE2ECfg accumulates the optional configuration. Tests rarely touch this
+// directly — they pass option closures.
+type bootE2ECfg struct {
+	// extraProxyOpts are appended to the static proxy.Option list passed to
+	// proxy.New (after WithGate / WithIngressPort / WithAIChain). Used by the
+	// connection-log seam test to install proxy.WithConnLogSink.
+	extraProxyOpts []proxy.Option
+}
+
+// withConnLogSink returns a bootE2EStack option that registers a proxy
+// ConnLogSink so the proxy hot-path records one connection_logs row per
+// closed request. The adapter that converts proxy.ConnLogEntry into the
+// concrete connlog.Entry lives in the calling test (kept out of the helper
+// to avoid forcing connlog import into every other e2e file).
+func withConnLogSink(sink proxy.ConnLogSink) bootE2EStackOption {
+	return func(c *bootE2ECfg) {
+		c.extraProxyOpts = append(c.extraProxyOpts, proxy.WithConnLogSink(sink))
+	}
+}
+
 // bootE2EStack stands up the whole real-stack chain. Always uses TLS on the
 // proxy (per plan: "dev wildcard cert + auth_domain test.local").
-func bootE2EStack(t *testing.T) *e2eStack {
+func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 	t.Helper()
+	cfg := &bootE2ECfg{}
+	for _, o := range opts {
+		o(cfg)
+	}
 	s := &e2eStack{
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -294,11 +324,15 @@ func bootE2EStack(t *testing.T) *e2eStack {
 	meterSink.Log = s.log
 	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
-	handler := proxy.New(
-		dialer, checker, e2eAuthDomain, s.log,
+	proxyOpts := []proxy.Option{
 		proxy.WithGate(gate),
 		proxy.WithIngressPort(s.proxyPort),
 		proxy.WithAIChain(aiChain),
+	}
+	proxyOpts = append(proxyOpts, cfg.extraProxyOpts...)
+	handler := proxy.New(
+		dialer, checker, e2eAuthDomain, s.log,
+		proxyOpts...,
 	)
 	s.proxySrv = &http.Server{
 		Handler:           handler,

@@ -33,19 +33,14 @@ package main
 //	                           "rendered" key present in the JSON response
 //	J OpenAPI viewer         — GET /api/v1/openapi/viewer/ → 200 text/html
 //
-// Part E note (production wiring gap): The v0.5.0 backend ships proxy.
-// WithConnLogSink + connlog.NewSQLSink but cmd/server has NOT yet wired
-// them together (internal/proxy/proxy.go declares the sink field but
-// never calls Record — Task 17 was deferred). Touching internal/proxy is
-// outside Task 2 scope per the integration plan. Part E therefore
-// exercises the API↔store↔connlog binding by calling
-// connlog.NewSQLSink(...).Record(...) directly (simulating exactly what
-// the proxy hot-path will do once Task 17 lands) and then asserting the
-// API read surface returns the row. This is a legitimate seam: it proves
-// the three packages that meet at this contract (proxy.ConnLogSink ←
-// connlog.SQLSink → SQLite → api.ConnLogDB) interoperate end-to-end
-// under the real binary. The remaining gap (proxy actually calling
-// Record) is documented in the v0.5.0 integration report as F-13.
+// Part E note (F-13 — wiring gap closed): The earlier shape of this test
+// called connlog.NewSQLSink(...).Record(...) directly because the proxy
+// never invoked the sink. F-13 closed that gap — internal/proxy/proxy.go
+// now records one connection_logs row on each request close, and
+// cmd/server/main.go installs the real sink via proxy.WithConnLogSink at
+// startup. Part E now drives a visitor request through bootE2EStack's
+// real proxy + real tunnel + real upstream and asserts a row landed —
+// a true production-shaped seam, not a direct sink call.
 
 import (
 	"bytes"
@@ -75,6 +70,7 @@ import (
 	"github.com/ankoehn/burrow/internal/connlog"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/metrics"
+	"github.com/ankoehn/burrow/internal/proxy"
 	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/webhook"
 )
@@ -425,61 +421,105 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 		}
 	})
 
-	// --- Part E — connection log API read surface -------------------------
+	// --- Part E — connection log proxy roundtrip seam (F-13) --------------
 	//
-	// Inserts a synthetic connection_log row via the production sink
-	// (connlog.NewSQLSink — the same type the proxy holds via WithConnLogSink)
-	// and polls the API read surface until the row is visible.
+	// Drives a real visitor request through the full ingress proxy + tunnel
+	// + upstream chain (bootE2EStack) with a connlog.NewSQLSink installed
+	// via proxy.WithConnLogSink, and asserts a connection_logs row landed.
 	//
-	// This exercises the full seam:
-	//   1. connlog.SQLSink.Record() INSERTs into connection_logs (real SQLite).
-	//   2. api.NewConnLogDBAdapter + GetConnectionLogs reads it back.
-	//   3. The chi router gates the read on requireConnLogRead (admin OK).
-	//
-	// The remaining production gap (the proxy hot-path actually calling
-	// sink.Record(...) inside ServeHTTP) is deferred — see file-level
-	// comment "Part E note".
+	// This is the genuine wiring seam for F-13: it proves the proxy hot-path
+	// actually invokes sink.Record(...) when a request closes. The previous
+	// shape of this subtest called sink.Record directly — which silently
+	// passed even when the proxy field was never read. The current shape
+	// fails (no rows) if proxy.serveResolved doesn't call recordOnClose.
 	t.Run("E_connection_logs", func(t *testing.T) {
-		sink := connlog.NewSQLSink(env.sqldb, slog.New(slog.NewTextHandler(io.Discard, nil)))
-		now := time.Now().UTC()
-		err := sink.Record(context.Background(), connlog.Entry{
-			Kind:      connlog.KindHTTPProxy,
-			ServiceID: env.serviceID,
-			SourceIP:  "127.0.0.1",
-			StartedAt: now.Add(-10 * time.Millisecond),
-			EndedAt:   now,
-			BytesIn:   42,
-			BytesOut:  100,
-			Status:    connlog.StatusClosedClean,
+		// Local sub-stack so this subtest doesn't share state with the
+		// TestV050DefaultBuildE2E env (which uses a stub stack without a
+		// real proxy listener). bootE2EStack already runs a real proxy +
+		// real tunnel + real upstream; we just plug a connlog sink into it.
+		//
+		// Adapter is a forward-reference: the sink itself can't be built
+		// until bootE2EStack has provisioned the test DB, but the proxy
+		// option list is consumed inside bootE2EStack. We resolve this
+		// with a thin indirection — the adapter calls through a sinkFn
+		// closure that returns the late-bound *connlog.SQLSink. The
+		// proxy never invokes the sink during bootE2EStack itself; only
+		// once a visitor request is dispatched, at which point realSink
+		// is non-nil.
+		var realSink *connlog.SQLSink
+		adapter := proxyConnLogTestAdapter{sinkFn: func() *connlog.SQLSink { return realSink }}
+
+		s := bootE2EStack(t, withConnLogSink(adapter))
+		realSink = connlog.NewSQLSink(db.Wrap(s.db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+		// Upstream returns a small known body so bytes_out > 0 is provable.
+		const body = "ok-from-upstream"
+		s.setUpstreamHandler(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = io.WriteString(w, body)
 		})
+
+		hc := s.visitorClient(t)
+		url := "https://" + s.hostWithPort() + "/conn-log-probe"
+		resp, err := hc.Get(url)
 		if err != nil {
-			t.Fatalf("sink.Record: %v", err)
+			t.Fatalf("GET: %v", err)
 		}
-		// SQLSink.Record spawns a goroutine — poll until the row is visible.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status: want 200, got %d", resp.StatusCode)
+		}
+
+		// Poll the connection_logs table directly (the read-surface seam
+		// already lives in part E's prior life; here we're testing the
+		// write side of the seam — does the proxy actually write rows?).
+		wrapped := db.Wrap(s.db)
 		deadline := time.Now().Add(5 * time.Second)
-		var lastBody []byte
+		var rows []db.ConnectionLog
 		for time.Now().Before(deadline) {
-			code, body := env.do(t, http.MethodGet,
-				"/api/v1/connection-logs?service_id="+env.serviceID, nil)
-			if code != http.StatusOK {
-				t.Fatalf("status=%d body=%s", code, body)
+			r, err := connlog.ListConnectionLogs(context.Background(), wrapped, connlog.ConnLogQuery{
+				ServiceID: s.serviceID,
+				Kind:      string(connlog.KindHTTPProxy),
+				Limit:     10,
+			})
+			if err != nil {
+				t.Fatalf("ListConnectionLogs: %v", err)
 			}
-			lastBody = body
-			var arr []map[string]any
-			if err := json.Unmarshal(body, &arr); err != nil {
-				t.Fatalf("decode: %v body=%s", err, body)
-			}
-			if len(arr) >= 1 {
-				// Confirm the row is the one we inserted (service_id matches).
-				if arr[0]["service_id"] != env.serviceID {
-					t.Errorf("connection_log service_id=%v want %s (body=%s)",
-						arr[0]["service_id"], env.serviceID, body)
-				}
-				return
+			rows = r
+			if len(rows) >= 1 {
+				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatalf("connection_log row never appeared within 5s (last body=%s)", lastBody)
+		if len(rows) < 1 {
+			t.Fatalf("no rows found in connection_logs for service_id=%s after 5s — proxy did not call sink.Record", s.serviceID)
+		}
+		got := rows[0]
+		if got.Kind != string(connlog.KindHTTPProxy) {
+			t.Errorf("kind=%q want %q", got.Kind, connlog.KindHTTPProxy)
+		}
+		if got.ServiceID != s.serviceID {
+			t.Errorf("service_id=%q want %q", got.ServiceID, s.serviceID)
+		}
+		if got.Status != string(connlog.StatusClosedClean) {
+			t.Errorf("status=%q want %q", got.Status, connlog.StatusClosedClean)
+		}
+		if got.BytesIn < 0 {
+			t.Errorf("bytes_in=%d want >= 0", got.BytesIn)
+		}
+		if got.BytesOut <= 0 {
+			t.Errorf("bytes_out=%d want > 0 (upstream wrote %d bytes)", got.BytesOut, len(body))
+		}
+		if got.DurationMs < 0 {
+			t.Errorf("duration_ms=%d want >= 0", got.DurationMs)
+		}
+		if got.StartedAt.IsZero() {
+			t.Errorf("started_at is zero")
+		}
+		if got.StartedAt.After(got.EndedAt) {
+			t.Errorf("started_at=%v after ended_at=%v", got.StartedAt, got.EndedAt)
+		}
 	})
 
 	// --- Part F — retention settings PUT then GET --------------------------
@@ -637,6 +677,40 @@ func mustReuseTestCA(t *testing.T, env *v050Env) (*x509.Certificate, *ecdsa.Priv
 		t.Fatal("mustReuseTestCA: bootV050E2E did not stash a CA — test wiring bug")
 	}
 	return pair.cert, pair.key
+}
+
+// proxyConnLogTestAdapter satisfies proxy.ConnLogSink by forwarding each
+// proxy.ConnLogEntry to a (late-bound) *connlog.SQLSink, mirroring the
+// production adapter shape in cmd/server/main.go. The sinkFn indirection
+// keeps the adapter constructable before the test DB exists — the proxy
+// option list must be passed to bootE2EStack at boot, but the SQLSink
+// itself can only be built after the test DB is opened. The proxy never
+// invokes the sink until a real visitor request lands, by which time
+// sinkFn returns the live sink.
+type proxyConnLogTestAdapter struct {
+	sinkFn func() *connlog.SQLSink
+}
+
+func (a proxyConnLogTestAdapter) Record(ctx context.Context, e proxy.ConnLogEntry) error {
+	s := a.sinkFn()
+	if s == nil {
+		return nil
+	}
+	return s.Record(ctx, connlog.Entry{
+		Kind:            connlog.Kind(e.Kind),
+		ServiceID:       e.ServiceID,
+		TunnelID:        e.TunnelID,
+		UserID:          e.UserID,
+		ClientSessionID: e.ClientSessionID,
+		SourceIP:        e.SourceIP,
+		UserAgent:       e.UserAgent,
+		StartedAt:       e.StartedAt,
+		EndedAt:         e.EndedAt,
+		BytesIn:         e.BytesIn,
+		BytesOut:        e.BytesOut,
+		Status:          connlog.Status(e.Status),
+		Reason:          e.Reason,
+	})
 }
 
 // genTestLeaf returns PEM bytes for a leaf cert signed by ca, carrying
