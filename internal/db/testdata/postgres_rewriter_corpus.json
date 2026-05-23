@@ -1,0 +1,267 @@
+[
+  {
+    "name": "empty/no_placeholders",
+    "in": "SELECT 1",
+    "out": "SELECT 1"
+  },
+  {
+    "name": "automation_tokens.go:25 INSERT VALUES(8 placeholders)",
+    "in": "INSERT INTO automation_tokens(id, name, prefix, user_id, role_at_mint, token_hash, permissions, expires_at)\n\t\t\t VALUES(?,?,?,?,?,?,?,?)",
+    "out": "INSERT INTO automation_tokens(id, name, prefix, user_id, role_at_mint, token_hash, permissions, expires_at)\n\t\t\t VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
+  },
+  {
+    "name": "automation_tokens.go:40 SELECT WHERE id=?",
+    "in": "SELECT id, name, prefix, user_id, role_at_mint, token_hash, permissions,\n\t\t        expires_at, last_used, created_at\n\t\t   FROM automation_tokens WHERE id=?",
+    "out": "SELECT id, name, prefix, user_id, role_at_mint, token_hash, permissions,\n\t\t        expires_at, last_used, created_at\n\t\t   FROM automation_tokens WHERE id=$1"
+  },
+  {
+    "name": "automation_tokens.go:88 DELETE FROM WHERE id=?",
+    "in": "DELETE FROM automation_tokens WHERE id=?",
+    "out": "DELETE FROM automation_tokens WHERE id=$1"
+  },
+  {
+    "name": "automation_tokens.go:107 UPDATE SET CURRENT_TIMESTAMP WHERE id=?",
+    "in": "UPDATE automation_tokens SET last_used=CURRENT_TIMESTAMP WHERE id=?",
+    "out": "UPDATE automation_tokens SET last_used=CURRENT_TIMESTAMP WHERE id=$1"
+  },
+  {
+    "name": "aimeter/sql_sink.go:76 VALUES(12 placeholders)",
+    "in": "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    "out": "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)"
+  },
+  {
+    "name": "aliases.go:30 INSERT VALUES(5 placeholders)",
+    "in": "INSERT INTO model_aliases(alias, concrete_model, service_id, provider, priority) VALUES(?,?,?,?,?)",
+    "out": "INSERT INTO model_aliases(alias, concrete_model, service_id, provider, priority) VALUES($1,$2,$3,$4,$5)"
+  },
+  {
+    "name": "aliases.go:121 UPDATE SET 2 WHERE 1",
+    "in": "UPDATE model_aliases SET concrete_model=?, service_id=? WHERE alias=?",
+    "out": "UPDATE model_aliases SET concrete_model=$1, service_id=$2 WHERE alias=$3"
+  },
+  {
+    "name": "aliases.go:143 UPDATE SET 4 WHERE 1",
+    "in": "UPDATE model_aliases SET concrete_model=?, service_id=?, provider=?, priority=? WHERE alias=?",
+    "out": "UPDATE model_aliases SET concrete_model=$1, service_id=$2, provider=$3, priority=$4 WHERE alias=$5"
+  },
+  {
+    "name": "audit.go:32 INSERT VALUES(14 placeholders)",
+    "in": ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "out": ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)"
+  },
+  {
+    "name": "audit.go:102 WHERE actor compound",
+    "in": "(actor_id = ? OR actor_email = ?)",
+    "out": "(actor_id = $1 OR actor_email = $2)"
+  },
+  {
+    "name": "audit.go:107 LIKE with three placeholders",
+    "in": "(lower(action) LIKE ? OR lower(subject_label) LIKE ? OR lower(actor_email) LIKE ?)",
+    "out": "(lower(action) LIKE $1 OR lower(subject_label) LIKE $2 OR lower(actor_email) LIKE $3)"
+  },
+  {
+    "name": "audit.go:221 UPDATE SET payload WHERE id",
+    "in": "UPDATE audit_events SET payload=? WHERE id=?",
+    "out": "UPDATE audit_events SET payload=$1 WHERE id=$2"
+  },
+  {
+    "name": "budgets.go:97-99 UPDATE multi-column",
+    "in": "    SET scope=?, subject_id=?, daily_usd=?, action_on_exceed=?, alert_webhook_id=?\n\t\t  WHERE id=?",
+    "out": "    SET scope=$1, subject_id=$2, daily_usd=$3, action_on_exceed=$4, alert_webhook_id=$5\n\t\t  WHERE id=$6"
+  },
+  {
+    "name": "cache/exact:270 VALUES + ON CONFLICT DO NOTHING",
+    "in": "VALUES (?,?,?,?,?,?,?,?)\n\t\tON CONFLICT(key_hash) DO NOTHING",
+    "out": "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)\n\t\tON CONFLICT(key_hash) DO NOTHING"
+  },
+  {
+    "name": "cache/exact:365 DELETE OR LIKE pattern",
+    "in": "DELETE FROM cache_entries WHERE scope_key = ? OR scope_key LIKE ?",
+    "out": "DELETE FROM cache_entries WHERE scope_key = $1 OR scope_key LIKE $2"
+  },
+  {
+    "name": "cache/semantic chromem.go:222-223 INSERT ON CONFLICT DO UPDATE",
+    "in": "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)\n\t\tON CONFLICT(service_id, exact_key_hash) DO UPDATE SET",
+    "out": "VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)\n\t\tON CONFLICT(service_id, exact_key_hash) DO UPDATE SET"
+  },
+  {
+    "name": "cache/semantic chromem.go:425 dynamic IN placeholders",
+    "in": "DELETE FROM semantic_index WHERE service_id = ? AND exact_key_hash IN (?,?,?,?)",
+    "out": "DELETE FROM semantic_index WHERE service_id = $1 AND exact_key_hash IN ($2,$3,$4,$5)"
+  },
+  {
+    "name": "connlog/sink.go:124 INSERT VALUES(15 placeholders)",
+    "in": "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "out": "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)"
+  },
+  {
+    "name": "connlog/sink.go:230 cursor subquery",
+    "in": "started_at < (SELECT started_at FROM connection_logs WHERE id = ?)",
+    "out": "started_at < (SELECT started_at FROM connection_logs WHERE id = $1)"
+  },
+  {
+    "name": "connlog/sink.go:358 substr LIKE clause",
+    "in": "WHERE substr(started_at,1,10) = ?",
+    "out": "WHERE substr(started_at,1,10) = $1"
+  },
+  {
+    "name": "connlog/sink.go:401-402 INSERT ... ON CONFLICT DO UPDATE SET",
+    "in": "VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n\t\t\t ON CONFLICT(day, service_id, kind) DO UPDATE SET",
+    "out": "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n\t\t\t ON CONFLICT(day, service_id, kind) DO UPDATE SET"
+  },
+  {
+    "name": "db/ai_config.go:58-60 INSERT ON CONFLICT DO UPDATE",
+    "in": "INSERT INTO service_ai_config(service_id, config, updated_at)\n\t\t VALUES(?, ?, CURRENT_TIMESTAMP)\n\t\t ON CONFLICT(service_id) DO UPDATE SET",
+    "out": "INSERT INTO service_ai_config(service_id, config, updated_at)\n\t\t VALUES($1, $2, CURRENT_TIMESTAMP)\n\t\t ON CONFLICT(service_id) DO UPDATE SET"
+  },
+  {
+    "name": "db/custom_domains.go:46-50 multi-line UPDATE SET 7 WHERE 2",
+    "in": "UPDATE service_custom_domains\n\t\t    SET hostname=?, cert_pem=?, key_pem=?, cert_sha256=?,\n\t\t        not_before=?, not_after=?, updated_at=?\n\t\t  WHERE id=? AND service_id=?",
+    "out": "UPDATE service_custom_domains\n\t\t    SET hostname=$1, cert_pem=$2, key_pem=$3, cert_sha256=$4,\n\t\t        not_before=$5, not_after=$6, updated_at=$7\n\t\t  WHERE id=$8 AND service_id=$9"
+  },
+  {
+    "name": "db/custom_domains.go:154 not_after < ?",
+    "in": "FROM service_custom_domains WHERE not_after < ?",
+    "out": "FROM service_custom_domains WHERE not_after < $1"
+  },
+  {
+    "name": "db/services.go:25-26 INSERT ON CONFLICT DO NOTHING",
+    "in": "VALUES(?,?,?,?)\n\t\t ON CONFLICT(user_id, name) DO NOTHING",
+    "out": "VALUES($1,$2,$3,$4)\n\t\t ON CONFLICT(user_id, name) DO NOTHING"
+  },
+  {
+    "name": "db/sessions.go:91 WHERE != placeholder",
+    "in": "DELETE FROM sessions WHERE user_id=? AND id<>?",
+    "out": "DELETE FROM sessions WHERE user_id=$1 AND id<>$2"
+  },
+  {
+    "name": "db/settings.go:41-42 INSERT ON CONFLICT DO UPDATE SET excluded",
+    "in": "INSERT INTO settings(key, value, updated_at) VALUES(?,?,CURRENT_TIMESTAMP)\n\t\t\t ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+    "out": "INSERT INTO settings(key, value, updated_at) VALUES($1,$2,CURRENT_TIMESTAMP)\n\t\t\t ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
+  },
+  {
+    "name": "db/tunnels.go:120-123 UPDATE compound expressions",
+    "in": "UPDATE tunnels\n\t\t    SET total_bytes_in  = total_bytes_in  + ?,\n\t\t        total_bytes_out = total_bytes_out + ?\n\t\t  WHERE id=?",
+    "out": "UPDATE tunnels\n\t\t    SET total_bytes_in  = total_bytes_in  + $1,\n\t\t        total_bytes_out = total_bytes_out + $2\n\t\t  WHERE id=$3"
+  },
+  {
+    "name": "db/users.go:65-67 multi-line LIKE escape + LIMIT/OFFSET",
+    "in": "SELECT id, email FROM users\n\t\t  WHERE email LIKE ? ESCAPE '\\'\n\t\t  ORDER BY email\n\t\t  LIMIT ? OFFSET ?",
+    "out": "SELECT id, email FROM users\n\t\t  WHERE email LIKE $1 ESCAPE '\\'\n\t\t  ORDER BY email\n\t\t  LIMIT $2 OFFSET $3"
+  },
+  {
+    "name": "store/store.go:183 INSERT ON CONFLICT(email) DO NOTHING",
+    "in": "INSERT INTO users(id, email, password_hash, role, status)\n\t\t VALUES(?,?,?,?,?)\n\t\t ON CONFLICT(email) DO NOTHING",
+    "out": "INSERT INTO users(id, email, password_hash, role, status)\n\t\t VALUES($1,$2,$3,$4,$5)\n\t\t ON CONFLICT(email) DO NOTHING"
+  },
+  {
+    "name": "edge: question mark inside single-quoted string literal",
+    "in": "SELECT id FROM t WHERE name = '?' AND code = ?",
+    "out": "SELECT id FROM t WHERE name = '?' AND code = $1"
+  },
+  {
+    "name": "edge: question mark inside double-quoted identifier",
+    "in": "SELECT \"col?\" FROM t WHERE id = ?",
+    "out": "SELECT \"col?\" FROM t WHERE id = $1"
+  },
+  {
+    "name": "edge: single-quoted string with escaped apostrophe '' then placeholder",
+    "in": "SELECT id FROM t WHERE label = 'O''Brien?' AND id = ?",
+    "out": "SELECT id FROM t WHERE label = 'O''Brien?' AND id = $1"
+  },
+  {
+    "name": "edge: question mark in -- line comment",
+    "in": "SELECT id FROM t -- bound ?\n WHERE id = ?",
+    "out": "SELECT id FROM t -- bound ?\n WHERE id = $1"
+  },
+  {
+    "name": "edge: -- comment to EOF preserves trailing question",
+    "in": "SELECT id FROM t WHERE x = ? -- ? mark",
+    "out": "SELECT id FROM t WHERE x = $1 -- ? mark"
+  },
+  {
+    "name": "edge: /* block comment */ with placeholder inside",
+    "in": "SELECT /* ? hint */ id FROM t WHERE id = ?",
+    "out": "SELECT /* ? hint */ id FROM t WHERE id = $1"
+  },
+  {
+    "name": "edge: multi-line block comment with ? inside",
+    "in": "SELECT id FROM t\n/* note: contains ?\n   another line ? */\nWHERE id = ?",
+    "out": "SELECT id FROM t\n/* note: contains ?\n   another line ? */\nWHERE id = $1"
+  },
+  {
+    "name": "edge: dollar-quoted string contains ?",
+    "in": "SELECT id FROM t WHERE body = $$has ? inside$$ AND id = ?",
+    "out": "SELECT id FROM t WHERE body = $$has ? inside$$ AND id = $1"
+  },
+  {
+    "name": "edge: tagged dollar-quote $tag$...$tag$ with ?",
+    "in": "SELECT id FROM t WHERE body = $tag$has ? inside$tag$ AND id = ?",
+    "out": "SELECT id FROM t WHERE body = $tag$has ? inside$tag$ AND id = $1"
+  },
+  {
+    "name": "edge: 10 placeholders to verify $10 not split as $1 then 0",
+    "in": "VALUES (?,?,?,?,?,?,?,?,?,?)",
+    "out": "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
+  },
+  {
+    "name": "edge: IN clause with placeholders",
+    "in": "SELECT id FROM t WHERE id IN (?,?,?)",
+    "out": "SELECT id FROM t WHERE id IN ($1,$2,$3)"
+  },
+  {
+    "name": "edge: literal $5 in single-quoted string preserved (no shift)",
+    "in": "SELECT '$5' AS price, id FROM t WHERE id = ?",
+    "out": "SELECT '$5' AS price, id FROM t WHERE id = $1"
+  },
+  {
+    "name": "edge: comparison operators >= <=",
+    "in": "WHERE ts >= ? AND ts <= ?",
+    "out": "WHERE ts >= $1 AND ts <= $2"
+  },
+  {
+    "name": "edge: subquery with placeholder",
+    "in": "SELECT s.id FROM sessions s WHERE s.user_id = (SELECT id FROM users WHERE email = ?)",
+    "out": "SELECT s.id FROM sessions s WHERE s.user_id = (SELECT id FROM users WHERE email = $1)"
+  },
+  {
+    "name": "edge: COALESCE with placeholder",
+    "in": "UPDATE t SET v = COALESCE(?, v) WHERE id = ?",
+    "out": "UPDATE t SET v = COALESCE($1, v) WHERE id = $2"
+  },
+  {
+    "name": "edge: parameter at very start of string",
+    "in": "? AS literal",
+    "out": "$1 AS literal"
+  },
+  {
+    "name": "edge: parameter at very end of string",
+    "in": "WHERE id=?",
+    "out": "WHERE id=$1"
+  },
+  {
+    "name": "edge: consecutive placeholders no spaces",
+    "in": "VALUES(?,?,?)",
+    "out": "VALUES($1,$2,$3)"
+  },
+  {
+    "name": "edge: 15 placeholders verifying multi-digit indices",
+    "in": "INSERT INTO t(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "out": "INSERT INTO t(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)"
+  },
+  {
+    "name": "edge: single line -- comment without trailing newline ending with ?",
+    "in": "-- placeholder ? here",
+    "out": "-- placeholder ? here"
+  },
+  {
+    "name": "edge: only a block comment, no placeholders",
+    "in": "/* nothing here ? */",
+    "out": "/* nothing here ? */"
+  },
+  {
+    "name": "edge: only single-quoted literal containing ?",
+    "in": "'is this ?'",
+    "out": "'is this ?'"
+  }
+]
