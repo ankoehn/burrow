@@ -94,6 +94,11 @@ var ClosedEvents = []string{
 	"service.created",
 	"service.deleted",
 	"connection.session_summary",
+	// v0.5.2 Task 10: tick-time edge fire on active -> cert_expiring transition.
+	// Distinct from the existing PUT-time "cert.expiring" event (fired when an
+	// admin uploads a cert already inside the 14-day window); subscribers can
+	// pick whichever trigger path they care about.
+	"custom_domain.cert.expiring",
 }
 
 // IsClosedEvent reports whether s is one of the spec-closed event names.

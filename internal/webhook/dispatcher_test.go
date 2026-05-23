@@ -634,10 +634,14 @@ func TestIsClosedEvent(t *testing.T) {
 	if IsClosedEvent("definitely.not.real") {
 		t.Error("free-form event must not pass IsClosedEvent")
 	}
-	// v0.5.0 Task 10 extended the vocabulary from 12 → 18.
-	if len(ClosedEvents) != 18 {
-		t.Errorf("ClosedEvents length = %d want 18 (12 original + 6 v0.5.0)",
+	// v0.5.0 Task 10 extended the vocabulary from 12 → 18; v0.5.2 Task 10
+	// added custom_domain.cert.expiring → 19.
+	if len(ClosedEvents) != 19 {
+		t.Errorf("ClosedEvents length = %d want 19 (12 original + 6 v0.5.0 + 1 v0.5.2)",
 			len(ClosedEvents))
+	}
+	if !IsClosedEvent("custom_domain.cert.expiring") {
+		t.Error("custom_domain.cert.expiring must be in ClosedEvents (v0.5.2 Task 10)")
 	}
 	// New events must all be in the closed set.
 	for _, ev := range []string{

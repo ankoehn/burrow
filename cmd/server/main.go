@@ -418,6 +418,23 @@ func main() {
 				compactor.Tick(ctx, "00:30")
 			}()
 
+			// v0.5.2 Task 10: daily custom-domain status state-machine tick.
+			// Mirrors the retention compactor lifecycle (LIFO defer order
+			// ensures ctx cancels before database.Close()). Walks all
+			// cert-bearing custom domains, persists active/cert_expiring/
+			// cert_expired transitions, and fires custom_domain.cert.expiring
+			// exactly once on the active->cert_expiring edge.
+			reaperWg.Add(1)
+			go func() {
+				defer reaperWg.Done()
+				customdomain.StatusTick(ctx, customdomain.StatusTickDeps{
+					DB:      db.Wrap(database),
+					Audit:   v04.AuditLogger,
+					Webhook: v04.WebhookDispatcher,
+					Log:     log,
+				}, "00:30")
+			}()
+
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
 				Handler: api.NewRouter(api.Deps{

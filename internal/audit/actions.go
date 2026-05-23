@@ -93,6 +93,11 @@ const (
 	ActionServiceCustomDomainUpdate = "service.custom_domain.update"
 	ActionServiceCustomDomainDelete = "service.custom_domain.delete"
 
+	// v0.5.2 Task 10: emitted by the daily status-tick on every persisted
+	// transition (from -> to) for a cert-bearing custom domain row. Payload:
+	// {id, from, to}. NOT in aggregatedActions — transitions are rare.
+	ActionServiceCustomDomainStatusChanged = "custom_domain.status_changed"
+
 	// v0.5.0 Task 9: retention compaction job.
 	ActionRetentionCompact = "retention.compact"
 
@@ -137,6 +142,7 @@ var AllActions = []string{
 	ActionMCPToolCall,
 	ActionServiceUpstreamCredentialBind, ActionServiceUpstreamCredentialUnbind,
 	ActionServiceCustomDomainAdd, ActionServiceCustomDomainUpdate, ActionServiceCustomDomainDelete,
+	ActionServiceCustomDomainStatusChanged,
 	ActionRetentionCompact,
 	ActionConnectionSessionSummary, ActionAICachePromoted, ActionAIUpstreamError,
 }
