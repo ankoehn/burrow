@@ -1,11 +1,13 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -116,6 +118,20 @@ type Proxy struct {
 type ConnLogSink interface {
 	Record(ctx context.Context, e ConnLogEntry) error
 }
+
+// Connection-log status values the proxy emits. Mirrors connlog.Status
+// but kept here as plain string constants so the proxy stays import-free
+// of connlog. The adapter in cmd/server converts these into the typed
+// connlog.Status equivalents byte-for-byte.
+//
+// Full status mapping (closed_error / closed_idle) is a v0.5.1 polish item;
+// v0.5.0 records only the two terminal states reachable from the
+// access-deny early return (Rejected) and the normal end-of-request
+// (ClosedClean).
+const (
+	StatusClosedClean = "closed_clean"
+	StatusRejected    = "rejected"
+)
 
 // ConnLogEntry is the subset of connlog.Entry the proxy needs to record an
 // http_proxy connection. cmd/server passes a thin adapter that converts this
@@ -318,9 +334,30 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 		return
 	}
 
+	// v0.5.0 F-13 connection-log accounting. Wrap before any other work so
+	// the body/byte counters cover the full request. The recordOnClose
+	// deferral fires on every return below (including the access-deny
+	// early return) with logStatus mutated to match the terminal state.
+	started := time.Now()
+	rc := newCountingBody(r.Body)
+	r.Body = rc
+	ww := newCountingResponseWriter(w)
+	w = ww
+
+	resolvedClientIP := clientip.Resolve(
+		r.RemoteAddr,
+		r.Header.Get("X-Forwarded-For"),
+		r.Header.Get("X-Real-IP"),
+		p.trustedProxies,
+	)
+
+	logStatus := StatusClosedClean
+	defer p.recordOnClose(r, res, resolvedClientIP, started, rc, ww, &logStatus)
+
 	// Step 2: enforce access mode BEFORE opening a stream.
 	ok, status, body, hdr := p.checker.Allow(ctx, res, r)
 	if !ok {
+		logStatus = StatusRejected
 		for k, vs := range hdr {
 			for _, v := range vs {
 				w.Header().Add(k, v)
@@ -338,13 +375,6 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 	if upstreamHost == "" {
 		upstreamHost = host
 	}
-
-	resolvedClientIP := clientip.Resolve(
-		r.RemoteAddr,
-		r.Header.Get("X-Forwarded-For"),
-		r.Header.Get("X-Real-IP"),
-		p.trustedProxies,
-	)
 
 	ingressPort := p.ingressPort
 	capturedServiceID := serviceID
@@ -398,9 +428,33 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resolved, label, suffix string) {
 	ctx := r.Context()
 
+	// v0.5.0 F-13 connection-log accounting. Wrap before any other work so
+	// the body/byte counters see the full request even if downstream code
+	// reads r.Body via the writer rebinding.
+	started := time.Now()
+	rc := newCountingBody(r.Body)
+	r.Body = rc
+	ww := newCountingResponseWriter(w)
+	w = ww
+
+	resolvedClientIP := clientip.Resolve(
+		r.RemoteAddr,
+		r.Header.Get("X-Forwarded-For"),
+		r.Header.Get("X-Real-IP"),
+		p.trustedProxies,
+	)
+
+	// Defer the connection-log record. logStatus is mutated below before any
+	// return so the deferred call sees the correct terminal status. Detached
+	// context (context.WithoutCancel via SQLSink.Record's own machinery)
+	// keeps the row recordable even on client cancel.
+	logStatus := StatusClosedClean
+	defer p.recordOnClose(r, res, resolvedClientIP, started, rc, ww, &logStatus)
+
 	// Step 2: enforce access mode BEFORE opening a stream.
 	ok, status, body, hdr := p.checker.Allow(ctx, res, r)
 	if !ok {
+		logStatus = StatusRejected
 		for k, vs := range hdr {
 			for _, v := range vs {
 				w.Header().Add(k, v)
@@ -420,19 +474,9 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 		upstreamHost = label + suffix // fallback: use the public vhost
 	}
 
-	// Resolve authoritative client IP once, using the inbound request.
-	// This is done here (before the Rewrite func) so we capture the original
-	// request's RemoteAddr and headers. In the Rewrite closure, r.In holds the
-	// original, but we capture clientIP here for clarity and to avoid any
-	// ambiguity about which request object is used.
-	resolvedClientIP := clientip.Resolve(
-		r.RemoteAddr,
-		r.Header.Get("X-Forwarded-For"),
-		r.Header.Get("X-Real-IP"),
-		p.trustedProxies,
-	)
-
 	// Capture values needed by Rewrite as local vars.
+	// resolvedClientIP was computed at function entry (above) so the
+	// connection-log deferral has it whether the access check passes or not.
 	authDomain := p.authDomain
 	ingressPort := p.ingressPort
 
@@ -613,4 +657,154 @@ func (p *Proxy) GetConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, err
 	// already the "final" one for this vhost.
 	cfg.GetConfigForClient = nil
 	return cfg, nil
+}
+
+// ---------------------------------------------------------------------------
+// v0.5.0 F-13: connection-log accounting helpers.
+// ---------------------------------------------------------------------------
+
+// recordOnClose builds a ConnLogEntry from the captured per-request counters
+// and dispatches it through the registered ConnLogSink. Safe to call when
+// p.connLogSink is nil — recordOnClose returns immediately. Called from a
+// deferred closure in serveResolved / serveCustomDomain so it fires on every
+// terminal exit (happy path, access-deny, panics recovered by the stdlib).
+//
+// Simplifications deferred to v0.5.1 polish:
+//   - TunnelID is left empty: Resolved doesn't currently carry a tunnel id
+//     and threading one through the dialer would expand the Resolved shape
+//     beyond the F-13 surgical fix.
+//   - UserID / ClientSessionID are left empty for the same reason — neither
+//     is currently surfaced through the data-plane resolver.
+//   - Status mapping is binary (Rejected | ClosedClean) — closed_error /
+//     closed_idle require hooking ReverseProxy.ErrorHandler + idle-timeout
+//     detection in the underlying transport. Both are out of F-13 scope.
+//   - Reason is always empty.
+func (p *Proxy) recordOnClose(
+	r *http.Request,
+	res *Resolved,
+	sourceIP string,
+	started time.Time,
+	rc *countingBody,
+	ww *countingResponseWriter,
+	status *string,
+) {
+	if p.connLogSink == nil {
+		return
+	}
+	ua := r.UserAgent()
+	if len(ua) > 200 {
+		ua = ua[:200]
+	}
+	entry := ConnLogEntry{
+		Kind:      "http_proxy",
+		ServiceID: res.ServiceID,
+		SourceIP:  sourceIP,
+		UserAgent: ua,
+		StartedAt: started,
+		EndedAt:   time.Now(),
+		BytesIn:   rc.bytes(),
+		BytesOut:  ww.bytes(),
+		Status:    *status,
+	}
+	// SQLSink.Record spawns its own goroutine + uses context.WithoutCancel,
+	// so passing r.Context() is safe even if the handler has already
+	// returned. Errors are swallowed (the sink logs them).
+	_ = p.connLogSink.Record(r.Context(), entry)
+}
+
+// countingBody wraps the inbound request body, counting bytes read into
+// BytesIn. Read errors are propagated unchanged so handlers that introspect
+// io.EOF / io.ErrUnexpectedEOF continue to behave correctly.
+type countingBody struct {
+	r io.ReadCloser
+	n int64
+}
+
+func newCountingBody(r io.ReadCloser) *countingBody {
+	if r == nil {
+		return &countingBody{r: io.NopCloser(strings.NewReader(""))}
+	}
+	return &countingBody{r: r}
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if n > 0 {
+		b.n += int64(n)
+	}
+	return n, err
+}
+
+func (b *countingBody) Close() error { return b.r.Close() }
+
+func (b *countingBody) bytes() int64 { return b.n }
+
+// countingResponseWriter wraps the outbound writer, totalling every byte
+// that escapes through Write into BytesOut. Implements http.Flusher and
+// http.Hijacker by delegating when the underlying writer supports them —
+// this preserves SSE flush behaviour and WebSocket upgrades that the
+// httputil.ReverseProxy depends on.
+//
+// Hijack returns an io.Writer wrapped net.Conn that continues to count
+// bytes — without this, hijacked responses (WebSocket frames, raw TCP
+// upgrades) would record bytes_out = 0 forever.
+type countingResponseWriter struct {
+	http.ResponseWriter
+	n int64
+}
+
+func newCountingResponseWriter(w http.ResponseWriter) *countingResponseWriter {
+	return &countingResponseWriter{ResponseWriter: w}
+}
+
+func (w *countingResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if n > 0 {
+		w.n += int64(n)
+	}
+	return n, err
+}
+
+func (w *countingResponseWriter) bytes() int64 { return w.n }
+
+// Flush delegates to the underlying ResponseWriter when it implements
+// http.Flusher. SSE / chunked streaming relies on this — ReverseProxy
+// (FlushInterval=-1) calls Flush after every write.
+func (w *countingResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack delegates to the underlying ResponseWriter when it implements
+// http.Hijacker. Returns ErrNotSupported when the underlying writer does
+// not support hijacking (mirrors Go's stdlib convention). The returned
+// net.Conn is wrapped in countingConn so bytes written by the hijacker
+// (WebSocket frames, raw TCP) continue to count toward bytes_out.
+func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	c, rw, err := h.Hijack()
+	if err != nil {
+		return c, rw, err
+	}
+	return &countingConn{Conn: c, n: &w.n}, rw, nil
+}
+
+// countingConn wraps a hijacked net.Conn and accumulates the byte count
+// of every Write into the shared *int64 owned by the countingResponseWriter
+// — so bytes_out remains accurate even when the response is hijacked.
+type countingConn struct {
+	net.Conn
+	n *int64
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		*c.n += int64(n)
+	}
+	return n, err
 }
