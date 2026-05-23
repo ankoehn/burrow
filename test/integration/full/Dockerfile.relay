@@ -1,0 +1,24 @@
+# test-only — never deploy this shape.
+# test/integration/full/Dockerfile.relay
+# Extends the basic harness pattern (test/integration/Dockerfile.relay):
+# adds cert mount + integration build tag + GO_BUILD_TAGS arg so the
+# compose Postgres override (T17) can swap "integration,postgres" in.
+FROM golang:1.26-alpine AS build
+ARG GO_BUILD_TAGS=integration
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -tags=${GO_BUILD_TAGS} -trimpath -ldflags="-s -w" -o /out/burrowd ./cmd/server
+
+FROM alpine:3.20
+RUN apk add --no-cache curl bash ca-certificates
+RUN adduser -D -u 65532 burrow && mkdir -p /data /run/burrow /certs && chown burrow:burrow /data /run/burrow /certs
+USER 65532
+COPY --from=build /out/burrowd /usr/local/bin/burrowd
+COPY test/integration/full/entrypoints/relay-full.sh /usr/local/bin/relay-full.sh
+ENV BURROW_DATABASE_PATH=/data/burrow.db \
+    BURROW_LOG_LEVEL=info \
+    BURROW_LOG_FORMAT=text \
+    BURROW_HTTPS_PROXY_TLS_CERT=/certs/wildcard.test.local.crt \
+    BURROW_HTTPS_PROXY_TLS_KEY=/certs/wildcard.test.local.key
+EXPOSE 7000 8080 8443 9000-9100 7800
+ENTRYPOINT ["/usr/local/bin/relay-full.sh"]
