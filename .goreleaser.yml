@@ -23,6 +23,8 @@ builds:
         goarch: arm
       - goos: darwin
         goarch: arm
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
@@ -45,6 +47,8 @@ builds:
         goarch: arm
       - goos: darwin
         goarch: arm
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
@@ -70,6 +74,8 @@ builds:
         goarch: arm
       - goos: darwin
         goarch: arm
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
@@ -92,6 +98,8 @@ builds:
         goarch: arm
       - goos: darwin
         goarch: "386"
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
