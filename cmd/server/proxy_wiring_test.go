@@ -202,6 +202,13 @@ func (f *fakeHTTPTunnelLookup) SnapshotSessions() []server.SessionSnapshot {
 	return nil
 }
 
+// LookupSessionByTunnelID is the v0.5.2 fast-path replacement for the
+// SnapshotSessions scan. The Lookup tests don't exercise session-field
+// population, so this fake always returns ok=false.
+func (f *fakeHTTPTunnelLookup) LookupSessionByTunnelID(_ string) (sessionID, userID string, ok bool) {
+	return "", "", false
+}
+
 // TestProxyDialerAdapter_Lookup_Found checks that Lookup returns a Resolved
 // with all fields correctly composed when both the service row and live tunnel exist.
 func TestProxyDialerAdapter_Lookup_Found(t *testing.T) {

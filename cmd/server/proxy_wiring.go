@@ -109,9 +109,10 @@ type tunnelStreamOpener interface {
 	LookupHTTPTunnel(sub string) (*server.Tunnel, bool)
 	LookupHTTPTunnelByServiceID(serviceID string) (*server.Tunnel, bool)
 	OpenTunnelStream(ctx context.Context, tn *server.Tunnel) (net.Conn, error)
-	// SnapshotSessions is used to resolve UserID + ClientSessionID from the
-	// tunnel runtime ID (v0.5.1 P2.4).
-	SnapshotSessions() []server.SessionSnapshot
+	// LookupSessionByTunnelID resolves UserID + ClientSessionID from the
+	// tunnel runtime ID via the Registry's O(1) tunnel index (v0.5.2
+	// BACKLOG #1). Replaces the v0.5.1 SnapshotSessions scan.
+	LookupSessionByTunnelID(tunnelID string) (sessionID, userID string, ok bool)
 }
 
 // proxyDialerAdapter adapts *server.Server + store to proxy.StreamDialer.
@@ -121,26 +122,16 @@ type proxyDialerAdapter struct {
 }
 
 // lookupSessionFields resolves the UserID and ClientSessionID for the tunnel
-// with the given runtime ID by scanning the live session snapshots. Returns
-// empty strings when no matching session is found (e.g. the tunnel just
-// disconnected). Safe to call concurrently — SnapshotSessions holds no lock
-// across the caller; it returns a copy.
-//
-// Hot-path cost: O(N sessions × M tunnels-per-session) per proxied request,
-// plus one full map copy inside SnapshotSessions. Acceptable for home-lab /
-// single-tenant deployments. At company scale, a
-// LookupSessionByTunnelID(tunnelID string) (sessionID, userID string, ok bool)
-// method on *server.Server that probes the registry's existing tunnel index
-// would eliminate the snapshot copy — tracked for v0.5.2 / v0.6.0.
+// with the given runtime ID via the Registry's O(1) tunnel index (v0.5.2
+// BACKLOG #1). Returns empty strings when no matching session is found
+// (e.g. the tunnel just disconnected). Safe to call concurrently — the
+// underlying SessionByTunnelID probe is RLock-guarded.
 func (a proxyDialerAdapter) lookupSessionFields(tunnelID string) (userID, sessionID string) {
-	for _, ss := range a.srv.SnapshotSessions() {
-		for _, tv := range ss.Tunnels {
-			if tv.ID == tunnelID {
-				return ss.UserID, ss.SessionID
-			}
-		}
+	sess, user, ok := a.srv.LookupSessionByTunnelID(tunnelID)
+	if !ok {
+		return "", ""
 	}
-	return "", ""
+	return user, sess
 }
 
 // Lookup implements proxy.StreamDialer.Lookup.
