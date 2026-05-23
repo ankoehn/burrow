@@ -195,9 +195,9 @@ type Chain struct {
 // treated as "feature unavailable" and the corresponding step is skipped at
 // request time — operators can wire only the subset they care about.
 //
-// When sem is non-nil (including NoopCache{}), NewChain wires the exact
-// cache's OnMiss hook to call sem.Promote so that every successful
-// exact-cache Store is automatically indexed for vector search.
+// Semantic promotion is NOT wired via exact.Cache.SetOnMiss. It happens
+// inline in the MISS path of run() after a successful Store, with the full
+// service ID, prompt bytes, and Settings available.
 func NewChain(
 	cache *exact.Cache,
 	sem semantic.Cache,
@@ -222,23 +222,6 @@ func NewChain(
 		Router:       router,
 		Meter:        meter,
 		Log:          log,
-	}
-	// Wire the exact cache's OnMiss hook to semantic.Promote. The hook fires
-	// in a detached goroutine (context.Background()) inside exact.Cache.Store,
-	// so the promote step never blocks the proxy hot path.
-	// We only wire when sem is non-nil; NoopCache.Promote is a no-op but
-	// we still wire it to allow for later swap without restart.
-	if cache != nil && sem != nil {
-		semRef := sem
-		cache.SetOnMiss(func(ctx context.Context, key string, body []byte) {
-			// The OnMiss hook receives the exact-cache key and the stored body.
-			// We don't have the prompt here (only the response body), so we
-			// pass the key as the promptFingerprint — semantic.Promote uses this
-			// as the index key. Actual promote with full prompt bytes happens
-			// in the chain body (see below in run()); this hook is the fallback
-			// path for any Store that happens outside the chain.
-			_ = semRef.Promote(ctx, "", key, body, semantic.Settings{})
-		})
 	}
 	return ch
 }

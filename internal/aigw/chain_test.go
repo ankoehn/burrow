@@ -916,3 +916,73 @@ func TestChainPassThroughWhenAllStepsDisabled(t *testing.T) {
 		t.Errorf("path: got %q", gotPath)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 12: NewChain does NOT wire exact.Cache.SetOnMiss.
+// After a MISS → Store cycle, the only Promote call recorded by the stub
+// is the inline one (serviceID == svc.ID, not "").
+// This guards against re-introducing the belt-and-suspenders hook that was
+// removed in fix(aigw): drop redundant exact.SetOnMiss hook in NewChain.
+// ---------------------------------------------------------------------------
+
+func TestChainOnMissHookNotWired(t *testing.T) {
+	// Upstream serves a deterministic JSON response for the MISS request.
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "15")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	cache := freshCache(t)
+
+	// semCache records every Promote call.
+	semCache := &stubSemanticCache{}
+
+	chain := aigw.NewChain(cache, semCache, nil, nil, nil, nil, nil, nil, testLog())
+
+	const svcID = "svc-no-hook"
+	svc := aigw.Service{
+		ID:           svcID,
+		APIKeyHeader: "Authorization",
+		AIConfig: aigw.ServiceAIConfig{
+			Cache: &exact.Settings{
+				Enabled:       true,
+				AppliesPer:    "global",
+				TTLSeconds:    300,
+				MaxEntries:    100,
+				MaxPerEntryKB: 64,
+			},
+			Semantic: &semantic.Settings{
+				Enabled:        true,
+				FallbackPolicy: "return_cached_marked",
+				PromoteOnMiss:  true,
+			},
+		},
+	}
+
+	req := httptest.NewRequest("POST", "https://abc.example.com/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4","prompt":"burrow hook test"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := runChain(t, chain, upstream, svc, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rec.Code)
+	}
+
+	// Give any detached goroutines a moment to complete.
+	time.Sleep(20 * time.Millisecond)
+
+	// The inline Promote fires once with the correct service ID.
+	if len(semCache.promotes) == 0 {
+		t.Fatal("expected at least one Promote call from the inline MISS path; got none")
+	}
+	for i, p := range semCache.promotes {
+		if p.serviceID == "" {
+			t.Errorf("Promote[%d]: serviceID is empty — this looks like the dead OnMiss hook firing (bug)", i)
+		}
+		if p.serviceID != svcID {
+			t.Errorf("Promote[%d]: serviceID = %q; want %q", i, p.serviceID, svcID)
+		}
+	}
+}
