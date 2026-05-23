@@ -147,6 +147,43 @@ func TestCompactorAuditDaysZeroSkipsAuditDeletion(t *testing.T) {
 	}
 }
 
+// TestRunOnceLogsAndContinuesOnPerTableError verifies spec F.2: when one table's
+// DELETE fails (e.g. because the table has been dropped), RunOnce returns nil
+// (not an error) and still processes the surviving tables.
+func TestRunOnceLogsAndContinuesOnPerTableError(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+
+	// Seed 5 eligible audit_events rows older than the 30-day cutoff.
+	old := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	for i := 0; i < 5; i++ {
+		seedAuditRow(t, x, "fa"+string(rune('0'+i)), "redaction.applied", old)
+	}
+
+	// Corrupt usage_events (the second table processed) so its DELETE will fail.
+	// audit_events must still be compacted despite usage_events failing.
+	if _, err := x.DB().ExecContext(ctx, `DROP TABLE usage_events`); err != nil {
+		t.Fatalf("drop usage_events: %v", err)
+	}
+
+	c := New(x, &staticLoader{s: Settings{
+		AuditDays: 30,
+		UsageDays: 90, // non-zero so RunOnce attempts the deleted table
+	}}, &noopAuditLogger{}, discardLog())
+
+	counts, err := c.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce returned err=%v; want nil (log-and-continue per spec F.2)", err)
+	}
+	if counts["audit_events"] != 5 {
+		t.Errorf("audit_events: want 5 deleted, got %d", counts["audit_events"])
+	}
+	// usage_events should be absent (or zero) because its DELETE failed.
+	if n, ok := counts["usage_events"]; ok && n > 0 {
+		t.Errorf("usage_events: want absent/0 after table drop, got %d", n)
+	}
+}
+
 // TestParseHHMM verifies the internal HH:MM parser.
 func TestParseHHMM(t *testing.T) {
 	cases := []struct {

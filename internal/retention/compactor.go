@@ -94,9 +94,10 @@ func (c *Compactor) RunOnce(ctx context.Context) (map[string]int, error) {
 		cutoff := now.Add(-time.Duration(s.AuditDays) * 24 * time.Hour)
 		n, err := deleteAuditRows(ctx, sqlDB, cutoff)
 		if err != nil {
-			return counts, fmt.Errorf("retention: delete audit rows: %w", err)
+			c.log.Error("retention: delete audit_events", "err", err)
+		} else {
+			counts["audit_events"] = n
 		}
-		counts["audit_events"] = n
 	}
 
 	// usage_events
@@ -104,9 +105,10 @@ func (c *Compactor) RunOnce(ctx context.Context) (map[string]int, error) {
 		cutoff := now.Add(-time.Duration(s.UsageDays) * 24 * time.Hour)
 		n, err := deleteWhere(ctx, sqlDB, "DELETE FROM usage_events WHERE ts < ?", cutoff)
 		if err != nil {
-			return counts, fmt.Errorf("retention: delete usage_events: %w", err)
+			c.log.Error("retention: delete usage_events", "err", err)
+		} else {
+			counts["usage_events"] = n
 		}
-		counts["usage_events"] = n
 	}
 
 	// connection_logs
@@ -114,9 +116,10 @@ func (c *Compactor) RunOnce(ctx context.Context) (map[string]int, error) {
 		cutoff := now.Add(-time.Duration(s.ConnectionLogsDays) * 24 * time.Hour)
 		n, err := deleteWhere(ctx, sqlDB, "DELETE FROM connection_logs WHERE created_at < ?", cutoff)
 		if err != nil {
-			return counts, fmt.Errorf("retention: delete connection_logs: %w", err)
+			c.log.Error("retention: delete connection_logs", "err", err)
+		} else {
+			counts["connection_logs"] = n
 		}
-		counts["connection_logs"] = n
 	}
 
 	// connection_log_rollups — keyed by DATE string (YYYY-MM-DD)
@@ -124,9 +127,10 @@ func (c *Compactor) RunOnce(ctx context.Context) (map[string]int, error) {
 		cutoffDay := now.AddDate(0, 0, -s.ConnectionLogRollupsDays).Format("2006-01-02")
 		n, err := deleteWhere(ctx, sqlDB, "DELETE FROM connection_log_rollups WHERE day < ?", cutoffDay)
 		if err != nil {
-			return counts, fmt.Errorf("retention: delete connection_log_rollups: %w", err)
+			c.log.Error("retention: delete connection_log_rollups", "err", err)
+		} else {
+			counts["connection_log_rollups"] = n
 		}
-		counts["connection_log_rollups"] = n
 	}
 
 	// webhook_deliveries
@@ -134,9 +138,10 @@ func (c *Compactor) RunOnce(ctx context.Context) (map[string]int, error) {
 		cutoff := now.Add(-time.Duration(s.WebhookDeliveriesDays) * 24 * time.Hour)
 		n, err := deleteWhere(ctx, sqlDB, "DELETE FROM webhook_deliveries WHERE created_at < ?", cutoff)
 		if err != nil {
-			return counts, fmt.Errorf("retention: delete webhook_deliveries: %w", err)
+			c.log.Error("retention: delete webhook_deliveries", "err", err)
+		} else {
+			counts["webhook_deliveries"] = n
 		}
-		counts["webhook_deliveries"] = n
 	}
 
 	// Emit one audit event per table with rows_deleted > 0.
