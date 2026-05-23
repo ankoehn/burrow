@@ -600,6 +600,17 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 		if got.StartedAt.After(got.EndedAt) {
 			t.Errorf("started_at=%v after ended_at=%v", got.StartedAt, got.EndedAt)
 		}
+		// v0.5.1 P2.4: TunnelID / UserID / ClientSessionID must be threaded
+		// through the Resolved struct and into the connection-log row.
+		if got.TunnelID == "" {
+			t.Error("tunnel_id missing")
+		}
+		if got.UserID == "" {
+			t.Error("user_id missing")
+		}
+		if got.ClientSessionID == "" {
+			t.Error("client_session_id missing")
+		}
 	})
 
 	// --- Part E2 — connection log: closed_error (upstream returns 500) -----

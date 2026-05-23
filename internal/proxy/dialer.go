@@ -52,11 +52,14 @@ var ErrNotFound = errors.New("proxy: tunnel not found")
 //     CA. Burrow does NOT sign client certs — the operator brings their
 //     own PKI.
 type Resolved struct {
-	ServiceID    string
-	AccessMode   string
-	APIKeyHeader string
-	LocalHost    string
-	MTLSCAPEM    []byte
+	ServiceID       string
+	AccessMode      string
+	APIKeyHeader    string
+	LocalHost       string
+	MTLSCAPEM       []byte
+	TunnelID        string
+	UserID          string
+	ClientSessionID string
 }
 
 // StreamDialer is the interface that the proxy uses to:

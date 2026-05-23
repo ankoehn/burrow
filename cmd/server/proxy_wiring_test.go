@@ -197,6 +197,11 @@ func (f *fakeHTTPTunnelLookup) OpenTunnelStream(_ context.Context, _ *server.Tun
 	return nil, errors.New("not implemented in fake")
 }
 
+func (f *fakeHTTPTunnelLookup) SnapshotSessions() []server.SessionSnapshot {
+	// Returns nil — Lookup tests don't exercise session-field population.
+	return nil
+}
+
 // TestProxyDialerAdapter_Lookup_Found checks that Lookup returns a Resolved
 // with all fields correctly composed when both the service row and live tunnel exist.
 func TestProxyDialerAdapter_Lookup_Found(t *testing.T) {

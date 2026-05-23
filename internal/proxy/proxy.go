@@ -758,12 +758,10 @@ func (p *Proxy) GetConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, err
 // deferred closure in serveResolved / serveCustomDomain so it fires on every
 // terminal exit (happy path, access-deny, panics recovered by the stdlib).
 //
-// Simplifications deferred to v0.5.1 polish:
-//   - TunnelID is left empty: Resolved doesn't currently carry a tunnel id
-//     and threading one through the dialer would expand the Resolved shape
-//     beyond the F-13 surgical fix.
-//   - UserID / ClientSessionID are left empty for the same reason — neither
-//     is currently surfaced through the data-plane resolver.
+// Notes:
+//   - TunnelID, UserID, ClientSessionID are populated from res (v0.5.1 P2.4).
+//     Resolved carries them since the proxyDialerAdapter was widened to call
+//     SnapshotSessions on every Lookup / LookupByServiceID.
 //   - Status mapping covers all four states: rejected, closed_clean,
 //     closed_error, closed_idle (v0.5.1 P2.3). Precedence is
 //     closed_error > closed_idle > closed_clean, enforced by the
@@ -787,15 +785,18 @@ func (p *Proxy) recordOnClose(
 		ua = ua[:200]
 	}
 	entry := ConnLogEntry{
-		Kind:      "http_proxy",
-		ServiceID: res.ServiceID,
-		SourceIP:  sourceIP,
-		UserAgent: ua,
-		StartedAt: started,
-		EndedAt:   time.Now(),
-		BytesIn:   rc.bytes(),
-		BytesOut:  ww.bytes(),
-		Status:    *status,
+		Kind:            "http_proxy",
+		ServiceID:       res.ServiceID,
+		TunnelID:        res.TunnelID,
+		UserID:          res.UserID,
+		ClientSessionID: res.ClientSessionID,
+		SourceIP:        sourceIP,
+		UserAgent:       ua,
+		StartedAt:       started,
+		EndedAt:         time.Now(),
+		BytesIn:         rc.bytes(),
+		BytesOut:        ww.bytes(),
+		Status:          *status,
 	}
 	// SQLSink.Record spawns its own goroutine + uses context.WithoutCancel,
 	// so passing r.Context() is safe even if the handler has already

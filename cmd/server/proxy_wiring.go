@@ -109,12 +109,31 @@ type tunnelStreamOpener interface {
 	LookupHTTPTunnel(sub string) (*server.Tunnel, bool)
 	LookupHTTPTunnelByServiceID(serviceID string) (*server.Tunnel, bool)
 	OpenTunnelStream(ctx context.Context, tn *server.Tunnel) (net.Conn, error)
+	// SnapshotSessions is used to resolve UserID + ClientSessionID from the
+	// tunnel runtime ID (v0.5.1 P2.4).
+	SnapshotSessions() []server.SessionSnapshot
 }
 
 // proxyDialerAdapter adapts *server.Server + store to proxy.StreamDialer.
 type proxyDialerAdapter struct {
 	st  subdomainStore
 	srv tunnelStreamOpener
+}
+
+// lookupSessionFields resolves the UserID and ClientSessionID for the tunnel
+// with the given runtime ID by scanning the live session snapshots. Returns
+// empty strings when no matching session is found (e.g. the tunnel just
+// disconnected). Safe to call concurrently — SnapshotSessions holds no lock
+// across the caller; it returns a copy.
+func (a proxyDialerAdapter) lookupSessionFields(tunnelID string) (userID, sessionID string) {
+	for _, ss := range a.srv.SnapshotSessions() {
+		for _, tv := range ss.Tunnels {
+			if tv.ID == tunnelID {
+				return ss.UserID, ss.SessionID
+			}
+		}
+	}
+	return "", ""
 }
 
 // Lookup implements proxy.StreamDialer.Lookup.
@@ -135,11 +154,15 @@ func (a proxyDialerAdapter) Lookup(ctx context.Context, sub string) (*proxy.Reso
 		// (the client may have disconnected after registering the subdomain).
 		return nil, proxy.ErrNotFound
 	}
+	userID, sessionID := a.lookupSessionFields(tn.ID)
 	r := &proxy.Resolved{
-		ServiceID:    svc.ID,
-		AccessMode:   svc.AccessMode,
-		APIKeyHeader: svc.APIKeyHeader,
-		LocalHost:    tn.LocalAddr,
+		ServiceID:       svc.ID,
+		AccessMode:      svc.AccessMode,
+		APIKeyHeader:    svc.APIKeyHeader,
+		LocalHost:       tn.LocalAddr,
+		TunnelID:        tn.ID,
+		UserID:          userID,
+		ClientSessionID: sessionID,
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
@@ -180,11 +203,15 @@ func (a proxyDialerAdapter) LookupByServiceID(ctx context.Context, serviceID str
 		}
 		return nil, fmt.Errorf("proxy lookup by service id: service for subdomain: %w", err)
 	}
+	userID, sessionID := a.lookupSessionFields(tn.ID)
 	r := &proxy.Resolved{
-		ServiceID:    svc.ID,
-		AccessMode:   svc.AccessMode,
-		APIKeyHeader: svc.APIKeyHeader,
-		LocalHost:    tn.LocalAddr,
+		ServiceID:       svc.ID,
+		AccessMode:      svc.AccessMode,
+		APIKeyHeader:    svc.APIKeyHeader,
+		LocalHost:       tn.LocalAddr,
+		TunnelID:        tn.ID,
+		UserID:          userID,
+		ClientSessionID: sessionID,
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
