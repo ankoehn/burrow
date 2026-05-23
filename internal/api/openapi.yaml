@@ -72,6 +72,8 @@ tags:
     description: Server-sent events stream (dashboard refresh).
   - name: metrics
     description: Prometheus 0.0.4 scrape endpoint.
+  - name: openapi
+    description: OpenAPI spec discovery and embedded browser viewer.
 
 components:
   securitySchemes:
@@ -2291,3 +2293,48 @@ paths:
             text/event-stream:
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # OpenAPI viewer (v0.5.0 Task 11, spec J.2)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/openapi/viewer/:
+    get:
+      tags: [openapi]
+      summary: Embedded hand-rolled OpenAPI browser (metrics:read or admin)
+      description: >
+        Serves the embedded single-page OpenAPI viewer. Fetches
+        /api/v1/openapi.yaml client-side (one same-origin GET) and renders
+        a sidebar index of all routes with path, parameters, request body,
+        and responses. Gated by admin OR metrics:read. No CDN, no phone-home.
+      responses:
+        '200':
+          description: HTML viewer page.
+          content:
+            text/html:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/openapi/viewer/static/{file}:
+    get:
+      tags: [openapi]
+      summary: Viewer static assets (closed allowlist — viewer.css, viewer.js only)
+      description: >
+        Serves viewer.css or viewer.js from the embedded FS. Any other path
+        returns 404. Gated by admin OR metrics:read (same as the viewer HTML).
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string, enum: [viewer.css, viewer.js] }
+      responses:
+        '200':
+          description: CSS or JS asset.
+          content:
+            text/css:
+              schema: { type: string }
+            application/javascript:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
