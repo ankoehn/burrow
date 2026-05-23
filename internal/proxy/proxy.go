@@ -117,10 +117,9 @@ type Proxy struct {
 // the data-plane hot path — the concrete type is injected by cmd/server via
 // WithConnLogSink.
 //
-// Full instrumentation (byte-counting transport wrapper, closed_error /
-// closed_idle status detection, bytes_in / bytes_out accounting) is deferred
-// to Task 17. In v0.5.0 Task 8 the sink field is declared and the Option is
-// registered; the actual Record calls land in Task 17.
+// closed_error / closed_idle status detection landed in v0.5.1 P2.3.
+// byte-counting transport wrapper + bytes_in / bytes_out accounting are
+// active since v0.5.0 Task 8 (sink field declared and wired here).
 type ConnLogSink interface {
 	Record(ctx context.Context, e ConnLogEntry) error
 }
@@ -765,9 +764,11 @@ func (p *Proxy) GetConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, err
 //     beyond the F-13 surgical fix.
 //   - UserID / ClientSessionID are left empty for the same reason — neither
 //     is currently surfaced through the data-plane resolver.
-//   - Status mapping is binary (Rejected | ClosedClean) — closed_error /
-//     closed_idle require hooking ReverseProxy.ErrorHandler + idle-timeout
-//     detection in the underlying transport. Both are out of F-13 scope.
+//   - Status mapping covers all four states: rejected, closed_clean,
+//     closed_error, closed_idle (v0.5.1 P2.3). Precedence is
+//     closed_error > closed_idle > closed_clean, enforced by the
+//     ErrorHandler closure and post-ServeHTTP 5xx promotion in
+//     serveResolved / serveCustomDomain.
 //   - Reason is always empty.
 func (p *Proxy) recordOnClose(
 	r *http.Request,
