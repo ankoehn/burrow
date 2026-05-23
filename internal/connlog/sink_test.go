@@ -188,6 +188,44 @@ func TestConnLogSinkCursorPagination(t *testing.T) {
 	}
 }
 
+// TestRecordHonoursDetachedContext verifies that Record still lands the row in
+// the DB even when the caller's context is already cancelled at call time.
+// This covers the proxy hot-path pattern:
+//
+//	defer sink.Record(r.Context(), entry)
+//
+// where r.Context() is cancelled the moment the handler returns.
+func TestRecordHonoursDetachedContext(t *testing.T) {
+	x := testDB(t)
+	sink := NewSQLSink(x, nil)
+
+	// Pre-cancel the context before calling Record.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	now := time.Now().UTC()
+	if err := sink.Record(ctx, Entry{
+		Kind:      KindHTTPProxy,
+		SourceIP:  "192.0.2.1",
+		StartedAt: now,
+		EndedAt:   now.Add(50 * time.Millisecond),
+		Status:    StatusClosedClean,
+	}); err != nil {
+		t.Fatalf("Record returned unexpected error: %v", err)
+	}
+
+	// Poll until the row lands or we time out.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, _ := ListConnectionLogs(context.Background(), x, ConnLogQuery{Limit: 10})
+		if len(entries) >= 1 {
+			return // success
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("entry never landed in DB despite pre-cancelled caller context")
+}
+
 // TestRollupIdempotentAndComputesP95 inserts 100 entries with durations
 // 100..199 ms for one service/day, runs Rollup twice, and asserts:
 //   - exactly 1 rollup row exists (idempotent),

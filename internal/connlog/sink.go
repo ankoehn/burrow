@@ -90,7 +90,11 @@ func NewSQLSink(b *db.DB, log *slog.Logger) *SQLSink {
 
 // Record persists e into connection_logs. The actual INSERT is run in a
 // goroutine to satisfy the "never blocks > 50 ms" budget on the proxy hot
-// path. ctx is propagated to the goroutine.
+// path. The goroutine uses a context detached from the caller's cancellation
+// (via context.WithoutCancel) so that a deferred call on the proxy hot path
+// (e.g. "defer sink.Record(r.Context(), entry)") does not lose the row when
+// the request context is cancelled on handler return.  A hard 5 s timeout is
+// added so a stuck DB cannot leak goroutines indefinitely.
 func (s *SQLSink) Record(ctx context.Context, e Entry) error {
 	if s == nil || s.b == nil {
 		return nil
@@ -110,6 +114,8 @@ func (s *SQLSink) Record(ctx context.Context, e Entry) error {
 	}
 
 	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
 		_, err := s.b.DB().ExecContext(ctx,
 			`INSERT INTO connection_logs
 			  (id, kind, service_id, tunnel_id, user_id, client_session_id,
