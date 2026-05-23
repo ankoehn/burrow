@@ -142,6 +142,25 @@ type ServerConfig struct {
 	// to a relative path it is resolved against the process working directory
 	// at use time. Env: BURROW_BACKUP_DIR.
 	BackupDir string `koanf:"backup_dir"`
+
+	// ----- v0.5.0 additions (Task 15) ----------------------------------------
+
+	// DatabaseURL is the Postgres connection URL (e.g.
+	// "postgres://user:pass@host/dbname?sslmode=verify-full"). When non-empty
+	// the server uses PostgreSQL instead of SQLite. Requires
+	// ExperimentalPostgres=true AND a binary built with -tags=postgres.
+	// Both DatabasePath and DatabaseURL being non-empty is a fatal error.
+	// Env: BURROW_DATABASE_URL (also _FILE variant).
+	DatabaseURL string `koanf:"database_url"`
+	// ExperimentalPostgres enables the PostgreSQL backend. Must be true when
+	// DatabaseURL is set; ignored when DatabaseURL is empty (no-op).
+	// Guards against operators accidentally enabling an alpha feature.
+	// Env: BURROW_EXPERIMENTAL_POSTGRES_BACKEND.
+	// koanf key: experimental_postgres_backend (flat underscore — koanf nested
+	// dot-path tags do not unmarshal correctly to flat struct fields in this
+	// codebase; the flat key matches the BURROW_EXPERIMENTAL_POSTGRES_BACKEND
+	// env-var after the standard prefix-strip + lowercase transform).
+	ExperimentalPostgres bool `koanf:"experimental_postgres_backend"`
 }
 
 // ClientConfig configures burrow.
@@ -338,6 +357,35 @@ func validateV04Fields(c *ServerConfig) error {
 	return nil
 }
 
+// validateDatabaseConfig enforces the v0.5.0 Task 15 backend-selection rules:
+//
+//   - Both database_path AND database_url set → fatal (ambiguous).
+//   - database_url set but experimental.postgres_backend != true → fatal
+//     (operator must explicitly opt in to the alpha Postgres feature).
+//
+// Note: database_path has a non-empty default ("./burrow.db"), so "both set"
+// means database_url is non-empty AND database_path is its default or
+// an explicit override. The validation rejects any non-empty database_url
+// when database_path is also non-empty, covering both cases.
+func validateDatabaseConfig(c *ServerConfig) error {
+	if c.DatabaseURL == "" {
+		return nil // SQLite-only; nothing to validate.
+	}
+	// database_url is set. Reject if database_path is also set (the default
+	// "./burrow.db" counts as "set" — operators must clear it explicitly via
+	// BURROW_DATABASE_PATH="" when switching to Postgres).
+	if c.DatabasePath != "" {
+		return fmt.Errorf("database_url and database_path must not both be set; " +
+			"clear database_path (BURROW_DATABASE_PATH=\"\") when using database_url")
+	}
+	// Require the explicit opt-in flag.
+	if !c.ExperimentalPostgres {
+		return fmt.Errorf("database_url is set but experimental_postgres_backend is false; " +
+			"set BURROW_EXPERIMENTAL_POSTGRES_BACKEND=true to enable the alpha Postgres backend")
+	}
+	return nil
+}
+
 // parseTrustedProxies validates that each entry in the list is a valid CIDR or
 // IP address. Returns an error naming the first invalid entry.
 func parseTrustedProxies(entries []string) error {
@@ -385,6 +433,8 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"mcp_listen": "", "burrow_mcp_token": "", "geo_db_path": "", "pricing_path": "",
 		"webauthn_rp_id": "", "webauthn_rp_name": "Burrow", "webauthn_origin": "",
 		"backup_dir": "",
+		// v0.5.0 (Task 15): Postgres backend defaults — both off by default.
+		"database_url": "", "experimental_postgres_backend": false,
 	}, "."), nil)
 	_ = k.Load(burrowEnvProvider(), nil)
 	if err := applyFileSecrets(k); err != nil {
@@ -417,6 +467,13 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	// derived origin is the one we sanity-check.
 	deriveV04Fields(&c)
 	if err := validateV04Fields(&c); err != nil {
+		return nil, fmt.Errorf("invalid server config: %w", err)
+	}
+	// v0.5.0 (Task 15): validate Postgres backend config. Both database_path
+	// and database_url being non-empty is ambiguous and therefore fatal.
+	// database_url without the experimental flag is also rejected (operators
+	// must opt in explicitly).
+	if err := validateDatabaseConfig(&c); err != nil {
 		return nil, fmt.Errorf("invalid server config: %w", err)
 	}
 	return &c, nil

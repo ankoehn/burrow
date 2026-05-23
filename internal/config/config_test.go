@@ -818,3 +818,79 @@ func TestBackupDirExplicitOverride(t *testing.T) {
 		t.Fatalf("backup_dir override = %q, want /srv/backups", c.BackupDir)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// v0.5.0 Task 15: database_url + experimental.postgres_backend validation
+// ---------------------------------------------------------------------------
+
+// TestDatabaseURLDefaultEmpty asserts that database_url defaults to "".
+func TestDatabaseURLDefaultEmpty(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.DatabaseURL != "" {
+		t.Fatalf("default database_url = %q, want empty", c.DatabaseURL)
+	}
+}
+
+// TestExperimentalPostgresDefaultFalse asserts that experimental.postgres_backend
+// defaults to false.
+func TestExperimentalPostgresDefaultFalse(t *testing.T) {
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if c.ExperimentalPostgres {
+		t.Fatal("default experimental.postgres_backend must be false, got true")
+	}
+}
+
+// TestConfigRejectsBothDatabasePathAndURL asserts that setting both
+// database_path and database_url returns a fatal error.
+func TestConfigRejectsBothDatabasePathAndURL(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"database_path":                   "/x/burrow.db",
+		"database_url":                    "postgres://user:pass@host/db",
+		"experimental.postgres_backend":   true,
+	})
+	if err == nil {
+		t.Fatal("expected error when both database_path and database_url are set, got nil")
+	}
+	if !strings.Contains(err.Error(), "database_url") || !strings.Contains(err.Error(), "database_path") {
+		t.Fatalf("error should mention both database_url and database_path, got: %v", err)
+	}
+}
+
+// TestConfigRequiresExperimentalFlagForPostgres asserts that setting database_url
+// without experimental_postgres_backend=true returns a fatal error.
+func TestConfigRequiresExperimentalFlagForPostgres(t *testing.T) {
+	_, err := LoadServer(map[string]any{
+		"database_path": "",
+		"database_url":  "postgres://user:pass@host/db",
+		// experimental_postgres_backend intentionally NOT set (defaults to false).
+	})
+	if err == nil {
+		t.Fatal("expected error when database_url set without experimental flag, got nil")
+	}
+	if !strings.Contains(err.Error(), "experimental_postgres_backend") {
+		t.Fatalf("error should mention experimental_postgres_backend, got: %v", err)
+	}
+}
+
+// TestConfigDatabaseURLEnvVar asserts that BURROW_DATABASE_URL is loaded.
+func TestConfigDatabaseURLEnvVar(t *testing.T) {
+	t.Setenv("BURROW_DATABASE_URL", "postgres://u:p@host/db")
+	t.Setenv("BURROW_DATABASE_PATH", "")
+	t.Setenv("BURROW_EXPERIMENTAL_POSTGRES_BACKEND", "true")
+	c, err := LoadServer(nil)
+	if err != nil {
+		t.Fatalf("LoadServer with database_url env: %v", err)
+	}
+	if c.DatabaseURL != "postgres://u:p@host/db" {
+		t.Fatalf("database_url = %q, want postgres://u:p@host/db", c.DatabaseURL)
+	}
+	if !c.ExperimentalPostgres {
+		t.Fatal("experimental_postgres_backend must be true after BURROW_EXPERIMENTAL_POSTGRES_BACKEND=true")
+	}
+}
