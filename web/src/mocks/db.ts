@@ -353,8 +353,10 @@ function seedInspector(serviceId: string): InspectorEntry[] {
 }
 
 // 25 connection log rows — 10 http_proxy, 10 control, 5 tcp_proxy.
+// Anchor at "now" so the default 24h date-range preset always captures the
+// full range of seeded kinds (otherwise rows drift out of the window over time).
 function seedConnectionLogs(): ConnectionLog[] {
-  const base = Date.parse("2026-05-22T12:00:00Z");
+  const base = Date.now();
   const kinds: ConnectionLog["kind"][] = [
     "http_proxy", "http_proxy", "http_proxy", "http_proxy", "http_proxy",
     "http_proxy", "http_proxy", "http_proxy", "http_proxy", "http_proxy",
@@ -410,8 +412,12 @@ function seedConnectionLogs(): ConnectionLog[] {
 }
 
 // 3 rollup rows — one per day for the last 3 days, each a different service+kind.
+// Days computed relative to "today" so the default 24h preset always includes
+// the most recent rollup row.
 function seedConnectionLogRollups(): ConnectionLogRollup[] {
-  const days = ["2026-05-20", "2026-05-21", "2026-05-22"];
+  const dayOffset = (d: number): string =>
+    new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+  const days = [dayOffset(2), dayOffset(1), dayOffset(0)];
   const kinds: ConnectionLogRollup["kind"][] = ["http_proxy", "control", "tcp_proxy"];
   const svcIds = ["svc_web01", "svc_ai001", "svc_pg001"];
   return days.map((day, i) => ({
