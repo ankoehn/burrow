@@ -62,14 +62,11 @@ import (
 // query in the v0.5.0 code path will manifest here as a 5xx + a clear
 // pq/pgx error in the test output.
 func TestV050PostgresBackendE2E(t *testing.T) {
-	// v0.5.0 deferral (P1 — see docs/RELEASE_NOTES_v0.5.0.md): the v0.5.0
-	// typed stores hardcode SQLite-style "?" placeholders, but the pgx/stdlib
-	// driver does not rewrite "?" → "$N". Any DML against Postgres fails at
-	// the first INSERT (SQLSTATE 42601). A central placeholder rewriter is
-	// queued for v0.5.1. The skip keeps CI green while the failing-first
-	// seam test stays in version control as the executable contract for
-	// the v0.5.1 fix.
-	t.Skip("v0.5.0 P1 deferral: portable placeholders not yet wired — pgx/stdlib does not rewrite ? → $N. Tracked as v0.5.1 P1; see docs/RELEASE_NOTES_v0.5.0.md.")
+	// v0.5.1 P1.1: portable placeholders are now wired via the pgx-rewrite
+	// driver in internal/db/postgres.go — SQLite-style "?" placeholders are
+	// rewritten to "$N" at PrepareContext/QueryContext/ExecContext time, so
+	// the unchanged v0.5.0 query strings execute under Postgres. The corpus
+	// gate is internal/db/postgres_rewriter_test.go::TestPostgresRewriteCorpus.
 
 	pgURL := os.Getenv("BURROW_TEST_POSTGRES_URL")
 	if pgURL == "" {
@@ -220,6 +217,9 @@ func TestV050PostgresBackendE2E(t *testing.T) {
 			t.Fatalf("sink.Record: %v", err)
 		}
 		// sink.Record is async (goroutine); poll until the row lands.
+		// GET /api/v1/connection-logs returns a flat JSON array per the
+		// v0.5.0 contract (writeJSON of []connectionLogResp), not an
+		// {"items": [...]} envelope.
 		deadline := time.Now().Add(5 * time.Second)
 		var count int
 		for time.Now().Before(deadline) {
@@ -228,13 +228,11 @@ func TestV050PostgresBackendE2E(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", code, body)
 			}
-			var obj struct {
-				Items []json.RawMessage `json:"items"`
-			}
-			if err := json.Unmarshal(body, &obj); err != nil {
+			var items []json.RawMessage
+			if err := json.Unmarshal(body, &items); err != nil {
 				t.Fatalf("decode: %v body=%s", err, body)
 			}
-			count = len(obj.Items)
+			count = len(items)
 			if count >= 1 {
 				break
 			}
