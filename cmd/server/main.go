@@ -473,12 +473,13 @@ func main() {
 						URLRedacted: dbURLForStatus(cfg, backend),
 						Alpha:       cfg.ExperimentalPostgres && backend.Driver() == "postgres",
 					},
-					// v0.5.0 Task 17 wiring — new Deps surfaces for Tasks 3-11.
-					// SemanticEngine: nil in the default build (handlers degrade
-					// gracefully); the chromem-backed engine would be set here
-					// under -tags=semantic_cache once a concrete SemanticEngine
-					// adapter is wired. For now, the NoopCache is in the chain
-					// but the API surface doesn't expose stats (returns zeros).
+					// v0.5.0 Task 17 + P2.2 wiring — new Deps surfaces for Tasks 3-11.
+					// SemanticEngine: newSemanticEngine returns noopSemanticEngine in
+					// the default build (GET /cache/stats returns zeros, ClearAll is a
+					// no-op) and semanticEngineAdapter under -tags=semantic_cache (sums
+					// per-service Stats() across all registered services, implements
+					// ClearAll by iterating ListAllServices).
+					SemanticEngine:     newSemanticEngine(v05.SemanticCache, db.Wrap(database)),
 					ServiceAIConfigs:   db.Wrap(database),
 					CredentialVault:    v05.CredVault,
 					CredentialDB:       db.Wrap(database),

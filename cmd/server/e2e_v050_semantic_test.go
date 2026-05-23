@@ -10,26 +10,23 @@ package main
 // seeds service_ai_config with cache + cache.semantic enabled, and runs a
 // two-request scenario:
 //
-//   1. POST /v1/chat/completions with content "hello world"
-//      → exact MISS, semantic MISS (index empty), upstream serves a small
-//      OpenAI-shaped JSON body, chain stores into exact cache + Promote()s
-//      into the semantic index.
-//   2. POST /v1/chat/completions with content "hello, world!"
-//      → exact MISS (different bytes), semantic HIT (the stub embedding
-//      server returns an identical vector regardless of input, so cosine
-//      similarity is 1.0 ≥ min_similarity=0.85), chain serves the cached
-//      response with Burrow-Cache: similar + Burrow-Cache-Similarity headers
-//      and does NOT hit the upstream a second time.
+//  1. POST /v1/chat/completions with content "hello world"
+//     → exact MISS, semantic MISS (index empty), upstream serves a small
+//     OpenAI-shaped JSON body, chain stores into exact cache + Promote()s
+//     into the semantic index.
+//  2. POST /v1/chat/completions with content "hello, world!"
+//     → exact MISS (different bytes), semantic HIT (the stub embedding
+//     server returns an identical vector regardless of input, so cosine
+//     similarity is 1.0 ≥ min_similarity=0.85), chain serves the cached
+//     response with Burrow-Cache: similar + Burrow-Cache-Similarity headers
+//     and does NOT hit the upstream a second time.
 //
-// Stats verification: GET /api/v1/cache/stats is NOT wired in
-// cmd/server/main.go for the semantic_cache build (Deps.SemanticEngine is
-// nil even under the tag — see main.go:477's TODO comment). So this test
-// queries semantic occupancy + similar-returned counters via the cache
-// instance's Stats(ctx, serviceID) API directly. The chromem backend's
-// Stats() reads the semantic_index table for Entries and the in-process
-// hits counter for SimilarReturned24h — exactly the two fields the spec
-// A.4 /cache/stats handler would surface once the Deps.SemanticEngine
-// adapter lands (tracked as v0.5.1 polish).
+// Stats verification: GET /api/v1/cache/stats is called on a lightweight
+// management API httptest.Server backed by the same DB, with the
+// semanticEngineAdapter wired as SemanticEngine. This exercises the full
+// P2.2 path: adapter.AggregateStats() sums per-service Stats() across all
+// services and the JSON response contains semantic_entries >= 1 and
+// semantic_similar_returned_24h >= 1.
 //
 // Why the stub embedding server returns a constant vector: this is a smoke
 // test for the chain + Lookup/Promote round-trip plumbing, not for the
@@ -46,14 +43,18 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/cache/semantic"
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/store"
 )
 
 // TestV050SemanticCacheE2E is the v0.5.0 INTEGRATION Task 3 smoke test.
@@ -248,30 +249,19 @@ func TestV050SemanticCacheE2E(t *testing.T) {
 		t.Errorf("second: Burrow-Cache-Age=%q is not an integer: %v", ageStr, perr)
 	}
 
-	// --- Stats check ------------------------------------------------------
-	// Query the cache directly — see file comment for why we skip the API.
-	stats, err := realCache.Stats(context.Background(), s.serviceID)
-	if err != nil {
-		t.Fatalf("semantic Stats: %v", err)
-	}
-	if stats.Entries < 1 {
-		t.Errorf("stats.Entries = %d, want >= 1 (one row promoted)", stats.Entries)
-	}
-	if stats.SimilarReturned24h < 1 {
-		t.Errorf("stats.SimilarReturned24h = %d, want >= 1 (one Lookup hit)",
-			stats.SimilarReturned24h)
-	}
-
-	// And cross-check via direct SQL on semantic_index — the chromem cache's
-	// source of truth (spec A.6).
-	var sqlCount int
-	if err := s.db.QueryRowContext(context.Background(),
-		`SELECT count(*) FROM semantic_index WHERE service_id = ?`, s.serviceID,
-	).Scan(&sqlCount); err != nil {
-		t.Fatalf("count semantic_index: %v", err)
-	}
-	if sqlCount < 1 {
-		t.Errorf("semantic_index rows for service = %d, want >= 1", sqlCount)
+	// --- Stats check via GET /api/v1/cache/stats (P2.2) -------------------
+	// Spin up a minimal management API httptest.Server backed by the SAME
+	// DB the chain used, then call GET /api/v1/cache/stats and assert the
+	// semantic_entries and semantic_similar_returned_24h fields are non-zero.
+	//
+	// The SemanticEngine is wired as semanticEngineAdapter{cache: realCache,
+	// svc: serviceListerAdapter{wrapped}} — the production adapter from P2.2.
+	// This exercises the full pipeline: adapter.AggregateStats() iterates
+	// all service IDs, calls realCache.Stats(ctx, id), and sums the fields.
+	statsResp := callCacheStatsAPI(t, s, wrapped, realCache)
+	if statsResp.SemanticEntries < 1 || statsResp.SemanticSimilarReturned24h < 1 {
+		t.Errorf("GET /api/v1/cache/stats: semantic_entries=%d semantic_similar_returned_24h=%d; want both >= 1",
+			statsResp.SemanticEntries, statsResp.SemanticSimilarReturned24h)
 	}
 
 	// Sanity: the embedding server was called at least twice (Promote on
@@ -287,6 +277,87 @@ func TestV050SemanticCacheE2E(t *testing.T) {
 	if perr := json.Unmarshal([]byte(body1), &parsed); perr == nil && parsed.ID != "" {
 		// no-op: parsing succeeded, body shape is the OpenAI envelope.
 	}
+}
+
+// cacheStatsWire is the subset of GET /api/v1/cache/stats we assert on.
+type cacheStatsWire struct {
+	SemanticEntries            int `json:"semantic_entries"`
+	SemanticSimilarReturned24h int `json:"semantic_similar_returned_24h"`
+}
+
+// callCacheStatsAPI boots a minimal management API httptest.Server backed by
+// the same DB, logs in as the e2eStack admin, and returns the parsed response
+// of GET /api/v1/cache/stats. The SemanticEngine field is wired to the
+// production semanticEngineAdapter (P2.2) so this is the full stack test.
+func callCacheStatsAPI(t *testing.T, s *e2eStack, wrapped *db.DB, realCache semantic.Cache) cacheStatsWire {
+	t.Helper()
+
+	st := store.New(s.db)
+	deps := api.Deps{
+		Log:      s.log,
+		Users:    st,
+		Roles:    st,
+		Sessions: st,
+		Settings: st,
+		DB:       s.db,
+		// SemanticEngine: wired to the production adapter so AggregateStats
+		// returns real per-service sums from the chromem backend.
+		SemanticEngine: newSemanticEngine(realCache, wrapped),
+	}
+	mgmtSrv := httptest.NewServer(api.NewRouter(deps))
+	t.Cleanup(mgmtSrv.Close)
+
+	// Log in as the same admin the e2e stack uses.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgmtHC := &http.Client{Jar: jar}
+	loginBody, _ := json.Marshal(map[string]string{
+		"email":    e2eAdminEmail,
+		"password": e2eAdminPassword,
+	})
+	resp, err := mgmtHC.Post(mgmtSrv.URL+"/api/v1/auth/login", "application/json",
+		bytes.NewReader(loginBody))
+	if err != nil {
+		t.Fatalf("mgmt login: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("mgmt login status=%d body=%s", resp.StatusCode, b)
+	}
+	_ = resp.Body.Close()
+
+	// Extract CSRF token from cookie jar.
+	u, _ := url.Parse(mgmtSrv.URL)
+	var csrf string
+	for _, ck := range jar.Cookies(u) {
+		if ck.Name == "burrow_csrf" {
+			csrf = ck.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatal("callCacheStatsAPI: no CSRF cookie after mgmt login")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, mgmtSrv.URL+"/api/v1/cache/stats", nil)
+	if err != nil {
+		t.Fatalf("new stats request: %v", err)
+	}
+	statsResp, err := mgmtHC.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/cache/stats: %v", err)
+	}
+	defer statsResp.Body.Close()
+	if statsResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(statsResp.Body)
+		t.Fatalf("GET /api/v1/cache/stats status=%d body=%s", statsResp.StatusCode, b)
+	}
+	var out cacheStatsWire
+	if err := json.NewDecoder(statsResp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode /api/v1/cache/stats: %v", err)
+	}
+	return out
 }
 
 // lazySemanticCache is a deferred-wiring adapter that satisfies semantic.Cache
