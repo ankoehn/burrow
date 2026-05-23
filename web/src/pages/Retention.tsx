@@ -40,6 +40,13 @@ export default function Retention() {
   type FormState = Record<string, string>;
   const [form, setForm] = useState<FormState>({});
 
+  // v0.5.1 P3.7 (deferred to v0.5.2): per-field touched gate so validation
+  // errors do not surface on first paint or while the user is still typing.
+  // A field becomes touched on blur (or on form submit — see onSubmit
+  // handler below where every field is marked touched at once).
+  type TouchedState = Record<string, boolean>;
+  const [touched, setTouched] = useState<TouchedState>({});
+
   useEffect(() => {
     if (data) {
       const s: FormState = {};
@@ -51,8 +58,11 @@ export default function Retention() {
   }, [data]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const markTouched = (k: string) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
 
-  // Determine which fields are out of range.
+  // Determine which fields are out of range. The errors map is computed for
+  // ALL fields (used by hasErrors / save disable); rendering is then gated
+  // per-field on `touched[key]`.
   const errors: Partial<Record<string, string>> = {};
   for (const { key, min, max, label } of FIELD_META) {
     const v = Number(form[key]);
@@ -90,11 +100,23 @@ export default function Retention() {
       <section className="account-section">
         <form
           className="pw-form"
-          onSubmit={(e) => { e.preventDefault(); if (!hasErrors) save.mutate(); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            // On submit, mark every field touched so any errors surface.
+            const allTouched: TouchedState = {};
+            for (const { key } of FIELD_META) allTouched[key] = true;
+            setTouched(allTouched);
+            if (!hasErrors) save.mutate();
+          }}
         >
           <div className="form-grid">
             {FIELD_META.map(({ key, label, min, max, placeholder }) => {
-              const invalid = key in errors;
+              // v0.5.1 P3.7: only render the inline error after the user has
+              // blurred the field (or submitted the form). The `invalid`
+              // styling on <Input> follows the same gate so first-paint is
+              // clean even when a backend default is out of range.
+              const hasError = key in errors;
+              const showError = hasError && touched[key];
               return (
                 <div className="field" key={key}>
                   <label htmlFor={`ret-${key}`}>{label}</label>
@@ -107,10 +129,11 @@ export default function Retention() {
                     placeholder={placeholder}
                     value={form[key] ?? ""}
                     onChange={(e) => set(key, e.target.value)}
-                    invalid={invalid}
-                    aria-invalid={invalid || undefined}
+                    onBlur={() => markTouched(key)}
+                    invalid={showError}
+                    aria-invalid={showError || undefined}
                   />
-                  {invalid && (
+                  {showError && (
                     <p role="alert" className="field-error">{errors[key]}</p>
                   )}
                   {/* Show the advisory note below the audit_retention_days field */}
