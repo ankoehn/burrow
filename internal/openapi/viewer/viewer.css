@@ -1,0 +1,97 @@
+/* Burrow OpenAPI Viewer — hand-rolled, zero deps.
+   Uses CSS custom properties so the hosting page can theme it.
+   Automatic dark/light from prefers-color-scheme; toggled via .dark class on body. */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f4f4f5;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --method-get: #16a34a;
+  --method-post: #2563eb;
+  --method-put: #d97706;
+  --method-patch: #7c3aed;
+  --method-delete: #dc2626;
+  --sidebar-w: 280px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#09090b; --surface:#18181b; --border:#27272a; --text:#f4f4f5; --text-muted:#a1a1aa; }
+}
+body.dark {
+  --bg:#09090b; --surface:#18181b; --border:#27272a; --text:#f4f4f5; --text-muted:#a1a1aa;
+}
+body.light {
+  --bg:#ffffff; --surface:#f4f4f5; --border:#e4e4e7; --text:#18181b; --text-muted:#71717a;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+
+/* Header */
+.hdr { display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10; }
+.hdr-title { font-weight: 700; font-size: 1rem; }
+.theme-btn { background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); cursor: pointer; padding: 0.25rem 0.5rem; font-size: 1rem; }
+
+/* Layout */
+.layout { display: flex; height: calc(100vh - 41px); overflow: hidden; }
+
+/* Sidebar */
+.sidebar { width: var(--sidebar-w); flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-search { padding: 0.5rem; border-bottom: 1px solid var(--border); }
+.sidebar-search input { width: 100%; padding: 0.35rem 0.5rem; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); color: var(--text); font-size: 13px; }
+.route-list { list-style: none; overflow-y: auto; flex: 1; }
+.route-list li { border-bottom: 1px solid var(--border); }
+.route-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.6rem;
+  cursor: pointer; text-decoration: none; color: var(--text); width: 100%; background: none;
+  border: none; text-align: left; }
+.route-item:hover, .route-item.active { background: var(--surface); }
+.method { font-size: 11px; font-weight: 700; min-width: 44px; text-align: right; }
+.method-GET    { color: var(--method-get); }
+.method-POST   { color: var(--method-post); }
+.method-PUT    { color: var(--method-put); }
+.method-PATCH  { color: var(--method-patch); }
+.method-DELETE { color: var(--method-delete); }
+.route-path { font-size: 12px; word-break: break-all; color: var(--text-muted); }
+.route-item.active .route-path { color: var(--text); }
+
+/* Detail pane */
+.detail { flex: 1; overflow-y: auto; padding: 1.5rem; }
+.placeholder { color: var(--text-muted); }
+
+.detail-header { margin-bottom: 1rem; }
+.detail-method { font-size: 13px; font-weight: 700; }
+.detail-path   { font-size: 1.1rem; font-weight: 700; word-break: break-all; }
+.detail-summary { color: var(--text-muted); margin-top: 0.25rem; }
+
+.section { margin-top: 1.25rem; }
+.section-title { font-weight: 600; font-size: 13px; margin-bottom: 0.5rem;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+
+/* Parameters table */
+.param-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.param-table th { text-align: left; padding: 0.3rem 0.5rem; background: var(--surface);
+  border-bottom: 1px solid var(--border); font-weight: 600; color: var(--text-muted); }
+.param-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); }
+.param-in { font-size: 11px; background: var(--surface); border-radius: 3px;
+  padding: 1px 4px; color: var(--text-muted); }
+.param-required { color: #dc2626; font-size: 11px; }
+
+/* Responses */
+.resp-list { list-style: none; }
+.resp-item { display: flex; align-items: baseline; gap: 0.5rem;
+  padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+.resp-code { font-weight: 700; font-size: 13px; min-width: 40px; }
+.resp-desc { color: var(--text-muted); font-size: 13px; }
+.resp-2xx { color: var(--method-get); }
+.resp-4xx { color: var(--method-delete); }
+.resp-5xx { color: var(--text-muted); }

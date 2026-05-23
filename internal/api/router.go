@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/openapi/viewer"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
@@ -97,6 +98,20 @@ func NewRouter(d Deps) http.Handler {
 		// would be self-referential and adds no SDK value).
 		r.Get("/openapi.yaml", d.GetOpenAPIYAML)
 		r.Get("/openapi.json", d.GetOpenAPIJSON)
+
+		// v0.5.0 Task 11: embedded OpenAPI browser (spec J.2).
+		// Gated by admin OR metrics:read — the same gate as /metrics —
+		// so any operator with the metrics:read permission can access the
+		// API docs viewer without full admin escalation.
+		// RequireBearerOrSession + RequireSession run first (outer group
+		// above) so unauthenticated callers get 401 before the perm check.
+		r.Group(func(r chi.Router) {
+			r.Use(RequireBearerOrSession(d.Bearer, d.Users))
+			r.Use(d.RequireSession)
+			r.Use(d.requireMetricsRead)
+			vh := viewer.New(d.Log)
+			r.Route("/openapi/viewer", vh.Routes)
+		})
 
 		r.With(loginPerIP, loginGlobal).Post("/auth/login", d.Login)
 		// v0.4.0 Task 19: WebAuthn passkey login endpoints. begin +

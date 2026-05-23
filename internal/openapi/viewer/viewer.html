@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Burrow API</title>
+<link rel="stylesheet" href="/api/v1/openapi/viewer/static/viewer.css">
+</head>
+<body>
+<header class="hdr">
+  <span class="hdr-title">Burrow API</span>
+  <button id="theme-toggle" class="theme-btn" aria-label="Toggle dark/light mode">&#9680;</button>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-search">
+      <input id="search" type="search" placeholder="Filter routes…" autocomplete="off">
+    </div>
+    <ul class="route-list" id="route-list" role="list"></ul>
+  </nav>
+  <main class="detail" id="detail">
+    <p class="placeholder">Select a route from the sidebar.</p>
+  </main>
+</div>
+<script src="/api/v1/openapi/viewer/static/viewer.js"></script>
+</body>
+</html>
