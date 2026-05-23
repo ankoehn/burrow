@@ -1,0 +1,31 @@
+# test-only — never deploy this shape.
+# Postgres profile override — apply with:
+#   docker compose -f compose.full.yml -f compose.full.postgres.yml up -d --build --wait
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: burrow
+      POSTGRES_USER: burrow
+      POSTGRES_PASSWORD: burrow
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U burrow -d burrow"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  relay:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      BURROW_ADMIN_EMAIL: admin@e2e.local
+      BURROW_ADMIN_PASSWORD: e2e-pass
+      # Override the default SQLite path with the v0.5 alpha Postgres URL.
+      BURROW_DATABASE_URL: postgres://burrow:burrow@postgres:5432/burrow?sslmode=disable
+    # Rebuild with -tags=integration,postgres for the v0.5 alpha backend.
+    # Dockerfile.relay accepts GO_BUILD_TAGS (defaults to 'integration').
+    build:
+      args:
+        GO_BUILD_TAGS: "integration,postgres"
