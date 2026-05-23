@@ -18,7 +18,11 @@ COPY test/integration/full/entrypoints/relay-full.sh /usr/local/bin/relay-full.s
 ENV BURROW_DATABASE_PATH=/data/burrow.db \
     BURROW_LOG_LEVEL=info \
     BURROW_LOG_FORMAT=text \
-    BURROW_HTTPS_PROXY_TLS_CERT=/certs/wildcard.test.local.crt \
-    BURROW_HTTPS_PROXY_TLS_KEY=/certs/wildcard.test.local.key
+    BURROW_HTTP_PROXY_TLS_CERT=/certs/wildcard.test.local.crt \
+    BURROW_HTTP_PROXY_TLS_KEY=/certs/wildcard.test.local.key \
+    BURROW_AUTH_DOMAIN=test.local
 EXPOSE 7000 8080 8443 9000-9100 7800
+# burrowd --dev-certs writes a generated CA at ./certs/dev-ca.pem; CWD must
+# be writable. Mirror the basic-harness pattern.
+WORKDIR /data
 ENTRYPOINT ["/usr/local/bin/relay-full.sh"]
