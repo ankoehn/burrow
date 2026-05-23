@@ -39,6 +39,29 @@ var allMetricNames = []string{
 	"burrow_cert_expiry_days",
 	"burrow_audit_chain_length",
 	"burrow_audit_chain_last_hash",
+	// Semantic cache (v0.5.0, spec Part K).
+	"burrow_ai_semantic_lookups_total",
+	"burrow_ai_semantic_hits_total",
+	"burrow_ai_semantic_promotions_total",
+	"burrow_ai_semantic_errors_total",
+	"burrow_ai_semantic_index_entries",
+	"burrow_ai_semantic_index_bytes",
+	// Upstream-credential injection (v0.5.0, spec Part K).
+	"burrow_ai_credential_injections_total",
+	"burrow_ai_credential_misses_total",
+	// Custom domains (v0.5.0, spec Part K).
+	"burrow_custom_domain_count",
+	// Connection logs (v0.5.0, spec Part K).
+	"burrow_connections_total",
+	"burrow_connection_bytes_in_total",
+	"burrow_connection_bytes_out_total",
+	// Retention (v0.5.0, spec Part K).
+	"burrow_retention_compact_rows_deleted_total",
+	"burrow_retention_compact_last_run_seconds",
+	// Database (v0.5.0, spec Part K).
+	"burrow_db_backend",
+	"burrow_db_pool_active",
+	"burrow_db_pool_idle",
 }
 
 // parsedSample is one (name, labels, value) sample line from the exposition
@@ -265,6 +288,29 @@ func TestWriteTextClosedSetPresent(t *testing.T) {
 	r.SetCertExpiryDays("wildcard.example.com", 30)
 	r.SetAuditChainLength(17)
 	r.SetAuditChainLastHash("deadbeef")
+	// v0.5.0 — semantic cache.
+	r.IncAISemanticLookups("svc")
+	r.IncAISemanticHits("svc", "return_cached_marked")
+	r.IncAISemanticPromotions("svc")
+	r.IncAISemanticErrors("svc", "timeout")
+	r.SetAISemanticIndexEntries("svc", 12)
+	r.SetAISemanticIndexBytes("svc", 4096)
+	// v0.5.0 — upstream-credential injection.
+	r.IncAICredentialInjections("svc", "OPENAI_API_KEY")
+	r.IncAICredentialMisses("svc")
+	// v0.5.0 — custom domains.
+	r.SetCustomDomainCount(3)
+	// v0.5.0 — connection logs.
+	r.IncConnections("svc", "http_proxy", "closed_clean")
+	r.AddConnectionBytesIn("svc", "http_proxy", 1024)
+	r.AddConnectionBytesOut("svc", "http_proxy", 2048)
+	// v0.5.0 — retention.
+	r.AddRetentionCompactRowsDeleted("audit_logs", 50)
+	r.SetRetentionCompactLastRunSeconds(1_748_000_000)
+	// v0.5.0 — database.
+	r.SetDBBackend("sqlite")
+	r.SetDBPoolActive(1)
+	r.SetDBPoolIdle(0)
 
 	var buf bytes.Buffer
 	if err := r.WriteText(&buf); err != nil {
@@ -424,6 +470,159 @@ func TestHistogramQuantilesMonotonic(t *testing.T) {
 	}
 	if !sawCount || !sawSum {
 		t.Errorf("missing _count(%v) or _sum(%v)", sawCount, sawSum)
+	}
+}
+
+// TestV050MetricAdditions is the golden test for the v0.5.0 spec Part K metric
+// additions. It asserts that every new metric:
+//   - has a HELP line
+//   - has a TYPE line
+//   - has at least one sample with the correct label keys
+//
+// Mirror of TestWriteTextClosedSetPresent but isolated so failures are clearly
+// attributable to the Part K additions.
+func TestV050MetricAdditions(t *testing.T) {
+	r := New()
+
+	// Semantic cache.
+	r.IncAISemanticLookups("svcA")
+	r.IncAISemanticHits("svcA", "return_cached_marked")
+	r.IncAISemanticHits("svcA", "treat_as_miss")
+	r.IncAISemanticPromotions("svcA")
+	r.IncAISemanticErrors("svcA", "timeout")
+	r.IncAISemanticErrors("svcA", "model")
+	r.IncAISemanticErrors("svcA", "index")
+	r.SetAISemanticIndexEntries("svcA", 100)
+	r.SetAISemanticIndexBytes("svcA", 81920)
+
+	// Upstream-credential injection.
+	r.IncAICredentialInjections("svcA", "OPENAI_KEY")
+	r.IncAICredentialInjections("svcA", "ANTHROPIC_KEY")
+	r.IncAICredentialMisses("svcA")
+
+	// Custom domains.
+	r.SetCustomDomainCount(5)
+
+	// Connection logs.
+	r.IncConnections("svcA", "http_proxy", "closed_clean")
+	r.IncConnections("svcA", "http_proxy", "closed_error")
+	r.IncConnections("svcA", "control", "rejected")
+	r.AddConnectionBytesIn("svcA", "http_proxy", 512)
+	r.AddConnectionBytesOut("svcA", "http_proxy", 1024)
+
+	// Retention.
+	r.AddRetentionCompactRowsDeleted("audit_logs", 200)
+	r.AddRetentionCompactRowsDeleted("connection_logs", 100)
+	r.SetRetentionCompactLastRunSeconds(1_748_000_000)
+
+	// Database.
+	r.SetDBBackend("sqlite")
+	r.SetDBPoolActive(1)
+	r.SetDBPoolIdle(0)
+
+	var buf bytes.Buffer
+	if err := r.WriteText(&buf); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	got := parseExposition(t, buf.String())
+
+	type labelCheck struct {
+		metric string
+		labels map[string]string // subset that must be present on at least one sample
+	}
+	checks := []labelCheck{
+		// Semantic cache.
+		{"burrow_ai_semantic_lookups_total", map[string]string{"service": "svcA"}},
+		{"burrow_ai_semantic_hits_total", map[string]string{"service": "svcA", "policy": "return_cached_marked"}},
+		{"burrow_ai_semantic_hits_total", map[string]string{"service": "svcA", "policy": "treat_as_miss"}},
+		{"burrow_ai_semantic_promotions_total", map[string]string{"service": "svcA"}},
+		{"burrow_ai_semantic_errors_total", map[string]string{"service": "svcA", "kind": "timeout"}},
+		{"burrow_ai_semantic_errors_total", map[string]string{"service": "svcA", "kind": "model"}},
+		{"burrow_ai_semantic_errors_total", map[string]string{"service": "svcA", "kind": "index"}},
+		{"burrow_ai_semantic_index_entries", map[string]string{"service": "svcA"}},
+		{"burrow_ai_semantic_index_bytes", map[string]string{"service": "svcA"}},
+		// Upstream-credential injection.
+		{"burrow_ai_credential_injections_total", map[string]string{"service": "svcA", "slot": "OPENAI_KEY"}},
+		{"burrow_ai_credential_injections_total", map[string]string{"service": "svcA", "slot": "ANTHROPIC_KEY"}},
+		{"burrow_ai_credential_misses_total", map[string]string{"service": "svcA"}},
+		// Custom domains — unlabeled gauge.
+		{"burrow_custom_domain_count", nil},
+		// Connection logs.
+		{"burrow_connections_total", map[string]string{"service": "svcA", "kind": "http_proxy", "status": "closed_clean"}},
+		{"burrow_connections_total", map[string]string{"service": "svcA", "kind": "http_proxy", "status": "closed_error"}},
+		{"burrow_connections_total", map[string]string{"service": "svcA", "kind": "control", "status": "rejected"}},
+		{"burrow_connection_bytes_in_total", map[string]string{"service": "svcA", "kind": "http_proxy"}},
+		{"burrow_connection_bytes_out_total", map[string]string{"service": "svcA", "kind": "http_proxy"}},
+		// Retention.
+		{"burrow_retention_compact_rows_deleted_total", map[string]string{"table": "audit_logs"}},
+		{"burrow_retention_compact_rows_deleted_total", map[string]string{"table": "connection_logs"}},
+		{"burrow_retention_compact_last_run_seconds", nil},
+		// Database.
+		{"burrow_db_backend", map[string]string{"driver": "sqlite"}},
+		{"burrow_db_pool_active", nil},
+		{"burrow_db_pool_idle", nil},
+	}
+
+	for _, c := range checks {
+		m, ok := got[c.metric]
+		if !ok {
+			t.Errorf("metric %q missing from output", c.metric)
+			continue
+		}
+		if m.Help == "" {
+			t.Errorf("metric %q missing HELP line", c.metric)
+		}
+		if m.Type == "" {
+			t.Errorf("metric %q missing TYPE line", c.metric)
+		}
+		if c.labels == nil {
+			// Unlabeled gauge — just need at least one sample.
+			if len(m.Samples) == 0 {
+				t.Errorf("metric %q has no samples", c.metric)
+			}
+			continue
+		}
+		// Find a sample that contains all required labels.
+		found := false
+		for _, s := range m.Samples {
+			match := true
+			for k, v := range c.labels {
+				if s.Labels[k] != v {
+					match = false
+					break
+				}
+			}
+			if match {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("metric %q: no sample with labels %v (got %+v)", c.metric, c.labels, m.Samples)
+		}
+	}
+
+	// Spot-check specific counter values.
+	connTotal := got["burrow_connections_total"]
+	if connTotal == nil {
+		t.Fatal("burrow_connections_total missing")
+	}
+	for _, s := range connTotal.Samples {
+		if s.Labels["kind"] == "http_proxy" && s.Labels["status"] == "closed_clean" {
+			if s.Value != "1" {
+				t.Errorf("burrow_connections_total{http_proxy,closed_clean}=%s want 1", s.Value)
+			}
+		}
+	}
+
+	retentionRows := got["burrow_retention_compact_rows_deleted_total"]
+	if retentionRows == nil {
+		t.Fatal("burrow_retention_compact_rows_deleted_total missing")
+	}
+	for _, s := range retentionRows.Samples {
+		if s.Labels["table"] == "audit_logs" && s.Value != "200" {
+			t.Errorf("retention audit_logs=%s want 200", s.Value)
+		}
 	}
 }
 

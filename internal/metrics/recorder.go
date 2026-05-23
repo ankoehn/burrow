@@ -135,6 +135,69 @@ var closedSet = []metricDef{
 	{name: "burrow_audit_chain_last_hash", kind: kindGauge,
 		help:   "Last audit chain hash (gauge value is always 1; the hex digest lives in the hash label).",
 		labels: []string{"hash"}},
+
+	// Semantic cache (v0.5.0, spec Part K).
+	{name: "burrow_ai_semantic_lookups_total", kind: kindCounter,
+		help:   "Total semantic cache lookup attempts.",
+		labels: []string{"service"}},
+	{name: "burrow_ai_semantic_hits_total", kind: kindCounter,
+		help:   "Total semantic cache hits.",
+		labels: []string{"service", "policy"}},
+	{name: "burrow_ai_semantic_promotions_total", kind: kindCounter,
+		help:   "Total semantic cache promotions.",
+		labels: []string{"service"}},
+	{name: "burrow_ai_semantic_errors_total", kind: kindCounter,
+		help:   "Total semantic cache errors.",
+		labels: []string{"service", "kind"}},
+	{name: "burrow_ai_semantic_index_entries", kind: kindGauge,
+		help:   "Current number of entries in the semantic index.",
+		labels: []string{"service"}},
+	{name: "burrow_ai_semantic_index_bytes", kind: kindGauge,
+		help:   "Current byte size of the semantic index.",
+		labels: []string{"service"}},
+
+	// Upstream-credential injection (v0.5.0, spec Part K).
+	{name: "burrow_ai_credential_injections_total", kind: kindCounter,
+		help:   "Total upstream credential injections.",
+		labels: []string{"service", "slot"}},
+	{name: "burrow_ai_credential_misses_total", kind: kindCounter,
+		help:   "Total upstream credential misses (slot env var absent).",
+		labels: []string{"service"}},
+
+	// Custom domains (v0.5.0, spec Part K).
+	{name: "burrow_custom_domain_count", kind: kindGauge,
+		help:   "Current number of provisioned custom domains.",
+		labels: nil},
+
+	// Connection logs (v0.5.0, spec Part K).
+	{name: "burrow_connections_total", kind: kindCounter,
+		help:   "Total connections recorded.",
+		labels: []string{"service", "kind", "status"}},
+	{name: "burrow_connection_bytes_in_total", kind: kindCounter,
+		help:   "Total inbound bytes across all connections.",
+		labels: []string{"service", "kind"}},
+	{name: "burrow_connection_bytes_out_total", kind: kindCounter,
+		help:   "Total outbound bytes across all connections.",
+		labels: []string{"service", "kind"}},
+
+	// Retention (v0.5.0, spec Part K).
+	{name: "burrow_retention_compact_rows_deleted_total", kind: kindCounter,
+		help:   "Total rows deleted by retention compaction.",
+		labels: []string{"table"}},
+	{name: "burrow_retention_compact_last_run_seconds", kind: kindGauge,
+		help:   "UTC Unix timestamp of the last retention compaction run.",
+		labels: nil},
+
+	// Database (v0.5.0, spec Part K).
+	{name: "burrow_db_backend", kind: kindGauge,
+		help:   "Always 1; the driver label identifies the database backend.",
+		labels: []string{"driver"}},
+	{name: "burrow_db_pool_active", kind: kindGauge,
+		help:   "Active database connections in the pool (Postgres only).",
+		labels: nil},
+	{name: "burrow_db_pool_idle", kind: kindGauge,
+		help:   "Idle database connections in the pool (Postgres only).",
+		labels: nil},
 }
 
 // closedSetIndex maps metric name → its definition, populated at package
@@ -482,6 +545,118 @@ func (r *Recorder) SetAuditChainLastHash(hex string) {
 	r.chainHashMu.Lock()
 	r.chainHash = hex
 	r.chainHashMu.Unlock()
+}
+
+// --- v0.5.0 metric methods (spec Part K) ----------------------------------
+
+// IncAISemanticLookups records one semantic cache lookup attempt for service.
+func (r *Recorder) IncAISemanticLookups(service string) {
+	r.incCounter("burrow_ai_semantic_lookups_total",
+		[]string{"service"}, []string{service}, 1)
+}
+
+// IncAISemanticHits records one semantic cache hit. policy must be one of
+// "treat_as_miss" or "return_cached_marked".
+func (r *Recorder) IncAISemanticHits(service, policy string) {
+	r.incCounter("burrow_ai_semantic_hits_total",
+		[]string{"service", "policy"}, []string{service, policy}, 1)
+}
+
+// IncAISemanticPromotions records one semantic cache promotion for service.
+func (r *Recorder) IncAISemanticPromotions(service string) {
+	r.incCounter("burrow_ai_semantic_promotions_total",
+		[]string{"service"}, []string{service}, 1)
+}
+
+// IncAISemanticErrors records one semantic cache error. kind must be one of
+// "timeout", "model", or "index".
+func (r *Recorder) IncAISemanticErrors(service, kind string) {
+	r.incCounter("burrow_ai_semantic_errors_total",
+		[]string{"service", "kind"}, []string{service, kind}, 1)
+}
+
+// SetAISemanticIndexEntries sets burrow_ai_semantic_index_entries{service} to n.
+func (r *Recorder) SetAISemanticIndexEntries(service string, n int64) {
+	r.setGauge("burrow_ai_semantic_index_entries",
+		[]string{"service"}, []string{service}, float64(n))
+}
+
+// SetAISemanticIndexBytes sets burrow_ai_semantic_index_bytes{service} to n.
+func (r *Recorder) SetAISemanticIndexBytes(service string, n int64) {
+	r.setGauge("burrow_ai_semantic_index_bytes",
+		[]string{"service"}, []string{service}, float64(n))
+}
+
+// IncAICredentialInjections records one upstream credential injection for
+// service at the given slot.
+func (r *Recorder) IncAICredentialInjections(service, slot string) {
+	r.incCounter("burrow_ai_credential_injections_total",
+		[]string{"service", "slot"}, []string{service, slot}, 1)
+}
+
+// IncAICredentialMisses records one upstream credential miss (slot env var
+// absent) for service.
+func (r *Recorder) IncAICredentialMisses(service string) {
+	r.incCounter("burrow_ai_credential_misses_total",
+		[]string{"service"}, []string{service}, 1)
+}
+
+// SetCustomDomainCount sets burrow_custom_domain_count to n.
+func (r *Recorder) SetCustomDomainCount(n int64) {
+	r.setGauge("burrow_custom_domain_count", nil, nil, float64(n))
+}
+
+// IncConnections records one connection for the given service, kind, and
+// status label tuple.
+func (r *Recorder) IncConnections(service, kind, status string) {
+	r.incCounter("burrow_connections_total",
+		[]string{"service", "kind", "status"},
+		[]string{service, kind, status}, 1)
+}
+
+// AddConnectionBytesIn adds n bytes to
+// burrow_connection_bytes_in_total{service,kind}.
+func (r *Recorder) AddConnectionBytesIn(service, kind string, n int64) {
+	r.incCounter("burrow_connection_bytes_in_total",
+		[]string{"service", "kind"}, []string{service, kind}, n)
+}
+
+// AddConnectionBytesOut adds n bytes to
+// burrow_connection_bytes_out_total{service,kind}.
+func (r *Recorder) AddConnectionBytesOut(service, kind string, n int64) {
+	r.incCounter("burrow_connection_bytes_out_total",
+		[]string{"service", "kind"}, []string{service, kind}, n)
+}
+
+// AddRetentionCompactRowsDeleted adds n to
+// burrow_retention_compact_rows_deleted_total{table}.
+func (r *Recorder) AddRetentionCompactRowsDeleted(table string, n int64) {
+	r.incCounter("burrow_retention_compact_rows_deleted_total",
+		[]string{"table"}, []string{table}, n)
+}
+
+// SetRetentionCompactLastRunSeconds sets
+// burrow_retention_compact_last_run_seconds to the UTC Unix timestamp ts.
+func (r *Recorder) SetRetentionCompactLastRunSeconds(ts int64) {
+	r.setGauge("burrow_retention_compact_last_run_seconds", nil, nil, float64(ts))
+}
+
+// SetDBBackend sets burrow_db_backend{driver} to 1. The value is always 1;
+// the driver label carries the identity ("sqlite", "postgres").
+func (r *Recorder) SetDBBackend(driver string) {
+	r.setGauge("burrow_db_backend",
+		[]string{"driver"}, []string{driver}, 1)
+}
+
+// SetDBPoolActive sets burrow_db_pool_active to n. For SQLite this is always
+// 1; call it with 0 when no pool is active.
+func (r *Recorder) SetDBPoolActive(n int64) {
+	r.setGauge("burrow_db_pool_active", nil, nil, float64(n))
+}
+
+// SetDBPoolIdle sets burrow_db_pool_idle to n. For SQLite this is always 0.
+func (r *Recorder) SetDBPoolIdle(n int64) {
+	r.setGauge("burrow_db_pool_idle", nil, nil, float64(n))
 }
 
 // --- WriteText -------------------------------------------------------------
