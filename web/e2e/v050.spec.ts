@@ -137,26 +137,31 @@ test("v0.5.0: semantic cache tab is enabled and shows controls", async ({ page }
 });
 
 // ── 6. Upstream-credential binding tab shows env-only disclosure ──────────────
+//
+// v0.5.2 P3.6: this test used to early-return when no live service existed in
+// the CI fixture. Now we pre-provision a service row via the new admin
+// POST /api/v1/services endpoint so the assertion runs unconditionally.
 test("v0.5.0: upstream key tab shows env-only disclosure text", async ({ page }) => {
-  // Create a service via API if none exists, capture its ID.
   const cookies = await page.context().cookies();
   const csrf = cookies.find((c) => c.name === "burrow_csrf")?.value ?? "";
   const headers = { "X-CSRF-Token": csrf, "Content-Type": "application/json" };
 
   const list = await page.request.get("/api/v1/services");
   expect(list.status()).toBe(200);
-  let services = (await list.json()) as { id: string; name: string }[];
+  const services = (await list.json()) as { id: string; name: string }[];
 
   let serviceId: string;
   if (services.length === 0) {
-    // No live services; create a placeholder via the internal API.
-    // The services endpoint requires a live burrow client, so instead we
-    // navigate to a known-404 service and verify the error notice renders.
-    await page.goto("/services/no-such-service-id");
-    await expect(page.getByRole("heading", { name: /Service/ })).toBeVisible();
-    // Service not found → error notice path; test the upstream-key tab layout
-    // is skipped for this run (no live services in CI fixture).
-    return;
+    // Pre-provision a service via the admin POST /services endpoint
+    // (v0.5.2 P3.6). The handler accepts service_id, title, and access_mode;
+    // duplicates return 409 which is acceptable here (we re-use an existing row).
+    const created = await page.request.post("/api/v1/services", {
+      headers,
+      data: { service_id: "svc_e2e_upstream", title: "Playwright pre-provisioned", access_mode: "api_key" },
+    });
+    // 201 on first run, 409 on a re-run; both leave the row in place.
+    expect([201, 409]).toContain(created.status());
+    serviceId = "svc_e2e_upstream";
   } else {
     serviceId = services[0]!.id;
   }
@@ -176,22 +181,34 @@ test("v0.5.0: upstream key tab shows env-only disclosure text", async ({ page })
 });
 
 // ── 7. Custom domains tab shows Add domain form ───────────────────────────────
+//
+// v0.5.2 P3.6: previously early-returned when no live service existed; now
+// pre-provisions one via the admin POST /api/v1/services so the assertion
+// always runs.
 test("v0.5.0: custom domains tab opens add-domain dialog", async ({ page }) => {
-  // Same service-availability guard as test 6.
+  const cookies = await page.context().cookies();
+  const csrf = cookies.find((c) => c.name === "burrow_csrf")?.value ?? "";
+  const headers = { "X-CSRF-Token": csrf, "Content-Type": "application/json" };
+
   const list = await page.request.get("/api/v1/services");
   expect(list.status()).toBe(200);
   const services = (await list.json()) as { id: string; name: string }[];
 
+  let serviceId: string;
   if (services.length === 0) {
-    // No live services in CI fixture; navigate to the /domains route directly
-    // which renders ServiceDetail with the domains tab initialised.
-    await page.goto("/services/no-such-service-id/domains");
-    await expect(page.getByRole("heading", { name: /Service/ })).toBeVisible();
-    // Error path: page renders with error notice, not the domains panel.
-    return;
+    // Pre-provision a service via the admin POST /services endpoint
+    // (v0.5.2 P3.6). Re-using the same row across test 6 + 7 is fine; the
+    // handler returns 409 on duplicates which we treat as a successful no-op.
+    const created = await page.request.post("/api/v1/services", {
+      headers,
+      data: { service_id: "svc_e2e_domains", title: "Playwright domains pre-provisioned" },
+    });
+    expect([201, 409]).toContain(created.status());
+    serviceId = "svc_e2e_domains";
+  } else {
+    serviceId = services[0]!.id;
   }
 
-  const serviceId = services[0]!.id;
   await page.goto(`/services/${serviceId}/domains`);
   await expect(page.getByRole("heading", { name: /Service/ })).toBeVisible();
 
