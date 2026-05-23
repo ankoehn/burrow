@@ -293,18 +293,21 @@ func main() {
 				log.Warn("serving with a DEVELOPMENT self-signed TLS certificate — NOT for production; set BURROW_TLS_CERT/BURROW_TLS_KEY (or --tls-cert/--tls-key) to real certificates",
 					"reason", reason, "cert", cfg.TLSCert)
 			}
-			database, err := db.Open(cfg.DatabasePath)
+			// v0.5.0 Task 15: branch on Postgres vs SQLite at startup.
+			// openBackend (tag-gated in db_default.go / db_postgres.go) selects
+			// the backend and runs migrations. The returned Backend is unwrapped
+			// to *sql.DB for the rest of the existing code (which was written
+			// before the Backend abstraction); new code should accept Backend.
+			backend, err := openBackend(cfg, log)
 			if err != nil {
 				return err
 			}
-			defer database.Close()
+			database := backend.DB()
+			defer backend.Close()
 			// reaperWg tracks the session-reaper goroutine; it is waited (via
-			// defer below) before database.Close() runs (LIFO defer ordering).
+			// defer below) before backend.Close() runs (LIFO defer ordering).
 			var reaperWg sync.WaitGroup
 			defer reaperWg.Wait()
-			if err := db.Migrate(database); err != nil {
-				return err
-			}
 			st := store.New(database)
 			st.SetSMTPPassword(cfg.SMTPPassword)
 			if err := st.SeedAdmin(context.Background(), cfg.AdminEmail, cfg.AdminPassword); err != nil {
