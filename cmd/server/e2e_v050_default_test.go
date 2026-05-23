@@ -50,6 +50,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -100,10 +101,6 @@ type v050Env struct {
 func bootV050E2E(t *testing.T) *v050Env {
 	t.Helper()
 
-	// Slot must be visible to EnvVault at construction time (NewEnvVault
-	// scans os.Environ() once). t.Setenv resets after the test.
-	t.Setenv("BURROW_UPSTREAM_KEY_OPENAI", "sk-test-1")
-
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "v050-e2e.db")
 	sqldb, err := db.Open(dbPath)
@@ -114,6 +111,26 @@ func bootV050E2E(t *testing.T) *v050Env {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { _ = sqldb.Close() })
+
+	return buildV050EnvOnDB(t, sqldb, "sqlite", dbPath)
+}
+
+// buildV050EnvOnDB factors the post-DB-open construction of bootV050E2E out
+// so a parallel boot (e.g. Postgres under the `postgres` build tag) can drive
+// the same router stack. driver is "sqlite" or "postgres" — surfaced via
+// Deps.Database for the Part G assertion. urlRedacted is the value reported
+// in GET /api/v1/database.url_redacted (the on-disk path for SQLite, a
+// redacted DSN for Postgres).
+//
+// The caller is responsible for: (1) opening sqldb, (2) running migrations,
+// (3) ensuring the schema is empty if reuse-across-runs is undesirable, (4)
+// registering close on cleanup.
+func buildV050EnvOnDB(t *testing.T, sqldb *sql.DB, driver, urlRedacted string) *v050Env {
+	t.Helper()
+
+	// Slot must be visible to EnvVault at construction time (NewEnvVault
+	// scans os.Environ() once). t.Setenv resets after the test.
+	t.Setenv("BURROW_UPSTREAM_KEY_OPENAI", "sk-test-1")
 
 	wrapped := db.Wrap(sqldb)
 	st := store.New(sqldb)
@@ -214,8 +231,8 @@ func bootV050E2E(t *testing.T) *v050Env {
 		ConnLogDB:           v05.ConnLogDB,
 		CertValidationRoots: caPool,
 		Database: api.DBInfo{
-			Driver:      "sqlite",
-			URLRedacted: "v050-e2e.db",
+			Driver:      driver,
+			URLRedacted: urlRedacted,
 		},
 	}
 
@@ -252,7 +269,7 @@ func bootV050E2E(t *testing.T) *v050Env {
 	}
 
 	env := &v050Env{
-		dbPath:    dbPath,
+		dbPath:    urlRedacted,
 		sqldb:     wrapped,
 		srv:       hsrv,
 		hc:        hc,
