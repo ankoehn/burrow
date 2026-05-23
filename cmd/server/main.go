@@ -29,6 +29,7 @@ import (
 
 	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/config"
+	"github.com/ankoehn/burrow/internal/connlog"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
 	"github.com/ankoehn/burrow/internal/events"
@@ -519,6 +520,12 @@ func main() {
 
 				accessChecker := proxy.NewAccessCheckerWithSessionsAndLogger(st, st, cfg.AuthDomain, log)
 				gate := proxy.NewGate(st, cfg.AuthDomain, effectiveSecureCookies, log)
+				// v0.5.0 F-13: wire the connection-log sink so the proxy
+				// records one connection_logs row per closed request. The
+				// adapter shim translates proxy.ConnLogEntry into the
+				// concrete connlog.Entry — kept here (not in internal/proxy)
+				// so the proxy package stays import-free of connlog.
+				connLogSink := connlog.NewSQLSink(db.Wrap(database), log)
 				proxyOpts := []proxy.Option{
 					proxy.WithGate(gate),
 					// v0.4.0 Task 25: wire the AI middleware chain into the
@@ -527,6 +534,7 @@ func main() {
 					// preserves the FlushInterval=-1 / SSE / WebSocket
 					// invariants byte-for-byte for v0.3.0 traffic.
 					proxy.WithAIChain(v04.AIChain),
+					proxy.WithConnLogSink(proxyConnLogAdapter{sink: connLogSink}),
 				}
 				if ingressPort != "" {
 					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))
@@ -743,4 +751,39 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// proxyConnLogAdapter bridges the proxy.ConnLogSink interface (which is
+// declared in internal/proxy to keep that package import-free of connlog)
+// to the concrete *connlog.SQLSink. Translation is one-to-one — every
+// proxy.ConnLogEntry field maps directly to its connlog.Entry counterpart;
+// the Kind / Status enums are string-cast through their typed equivalents.
+//
+// Lives here (not in internal/proxy) so the data-plane proxy package never
+// imports connlog. The seam test in cmd/server/e2e_v050_default_test.go
+// installs an identical adapter shape, which keeps test and production
+// wiring symmetric.
+type proxyConnLogAdapter struct {
+	sink *connlog.SQLSink
+}
+
+func (a proxyConnLogAdapter) Record(ctx context.Context, e proxy.ConnLogEntry) error {
+	if a.sink == nil {
+		return nil
+	}
+	return a.sink.Record(ctx, connlog.Entry{
+		Kind:            connlog.Kind(e.Kind),
+		ServiceID:       e.ServiceID,
+		TunnelID:        e.TunnelID,
+		UserID:          e.UserID,
+		ClientSessionID: e.ClientSessionID,
+		SourceIP:        e.SourceIP,
+		UserAgent:       e.UserAgent,
+		StartedAt:       e.StartedAt,
+		EndedAt:         e.EndedAt,
+		BytesIn:         e.BytesIn,
+		BytesOut:        e.BytesOut,
+		Status:          connlog.Status(e.Status),
+		Reason:          e.Reason,
+	})
 }
