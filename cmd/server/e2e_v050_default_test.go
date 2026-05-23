@@ -743,4 +743,3 @@ func genTestLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, dn
 	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
 	return certPEM, keyPEM
 }
-
