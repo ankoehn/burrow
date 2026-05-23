@@ -86,7 +86,8 @@ type Proxy struct {
 	// falls back to this lookup when the incoming Host header does not match
 	// the subdomain pattern. The function returns the serviceID whose backend
 	// should receive the request, or ok=false when no custom domain matches.
-	// cmd/server wiring is deferred to Task 17.
+	// cmd/server wires this via WithCustomDomainLookup against
+	// v05.CustomDomainStore.LookupBySNI (F-13 closure, v0.5.0 integration).
 	customDomainLookup func(ctx context.Context, host string) (serviceID string, ok bool, err error)
 
 	// v0.5.0 Task 8: per-connection log sink. When non-nil, the proxy calls
