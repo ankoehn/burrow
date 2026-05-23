@@ -47,6 +47,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -66,19 +67,40 @@ func TestV050SemanticCacheE2E(t *testing.T) {
 	}
 
 	// --- Stub embedding server --------------------------------------------
-	// Responds with an OpenAI-shaped /v1/embeddings JSON body. Returns the
-	// SAME 8-dim unit vector for every input so the chromem cosine-similarity
-	// trivially returns 1.0 — sufficient for a smoke test (see file comment).
+	// Responds with an OpenAI-shaped /v1/embeddings JSON body. Dispatches by
+	// prompt-content substring:
+	//
+	//   - any input containing "hello" → constant 8-dim vector aligned along
+	//     all axes (the "similar" cluster). Requests #1 and #2 land here, so
+	//     cosine similarity between them is 1.0 ≥ min_similarity → HIT.
+	//   - any input containing "orthogonal" → an 8-dim unit vector on a
+	//     single dimension that is ZERO in the "hello" cluster vector. Cosine
+	//     similarity to the hello cluster is 0.0 < min_similarity=0.85 → MISS.
+	//   - anything else → the "hello" cluster vector (preserves existing
+	//     behaviour for unrelated callers, defensive).
+	//
+	// The negative case (request #3) lands here as a MISS, exercising the
+	// min_similarity threshold path. See file comment for the "constant vector
+	// is fine for a smoke test" rationale of requests #1+#2.
 	var embedCalls atomic.Int32
+	const helloVec = `[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]`
+	const orthoVec = `[0,0,0,0,0,0,0,1]` // unit vector on dim 7; dim 7 of helloVec = 0.5 → not orthogonal in the strict sense BUT cosine = 0.5/sqrt(8*0.25)/sqrt(1) ≈ 0.354 < 0.85
 	embed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		embedCalls.Add(1)
 		if r.URL.Path != "/v1/embeddings" {
 			http.NotFound(w, r)
 			return
 		}
-		// Drain the request body to assert it parsed but ignore content.
-		_, _ = io.Copy(io.Discard, r.Body)
-		body := `{"data":[{"embedding":[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5],"index":0,"object":"embedding"}],"model":"stub","object":"list","usage":{"prompt_tokens":1,"total_tokens":1}}`
+		raw, _ := io.ReadAll(r.Body)
+		var parsed struct {
+			Input string `json:"input"`
+		}
+		_ = json.Unmarshal(raw, &parsed)
+		vec := helloVec
+		if strings.Contains(parsed.Input, "orthogonal") {
+			vec = orthoVec
+		}
+		body := `{"data":[{"embedding":` + vec + `,"index":0,"object":"embedding"}],"model":"stub","object":"list","usage":{"prompt_tokens":1,"total_tokens":1}}`
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		w.WriteHeader(http.StatusOK)
@@ -247,6 +269,40 @@ func TestV050SemanticCacheE2E(t *testing.T) {
 		t.Error("second: Burrow-Cache-Age header missing")
 	} else if _, perr := strconv.Atoi(ageStr); perr != nil {
 		t.Errorf("second: Burrow-Cache-Age=%q is not an integer: %v", ageStr, perr)
+	}
+
+	// --- Request #3 — exact MISS, semantic MISS (orthogonal vector) -------
+	// The embed stub maps any input containing "orthogonal" to a unit vector
+	// on dim 7; the "hello" cluster vector is [0.5]*8. Cosine similarity is
+	// ~0.354, well below min_similarity=0.85, so the chain MUST treat this
+	// as a semantic MISS and serve from the upstream. This is the negative
+	// case for the min_similarity threshold path — without it, request #1's
+	// cached response would shadow ANY future request, defeating the point
+	// of having a similarity threshold at all.
+	//
+	// Capture the semantic_similar_returned_24h counter just before and after
+	// this request to assert it did NOT increment (the chain only counts a
+	// similar hit when the candidate exceeds the threshold).
+	before := callCacheStatsAPI(t, s, wrapped, realCache).SemanticSimilarReturned24h
+	upstreamBefore := upstreamHits.Load()
+	r3, err := hc.Do(mkReq("orthogonal vector"))
+	must(t, err, "third request")
+	_ = readAllString(t, r3)
+	if r3.StatusCode != http.StatusOK {
+		t.Fatalf("third: want 200, got %d", r3.StatusCode)
+	}
+	if got := upstreamHits.Load(); got != upstreamBefore+1 {
+		t.Fatalf("third: upstream hits delta = %d, want 1 (semantic tier must MISS on orthogonal prompt)",
+			got-upstreamBefore)
+	}
+	if got := r3.Header.Get("Burrow-Cache"); got == "similar" || got == "HIT" {
+		t.Fatalf("third: Burrow-Cache=%q, want neither similar nor HIT (orthogonal prompt below min_similarity)", got)
+	}
+	// Threshold enforcement: similar_returned counter must NOT have moved.
+	after := callCacheStatsAPI(t, s, wrapped, realCache).SemanticSimilarReturned24h
+	if after != before {
+		t.Errorf("third: semantic_similar_returned_24h moved from %d to %d after orthogonal prompt; threshold not enforced",
+			before, after)
 	}
 
 	// --- Stats check via GET /api/v1/cache/stats (P2.2) -------------------
