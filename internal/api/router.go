@@ -202,6 +202,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/services/{serviceID}/domains/{did}", d.GetCustomDomain)
 			r.Put("/services/{serviceID}/domains/{did}", d.PutCustomDomain)
 			r.Delete("/services/{serviceID}/domains/{did}", d.DeleteCustomDomain)
+			// v0.5.0 Task 8: per-tunnel connection logs (spec E.2).
+			// All three routes are gated by requireConnLogRead (admin OR
+			// audit:read). /export streams ndjson or csv; no CSRF needed
+			// for GET. No pagination cursor on /rollups (full result set
+			// per filter window). /export uses a fixed max-limit (1000
+			// rows); full streaming is deferred to Task 17.
+			r.With(d.requireConnLogRead).Get("/connection-logs", d.GetConnectionLogs)
+			r.With(d.requireConnLogRead).Get("/connection-logs/rollups", d.GetConnectionLogRollups)
+			r.With(d.requireConnLogRead).Get("/connection-logs/export", d.GetConnectionLogsExport)
 			// v0.4.0 Task 5: redaction rules + settings + preview JSON API.
 			// GET endpoints are session-authed (any user may read); mutations
 			// (POST/PUT/DELETE rules, PUT settings, POST preview) are gated

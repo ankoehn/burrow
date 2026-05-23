@@ -437,6 +437,13 @@ type Deps struct {
 	// so the chain validation step trusts the test-issued cert without
 	// requiring a real CA-signed certificate.
 	CertValidationRoots *x509.CertPool
+
+	// v0.5.0 Task 8: per-tunnel connection logs (spec E).
+	// ConnLogDB is the read surface for GET /api/v1/connection-logs and the
+	// two sub-routes (/rollups, /export). NewConnLogDBAdapter wraps *db.DB.
+	// Nil disables all three routes (handlers return 500 "connection log store
+	// unavailable"). cmd/server wiring is deferred to Task 17.
+	ConnLogDB ConnectionLogStore
 }
 
 // GeoLookupSurface is the Deps-facing interface that proxy.GeoLookup

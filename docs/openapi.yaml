@@ -166,6 +166,35 @@ components:
         mode: { type: string }
         header: { type: string }
         mtls_ca_pem: { type: string }
+    ConnectionLog:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [control, http_proxy, tcp_proxy] }
+        service_id: { type: string }
+        tunnel_id: { type: string }
+        user_id: { type: string }
+        client_session_id: { type: string }
+        source_ip: { type: string }
+        user_agent: { type: string }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        duration_ms: { type: integer }
+        bytes_in: { type: integer, format: int64 }
+        bytes_out: { type: integer, format: int64 }
+        status: { type: string, enum: [closed_clean, closed_error, closed_idle, rejected] }
+        reason: { type: string }
+    ConnectionLogRollup:
+      type: object
+      properties:
+        day: { type: string, format: date }
+        service_id: { type: string }
+        kind: { type: string }
+        sessions: { type: integer, format: int64 }
+        bytes_in: { type: integer, format: int64 }
+        bytes_out: { type: integer, format: int64 }
+        avg_duration_ms: { type: integer, format: int64 }
+        p95_duration_ms: { type: integer, format: int64 }
 
   responses:
     Unauthorized:
@@ -2082,6 +2111,116 @@ paths:
           schema: { type: string }
       responses:
         '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Connection Logs (spec E.2)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/connection-logs:
+    get:
+      tags: [audit]
+      summary: List per-tunnel connection log entries (newest first)
+      description: |
+        Returns connection_logs rows with cursor pagination. Permission:
+        admin OR audit:read. Filterable by kind, service_id, since, until,
+        and free-text q. Cursor: ?before_id=<last_id> for the next older page.
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [control, http_proxy, tcp_proxy] }
+        - name: service_id
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 1000 }
+        - name: before_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of connection log entries, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConnectionLog' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/connection-logs/rollups:
+    get:
+      tags: [audit]
+      summary: List daily connection log rollup rows
+      description: |
+        Returns connection_log_rollups rows (daily aggregates). Permission:
+        admin OR audit:read.
+      parameters:
+        - name: service_id
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { type: string, enum: [control, http_proxy, tcp_proxy] }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Array of rollup rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConnectionLogRollup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/connection-logs/export:
+    get:
+      tags: [audit]
+      summary: Export connection logs as NDJSON or CSV
+      description: |
+        Streams all matching connection log rows as NDJSON (default) or
+        CSV (?format=csv). Permission: admin OR audit:read.
+        Up to 1000 rows in v0.5.0; full streaming deferred to Task 17.
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [ndjson, csv], default: ndjson }
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: service_id
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Streamed NDJSON or CSV file.
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 

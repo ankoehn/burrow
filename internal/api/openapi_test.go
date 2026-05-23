@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ankoehn/burrow/internal/audit"
+	"github.com/ankoehn/burrow/internal/connlog"
 	"github.com/ankoehn/burrow/internal/cost"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/inspector"
@@ -195,6 +196,8 @@ func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
 		CredentialServices: stub,
 		// v0.5.0 Task 7: custom domain store (nil OK — routes registered unconditionally).
 		CustomDomains: stub,
+		// v0.5.0 Task 8: connection log store.
+		ConnLogDB: stub,
 	}
 	r := NewRouter(deps)
 	mux, ok := r.(chi.Router)
@@ -783,6 +786,16 @@ func (*fullDepsStub) UpsertUpstreamCredential(context.Context, db.ServiceUpstrea
 func (*fullDepsStub) DeleteUpstreamCredential(context.Context, string) error {
 	stubPanic("CredentialStore.DeleteUpstreamCredential")
 	return nil
+}
+
+// ConnectionLogStore (v0.5.0 Task 8).
+func (*fullDepsStub) ListConnectionLogs(context.Context, connlog.ConnLogQuery) ([]db.ConnectionLog, error) {
+	stubPanic("ConnectionLogStore.ListConnectionLogs")
+	return nil, nil
+}
+func (*fullDepsStub) ListConnectionLogRollups(context.Context, connlog.RollupQuery) ([]db.ConnectionLogRollup, error) {
+	stubPanic("ConnectionLogStore.ListConnectionLogRollups")
+	return nil, nil
 }
 
 // CustomDomainStore (v0.5.0 Task 7).
