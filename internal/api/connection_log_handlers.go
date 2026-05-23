@@ -24,6 +24,14 @@ type ConnectionLogStore interface {
 	ListConnectionLogs(ctx context.Context, q connlog.ConnLogQuery) ([]db.ConnectionLog, error)
 	// ListConnectionLogRollups returns connection_log_rollups rows matching q.
 	ListConnectionLogRollups(ctx context.Context, q connlog.RollupQuery) ([]db.ConnectionLogRollup, error)
+	// ListConnectionLogRollupTopIPs returns the persisted top-source-IPs rows
+	// for one (day, service_id, kind) group (Q12, v0.5.1 Task 5). Empty
+	// result means either the toggle was off at the last compaction or the
+	// group has never been rolled up. The handler distinguishes the two by
+	// consulting the connection_logs.rollup_include_top_ips setting before
+	// calling — when the setting is "false" the handler omits the
+	// top_source_ips field entirely (NOT empty).
+	ListConnectionLogRollupTopIPs(ctx context.Context, day, serviceID, kind string) ([]connlog.TopIP, error)
 }
 
 // connLogDBAdapter wraps *db.DB + connlog helpers to satisfy ConnectionLogStore.
@@ -34,6 +42,9 @@ func (a connLogDBAdapter) ListConnectionLogs(ctx context.Context, q connlog.Conn
 }
 func (a connLogDBAdapter) ListConnectionLogRollups(ctx context.Context, q connlog.RollupQuery) ([]db.ConnectionLogRollup, error) {
 	return connlog.ListConnectionLogRollups(ctx, a.x, q)
+}
+func (a connLogDBAdapter) ListConnectionLogRollupTopIPs(ctx context.Context, day, serviceID, kind string) ([]connlog.TopIP, error) {
+	return connlog.ListConnectionLogRollupTopIPs(ctx, a.x, day, serviceID, kind)
 }
 
 // NewConnLogDBAdapter wraps a *db.DB so it satisfies ConnectionLogStore.
@@ -110,15 +121,25 @@ func toConnectionLogResp(r db.ConnectionLog) connectionLogResp {
 }
 
 // connectionLogRollupResp is the JSON wire shape for one connection_log_rollups row.
+//
+// TopSourceIPs is a *pointer* to a slice so the JSON marshaler can express the
+// three states of the Q12 toggle distinctly:
+//   - toggle ON + group has data → pointer to populated slice → top_source_ips: [...]
+//   - toggle ON + group is empty → pointer to empty []         → top_source_ips: []
+//   - toggle OFF                  → nil pointer + omitempty     → field omitted entirely
+//
+// A plain []connlog.TopIP with `omitempty` cannot distinguish ON-but-empty
+// from OFF (encoding/json treats both nil and zero-length slices as empty).
 type connectionLogRollupResp struct {
-	Day           string `json:"day"`
-	ServiceID     string `json:"service_id"`
-	Kind          string `json:"kind"`
-	Sessions      int64  `json:"sessions"`
-	BytesIn       int64  `json:"bytes_in"`
-	BytesOut      int64  `json:"bytes_out"`
-	AvgDurationMs int64  `json:"avg_duration_ms"`
-	P95DurationMs int64  `json:"p95_duration_ms"`
+	Day           string           `json:"day"`
+	ServiceID     string           `json:"service_id"`
+	Kind          string           `json:"kind"`
+	Sessions      int64            `json:"sessions"`
+	BytesIn       int64            `json:"bytes_in"`
+	BytesOut      int64            `json:"bytes_out"`
+	AvgDurationMs int64            `json:"avg_duration_ms"`
+	P95DurationMs int64            `json:"p95_duration_ms"`
+	TopSourceIPs  *[]connlog.TopIP `json:"top_source_ips,omitempty"`
 }
 
 func toConnectionLogRollupResp(r db.ConnectionLogRollup) connectionLogRollupResp {
@@ -230,6 +251,13 @@ func parseRollupQuery(r *http.Request) (connlog.RollupQuery, error) {
 }
 
 // GetConnectionLogRollups handles GET /api/v1/connection-logs/rollups.
+//
+// When the connection_logs.rollup_include_top_ips setting is "true" (or unset
+// — default true), each row's top_source_ips field is populated from the aux
+// table connection_log_rollup_top_ips. When the setting is "false", the field
+// is omitted from the JSON response entirely (omitempty marshals nil away).
+// The handler tolerates a missing or failing settings reader by treating the
+// toggle as enabled.
 func (d Deps) GetConnectionLogRollups(w http.ResponseWriter, r *http.Request) {
 	if d.ConnLogDB == nil {
 		writeErr(w, http.StatusInternalServerError, "connection log store unavailable")
@@ -245,9 +273,42 @@ func (d Deps) GetConnectionLogRollups(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "list rollups failed")
 		return
 	}
+
+	// Resolve the Q12 toggle. Default-true policy: a missing Settings
+	// dependency, a missing key, or any value other than the literal string
+	// "false" evaluates to enabled.
+	topIPsEnabled := true
+	if d.Settings != nil {
+		m, gerr := d.Settings.GetSettings(r.Context())
+		if gerr == nil {
+			if v, ok := m["connection_logs.rollup_include_top_ips"]; ok && v == "false" {
+				topIPsEnabled = false
+			}
+		}
+	}
+
 	out := make([]connectionLogRollupResp, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toConnectionLogRollupResp(row))
+		resp := toConnectionLogRollupResp(row)
+		if topIPsEnabled {
+			ips, terr := d.ConnLogDB.ListConnectionLogRollupTopIPs(
+				r.Context(), row.Day, row.ServiceID, row.Kind,
+			)
+			if terr != nil {
+				writeErr(w, http.StatusInternalServerError, "list rollups failed")
+				return
+			}
+			// Pointer-to-slice: a non-nil pointer to an empty slice marshals
+			// as `[]`, a nil pointer is omitted by `omitempty`. This is the
+			// only way to express "toggle ON but no data" distinctly from
+			// "toggle OFF" without a custom marshaler. See the doc comment
+			// on connectionLogRollupResp.
+			if ips == nil {
+				ips = []connlog.TopIP{}
+			}
+			resp.TopSourceIPs = &ips
+		}
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -67,9 +67,14 @@ func nullOrStr(s string) any {
 
 // fakeConnLogStore is a simple in-memory stub for unit tests that don't need
 // a real DB.
+//
+// topIPs holds per-(day, service_id, kind) top-source-IP rows for the Q12
+// toggle tests. The map key is "<day>|<service_id>|<kind>". Tests seed via
+// seedTopIPs; the handler reads via ListConnectionLogRollupTopIPs.
 type fakeConnLogStore struct {
 	logs    []db.ConnectionLog
 	rollups []db.ConnectionLogRollup
+	topIPs  map[string][]connlog.TopIP
 }
 
 func (f *fakeConnLogStore) ListConnectionLogs(_ context.Context, q connlog.ConnLogQuery) ([]db.ConnectionLog, error) {
@@ -95,6 +100,13 @@ func (f *fakeConnLogStore) ListConnectionLogs(_ context.Context, q connlog.ConnL
 
 func (f *fakeConnLogStore) ListConnectionLogRollups(_ context.Context, _ connlog.RollupQuery) ([]db.ConnectionLogRollup, error) {
 	return f.rollups, nil
+}
+
+func (f *fakeConnLogStore) ListConnectionLogRollupTopIPs(_ context.Context, day, serviceID, kind string) ([]connlog.TopIP, error) {
+	if f.topIPs == nil {
+		return nil, nil
+	}
+	return f.topIPs[day+"|"+serviceID+"|"+kind], nil
 }
 
 // TestConnectionLogsGETReturnsEmptyWhenNone asserts that the list endpoint
@@ -235,6 +247,139 @@ func TestConnectionLogsRollupsGET(t *testing.T) {
 	}
 	if out[0].P95DurationMs != 195 {
 		t.Errorf("want p95=195, got %d", out[0].P95DurationMs)
+	}
+}
+
+// TestGetRollups_TopIPsToggle exercises the v0.5.1 Q12 toggle on the rollups
+// read path. Three states are asserted by inspecting the raw JSON because the
+// distinction between "field absent" and "field present but empty" is the
+// whole point of the toggle's wire contract:
+//
+//	default-unset → top_source_ips present (populated when seeded)
+//	"true"       → top_source_ips present (populated when seeded)
+//	"false"      → top_source_ips field omitted entirely (NOT empty array)
+func TestGetRollups_TopIPsToggle(t *testing.T) {
+	day := "2026-01-15"
+	rollupRow := db.ConnectionLogRollup{
+		Day: day, ServiceID: "s1", Kind: "http_proxy",
+		Sessions: 100, BytesIn: 1000, BytesOut: 2000,
+		AvgDurationMs: 150, P95DurationMs: 195,
+	}
+	topIPs := []connlog.TopIP{
+		{IP: "10.0.0.1", Sessions: 42},
+		{IP: "10.0.0.2", Sessions: 17},
+	}
+	key := day + "|s1|http_proxy"
+
+	check := func(t *testing.T, settingValue string, wantTopPresent bool, wantIPCount int) {
+		t.Helper()
+		store := &fakeConnLogStore{
+			rollups: []db.ConnectionLogRollup{rollupRow},
+			topIPs:  map[string][]connlog.TopIP{key: topIPs},
+		}
+		settings := &fakeCacheSettingsStore{}
+		if settingValue != "" {
+			settings.saved = map[string]string{
+				"connection_logs.rollup_include_top_ips": settingValue,
+			}
+		}
+		d := Deps{
+			Log:       discardLog(),
+			Users:     &fakeUserStore{role: "admin"},
+			ConnLogDB: store,
+			Settings:  settings,
+		}
+		srv := httptest.NewServer(NewRouter(d))
+		defer srv.Close()
+		c := authedClient(t, srv)
+
+		r := c.get(t, "/api/v1/connection-logs/rollups")
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+		}
+		// Decode into a slice of raw maps so we can detect "field absent"
+		// versus "field present and []".
+		var raw []map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if len(raw) != 1 {
+			t.Fatalf("want 1 rollup row, got %d", len(raw))
+		}
+		topRaw, hasField := raw[0]["top_source_ips"]
+		if hasField != wantTopPresent {
+			t.Fatalf("setting=%q: top_source_ips present=%v want=%v (raw=%v)",
+				settingValue, hasField, wantTopPresent, raw[0])
+		}
+		if wantTopPresent {
+			var ips []connlog.TopIP
+			if err := json.Unmarshal(topRaw, &ips); err != nil {
+				t.Fatalf("decode top_source_ips: %v", err)
+			}
+			if len(ips) != wantIPCount {
+				t.Fatalf("setting=%q: want %d top IPs, got %d", settingValue, wantIPCount, len(ips))
+			}
+		}
+	}
+
+	t.Run("default unset → toggle on, ips present", func(t *testing.T) {
+		check(t, "", true, 2)
+	})
+	t.Run("explicit true → toggle on, ips present", func(t *testing.T) {
+		check(t, "true", true, 2)
+	})
+	t.Run("explicit false → field omitted entirely", func(t *testing.T) {
+		check(t, "false", false, 0)
+	})
+}
+
+// TestGetRollups_TopIPsToggle_EmptyButEnabled asserts the wire contract for a
+// rollup row whose group has no top-IP rows but the toggle is still ON: the
+// top_source_ips field MUST be present as an empty array, NOT omitted. This
+// is the third state that distinguishes ON-but-empty from OFF.
+func TestGetRollups_TopIPsToggle_EmptyButEnabled(t *testing.T) {
+	day := "2026-01-16"
+	store := &fakeConnLogStore{
+		rollups: []db.ConnectionLogRollup{
+			{Day: day, ServiceID: "s2", Kind: "control",
+				Sessions: 1, AvgDurationMs: 10, P95DurationMs: 10},
+		},
+		// topIPs map intentionally empty — group has no aux rows yet.
+	}
+	settings := &fakeCacheSettingsStore{
+		saved: map[string]string{
+			"connection_logs.rollup_include_top_ips": "true",
+		},
+	}
+	d := Deps{
+		Log:       discardLog(),
+		Users:     &fakeUserStore{role: "admin"},
+		ConnLogDB: store,
+		Settings:  settings,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.get(t, "/api/v1/connection-logs/rollups")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var raw []map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if len(raw) != 1 {
+		t.Fatalf("want 1 row, got %d", len(raw))
+	}
+	topRaw, hasField := raw[0]["top_source_ips"]
+	if !hasField {
+		t.Fatal("toggle ON + no aux rows: top_source_ips MUST be present (not omitted)")
+	}
+	if string(topRaw) != "[]" {
+		t.Errorf("want top_source_ips=[], got %s", string(topRaw))
 	}
 }
 

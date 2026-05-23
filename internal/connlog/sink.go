@@ -354,6 +354,46 @@ func ListConnectionLogRollups(ctx context.Context, x *db.DB, q RollupQuery) ([]d
 	return out, nil
 }
 
+// TopIP is one (ip, sessions) pair for a (day, service_id, kind) group. Used
+// by the rollup read path to surface per-group top-source-IP attribution when
+// the connection_logs.rollup_include_top_ips toggle is enabled (Q12). Sessions
+// is the per-day per-group hit count attributed to ip.
+type TopIP struct {
+	IP       string `json:"ip"`
+	Sessions int64  `json:"sessions"`
+}
+
+// ListConnectionLogRollupTopIPs returns the persisted top-source-IPs rows for
+// one (day, service_id, kind) group, ordered most-frequent-first. The list is
+// empty when (a) the toggle was off at the most recent Rollup compaction, or
+// (b) the group has never been rolled up. Callers that need the toggle
+// distinguished from a never-rolled-up group should consult settings
+// independently.
+func ListConnectionLogRollupTopIPs(ctx context.Context, x *db.DB, day, serviceID, kind string) ([]TopIP, error) {
+	rows, err := x.DB().QueryContext(ctx,
+		`SELECT ip, sessions FROM connection_log_rollup_top_ips
+		  WHERE day = ? AND service_id = ? AND kind = ?
+		  ORDER BY sessions DESC, ip ASC`,
+		day, serviceID, kind,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list top_ips: %w", err)
+	}
+	defer rows.Close()
+	var out []TopIP
+	for rows.Next() {
+		var r TopIP
+		if err := rows.Scan(&r.IP, &r.Sessions); err != nil {
+			return nil, fmt.Errorf("scan top_ip: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("top_ips rows: %w", err)
+	}
+	return out, nil
+}
+
 // Rollup computes the daily rollup for the calendar day that contains t (UTC).
 // It is idempotent: re-running for the same day upserts (ON CONFLICT DO
 // UPDATE) so no duplicate rows are produced.
