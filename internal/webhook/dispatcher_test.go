@@ -634,9 +634,140 @@ func TestIsClosedEvent(t *testing.T) {
 	if IsClosedEvent("definitely.not.real") {
 		t.Error("free-form event must not pass IsClosedEvent")
 	}
-	if len(ClosedEvents) != 12 {
-		t.Errorf("ClosedEvents length = %d want 12 (spec Part H.3)",
+	// v0.5.0 Task 10 extended the vocabulary from 12 → 18.
+	if len(ClosedEvents) != 18 {
+		t.Errorf("ClosedEvents length = %d want 18 (12 original + 6 v0.5.0)",
 			len(ClosedEvents))
+	}
+	// New events must all be in the closed set.
+	for _, ev := range []string{
+		"ai.upstream_error",
+		"ai.cache_promotion",
+		"audit.policy_change",
+		"service.created",
+		"service.deleted",
+		"connection.session_summary",
+	} {
+		if !IsClosedEvent(ev) {
+			t.Errorf("new v0.5.0 event %q must be in ClosedEvents", ev)
+		}
+	}
+}
+
+// TestDispatcherFiresAiUpstreamErrorEvent confirms that EmitAIUpstreamError
+// delivers a POST to a webhook subscribed to "ai.upstream_error".
+func TestDispatcherFiresAiUpstreamErrorEvent(t *testing.T) {
+	got := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store := newFakeStore()
+	store.addWebhook(db.Webhook{
+		ID:     "wh1",
+		Name:   "ai-errors",
+		URL:    srv.URL,
+		Events: `["ai.upstream_error"]`,
+	})
+	d := New(store, &fakeSecrets{id: "wh1", plaintext: "s"}, nil, nil)
+	d.SetRetryBackoff(nil)
+	d.Start()
+	defer d.Close()
+
+	d.EmitAIUpstreamError("svc-1", "be-1", 502, "upstream timeout", 3)
+
+	select {
+	case body := <-got:
+		var env map[string]any
+		if err := json.Unmarshal(body, &env); err != nil {
+			t.Fatalf("body not JSON: %v", err)
+		}
+		if env["event"] != "ai.upstream_error" {
+			t.Errorf("body.event = %v want ai.upstream_error", env["event"])
+		}
+		data, ok := env["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("body.data not a map: %T", env["data"])
+		}
+		if data["ServiceID"] != "svc-1" {
+			t.Errorf("ServiceID = %v want svc-1", data["ServiceID"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no delivery within 2s")
+	}
+}
+
+// TestDispatcherRateLimit_AIUpstreamError confirms that the second
+// EmitAIUpstreamError within the hour window is silently suppressed.
+func TestDispatcherRateLimit_AIUpstreamError(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	store := newFakeStore()
+	store.addWebhook(db.Webhook{
+		ID:     "wh1",
+		Name:   "ai-errors",
+		URL:    srv.URL,
+		Events: `["ai.upstream_error"]`,
+	})
+	d := New(store, &fakeSecrets{id: "wh1", plaintext: "s"}, nil, nil)
+	d.SetRetryBackoff(nil)
+	d.Start()
+	defer d.Close()
+
+	// The rate limiter uses a package-level singleton. We emit to a unique
+	// serviceID so previous test runs don't interfere.
+	const svcID = "rl-test-svc"
+	d.EmitAIUpstreamError(svcID, "be", 502, "err", 0)
+	waitFor(t, 2*time.Second, func() bool { return atomic.LoadInt32(&hits) >= 1 })
+	d.EmitAIUpstreamError(svcID, "be", 502, "err", 1) // within 1h window → suppressed
+	time.Sleep(50 * time.Millisecond)
+	if h := atomic.LoadInt32(&hits); h != 1 {
+		t.Errorf("hits=%d want 1 (second emit should be rate-limited)", h)
+	}
+}
+
+// TestDispatcherPayloadTemplate confirms that a webhook with a non-empty
+// PayloadTemplate receives the rendered body instead of the default body.
+func TestDispatcherPayloadTemplate(t *testing.T) {
+	got := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- body
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	store := newFakeStore()
+	store.addWebhook(db.Webhook{
+		ID:              "wh1",
+		Name:            "templated",
+		URL:             srv.URL,
+		Events:          `["service.created"]`,
+		PayloadTemplate: `svc={{.ServiceID}},name={{.Name}}`,
+	})
+	d := New(store, &fakeSecrets{id: "wh1", plaintext: "s"}, nil, nil)
+	d.SetRetryBackoff(nil)
+	d.Start()
+	defer d.Close()
+
+	d.EmitServiceCreated("svc-42", "my-service", "http", "open")
+
+	select {
+	case body := <-got:
+		s := string(body)
+		if s != "svc=svc-42,name=my-service" {
+			t.Errorf("rendered body = %q want svc=svc-42,name=my-service", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no delivery within 2s")
 	}
 }
 

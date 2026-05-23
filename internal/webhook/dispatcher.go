@@ -32,6 +32,7 @@ import (
 
 	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/db"
+	wtemplate "github.com/ankoehn/burrow/internal/webhook/template"
 )
 
 // DefaultRetryBackoff is the spec-mandated retry schedule (Part H.2):
@@ -86,6 +87,13 @@ var ClosedEvents = []string{
 	"cert.expiring",
 	"audit.exported",
 	"backup.completed",
+	// v0.5.0 Task 10: new event vocabulary.
+	"ai.upstream_error",
+	"ai.cache_promotion",
+	"audit.policy_change",
+	"service.created",
+	"service.deleted",
+	"connection.session_summary",
 }
 
 // IsClosedEvent reports whether s is one of the spec-closed event names.
@@ -267,7 +275,9 @@ func (d *Dispatcher) workerLoop() {
 }
 
 // handleJob processes one Publish: list all webhooks, dispatch to those
-// that subscribe to the event, retry per attempt.
+// that subscribe to the event, retry per attempt. Each webhook with a
+// non-empty PayloadTemplate renders its own body; webhooks with an empty
+// template use the shared default body.
 func (d *Dispatcher) handleJob(j job) {
 	ctx := context.Background()
 	hooks, err := d.store.ListWebhooks(ctx)
@@ -275,7 +285,8 @@ func (d *Dispatcher) handleJob(j job) {
 		d.log.Warn("webhook: list webhooks failed", "err", err)
 		return
 	}
-	body, err := json.Marshal(map[string]any{
+	// Default body (used when PayloadTemplate is empty).
+	defaultBody, err := json.Marshal(map[string]any{
 		"event": j.event,
 		"data":  j.payload,
 	})
@@ -284,6 +295,11 @@ func (d *Dispatcher) handleJob(j job) {
 			"event", j.event, "err", err)
 		return
 	}
+	// Convert j.payload to a field map for template rendering. If payload is
+	// already a map[string]any we use it directly; otherwise we round-trip
+	// through JSON to get a flat map.
+	fields := payloadToFields(j.payload)
+
 	for _, wh := range hooks {
 		if wh.Paused {
 			continue
@@ -291,8 +307,39 @@ func (d *Dispatcher) handleJob(j job) {
 		if !webhookSubscribes(wh, j.event) {
 			continue
 		}
+		body := defaultBody
+		if wh.PayloadTemplate != "" {
+			rendered, _, err := wtemplate.Render(wh.PayloadTemplate, fields)
+			if err != nil {
+				d.log.Warn("webhook: template render failed, using default body",
+					"webhook_id", wh.ID, "event", j.event, "err", err)
+			} else {
+				body = rendered
+			}
+		}
 		d.deliverOne(ctx, wh, j.event, body)
 	}
+}
+
+// payloadToFields converts an arbitrary payload value to a map[string]any
+// suitable for template.Render. map[string]any passes through unchanged;
+// all other types are marshalled+unmarshalled to produce a flat map.
+func payloadToFields(payload any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	if m, ok := payload.(map[string]any); ok {
+		return m
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return map[string]any{}
+	}
+	return m
 }
 
 // DeliverNow runs the full attempt/retry loop for a single webhook and
@@ -308,12 +355,20 @@ func (d *Dispatcher) DeliverNow(ctx context.Context, webhookID, event string, pa
 	if err != nil {
 		return 0, 0, err
 	}
-	body, err := json.Marshal(map[string]any{
+	defaultBody, err := json.Marshal(map[string]any{
 		"event": event,
 		"data":  payload,
 	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("marshal payload: %w", err)
+	}
+	body := defaultBody
+	if wh.PayloadTemplate != "" {
+		fields := payloadToFields(payload)
+		if rendered, _, err := wtemplate.Render(wh.PayloadTemplate, fields); err == nil {
+			body = rendered
+		}
+		// On render error we fall back to the default body silently.
 	}
 	return d.deliverOne(ctx, wh, event, body), 0, nil
 }
@@ -573,6 +628,142 @@ func newDeliveryID() string {
 		return id
 	}
 	return fmt.Sprintf("d-%d", time.Now().UnixNano())
+}
+
+// ---------------------------------------------------------------------------
+// v0.5.0 Task 10: new event helpers + per-event rate-limiting
+// ---------------------------------------------------------------------------
+
+// RollupData carries the aggregated session metrics for the
+// connection.session_summary event. Populated by the hourly tick in Task 17.
+type RollupData struct {
+	Sessions      int64
+	BytesIn       int64
+	BytesOut      int64
+	AvgDurationMs int64
+	P95DurationMs int64
+}
+
+// emitRateLimiter is a per-event-per-serviceID in-process rate limiter.
+// It records the last time each (event, serviceID) pair was emitted; callers
+// that would exceed the window are silently suppressed.
+//
+// guarded by emitMu.
+type emitRateLimiter struct {
+	mu      sync.Mutex
+	lastHit map[string]time.Time // key: "event:serviceID"
+}
+
+func newEmitRateLimiter() *emitRateLimiter {
+	return &emitRateLimiter{lastHit: make(map[string]time.Time)}
+}
+
+// allow returns true and records the hit when the (event, key) pair
+// has not fired within the given window. Returns false to suppress.
+func (r *emitRateLimiter) allow(event, key string, window time.Duration) bool {
+	k := event + ":" + key
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if last, ok := r.lastHit[k]; ok && time.Since(last) < window {
+		return false
+	}
+	r.lastHit[k] = time.Now()
+	return true
+}
+
+// rateLimiter is the process-wide emitter rate limiter. Constructed lazily;
+// callers use dispatcherRateLimiter() to access.
+var (
+	globalRateLimiter     *emitRateLimiter
+	globalRateLimiterOnce sync.Once
+)
+
+func dispatcherRateLimiter() *emitRateLimiter {
+	globalRateLimiterOnce.Do(func() { globalRateLimiter = newEmitRateLimiter() })
+	return globalRateLimiter
+}
+
+// EmitAIUpstreamError publishes an "ai.upstream_error" webhook event on
+// behalf of the given service. Rate-limited to 1/h per serviceID.
+func (d *Dispatcher) EmitAIUpstreamError(serviceID, backendServiceID string, status int, errMsg string, retryCount int) {
+	const event = "ai.upstream_error"
+	if !dispatcherRateLimiter().allow(event, serviceID, time.Hour) {
+		return
+	}
+	d.Publish(context.Background(), event, map[string]any{
+		"ServiceID":        serviceID,
+		"BackendServiceID": backendServiceID,
+		"Status":           status,
+		"Error":            errMsg,
+		"RetryCount":       retryCount,
+	})
+}
+
+// EmitAICachePromotion publishes an "ai.cache_promotion" webhook event.
+// Rate-limited to 1/h per serviceID.
+func (d *Dispatcher) EmitAICachePromotion(serviceID, exactKeyHash, promptFingerprint string, similarity float64) {
+	const event = "ai.cache_promotion"
+	if !dispatcherRateLimiter().allow(event, serviceID, time.Hour) {
+		return
+	}
+	d.Publish(context.Background(), event, map[string]any{
+		"ServiceID":         serviceID,
+		"ExactKeyHash":      exactKeyHash,
+		"PromptFingerprint": promptFingerprint,
+		"Similarity":        similarity,
+	})
+}
+
+// EmitAuditPolicyChange publishes an "audit.policy_change" webhook event.
+// Not rate-limited (admin-initiated, low-volume).
+func (d *Dispatcher) EmitAuditPolicyChange(actorEmail, action string, before, after any) {
+	d.Publish(context.Background(), "audit.policy_change", map[string]any{
+		"ActorEmail": actorEmail,
+		"Action":     action,
+		"Before":     before,
+		"After":      after,
+	})
+}
+
+// EmitServiceCreated publishes a "service.created" webhook event.
+// Not rate-limited (admin-initiated, low-volume).
+func (d *Dispatcher) EmitServiceCreated(serviceID, name, kind, accessMode string) {
+	d.Publish(context.Background(), "service.created", map[string]any{
+		"ServiceID":  serviceID,
+		"Name":       name,
+		"Kind":       kind,
+		"AccessMode": accessMode,
+	})
+}
+
+// EmitServiceDeleted publishes a "service.deleted" webhook event.
+// Not rate-limited (admin-initiated, low-volume).
+func (d *Dispatcher) EmitServiceDeleted(serviceID, name string) {
+	d.Publish(context.Background(), "service.deleted", map[string]any{
+		"ServiceID": serviceID,
+		"Name":      name,
+	})
+}
+
+// EmitConnectionSessionSummary publishes a "connection.session_summary"
+// webhook event. This is the hourly-tick function; the actual tick caller
+// is wired in Task 17. The function exists here so Task 17 can simply call
+// it without touching the dispatcher surface.
+//
+// Not rate-limited at the event-helper level — the caller (Task 17's hourly
+// tick) controls the cadence.
+func (d *Dispatcher) EmitConnectionSessionSummary(serviceID, kind string, windowStart, windowEnd time.Time, rollup RollupData) {
+	d.Publish(context.Background(), "connection.session_summary", map[string]any{
+		"ServiceID":     serviceID,
+		"Kind":          kind,
+		"WindowStart":   windowStart.UTC().Format(time.RFC3339),
+		"WindowEnd":     windowEnd.UTC().Format(time.RFC3339),
+		"Sessions":      rollup.Sessions,
+		"BytesIn":       rollup.BytesIn,
+		"BytesOut":      rollup.BytesOut,
+		"AvgDurationMs": rollup.AvgDurationMs,
+		"P95DurationMs": rollup.P95DurationMs,
+	})
 }
 
 // InMemorySecrets is a tiny in-process SecretLookup backed by a
