@@ -421,6 +421,69 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 		}
 	})
 
+	// --- Part D2 — custom domain proxy routing seam (F-14) ----------------
+	//
+	// Drives a real visitor request through the full ingress proxy + tunnel
+	// + upstream chain (bootE2EStack) with a proxy.WithCustomDomainLookup
+	// closure installed via withCustomDomainLookup. The closure maps
+	// "foo.example.com" -> s.serviceID, mirroring how cmd/server/main.go
+	// adapts v05.CustomDomainStore.LookupBySNI into the proxy hook.
+	//
+	// This is the genuine wiring seam for F-14: it proves the proxy's
+	// host-not-a-subdomain branch (proxy.go:285) actually routes through
+	// the registered lookup and serves the upstream's body. Without F-14's
+	// fix in cmd/server/main.go, the lookup field is nil and the dead-code
+	// branch returns notFound — every custom-domain visitor gets a 404.
+	//
+	// The companion subtest D_custom_domain_post exercises the API write
+	// path (POST /domains + chain validation) on the v050Env, which is
+	// where v05.CustomDomainStore is fed. This subtest exercises the read
+	// path through the proxy data plane on bootE2EStack.
+	t.Run("D_custom_domain_route", func(t *testing.T) {
+		const customHost = "foo.example.com"
+
+		// In-test lookup: map customHost -> serviceID. The real production
+		// adapter calls v05.CustomDomainStore.LookupBySNI; this stub mirrors
+		// its (serviceID, ok, err) contract verbatim. Misses return ok=false.
+		var lookupServiceID string
+		lookup := func(_ context.Context, host string) (string, bool, error) {
+			if strings.EqualFold(host, customHost) {
+				return lookupServiceID, true, nil
+			}
+			return "", false, nil
+		}
+
+		s := bootE2EStack(t, withCustomDomainLookup(lookup))
+		lookupServiceID = s.serviceID // late-bound: bootE2EStack assigns serviceID
+
+		const body = "ok-from-custom-domain"
+		s.setUpstreamHandler(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = io.WriteString(w, body)
+		})
+
+		// visitorClient already routes dial to the proxy regardless of URL
+		// host and sets SNI from the URL host with InsecureSkipVerify, so a
+		// GET to https://foo.example.com:<port>/ exercises the custom-domain
+		// branch without DNS or a CA-rooted cert chain. The wildcard cert
+		// presented by the proxy ingress will not match foo.example.com,
+		// but InsecureSkipVerify=true in visitorClient suppresses validation.
+		hc := s.visitorClient(t)
+		url := "https://" + customHost + ":" + s.proxyPort + "/custom-domain-probe"
+		resp, err := hc.Get(url)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		got, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status: want 200, got %d body=%s", resp.StatusCode, got)
+		}
+		if string(got) != body {
+			t.Errorf("body: want %q, got %q", body, string(got))
+		}
+	})
+
 	// --- Part E — connection log proxy roundtrip seam (F-13) --------------
 	//
 	// Drives a real visitor request through the full ingress proxy + tunnel
