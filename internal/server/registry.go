@@ -70,14 +70,24 @@ type ClientSession struct {
 }
 
 // Registry tracks live sessions and their tunnels (in-memory, mutex-guarded).
+//
+// tunnelIndex (v0.5.2 BACKLOG #1) is a parallel map keyed by tunnel runtime ID
+// pointing at the owning session. It is maintained on AddTunnel/RemoveTunnel/
+// RemoveSession and lets LookupSessionByTunnelID do an O(1) probe instead of
+// the O(N sessions x M tunnels) scan the previous SnapshotSessions-based
+// lookup performed once per proxied request.
 type Registry struct {
-	mu       sync.RWMutex
-	sessions map[string]*ClientSession
+	mu          sync.RWMutex
+	sessions    map[string]*ClientSession
+	tunnelIndex map[string]*ClientSession
 }
 
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
-	return &Registry{sessions: make(map[string]*ClientSession)}
+	return &Registry{
+		sessions:    make(map[string]*ClientSession),
+		tunnelIndex: make(map[string]*ClientSession),
+	}
 }
 
 // AddSession registers a session (initialising its tunnel map).
@@ -90,14 +100,30 @@ func (r *Registry) AddSession(cs *ClientSession) {
 	r.mu.Unlock()
 }
 
-// RemoveSession drops a session.
+// RemoveSession drops a session and clears its tunnel-index entries.
 func (r *Registry) RemoveSession(cs *ClientSession) {
+	// Snapshot the session's tunnel IDs under cs.mu so we can clear them from
+	// the registry-level tunnelIndex without holding two locks in nested order.
+	cs.mu.Lock()
+	ids := make([]string, 0, len(cs.Tunnels))
+	for id := range cs.Tunnels {
+		ids = append(ids, id)
+	}
+	cs.mu.Unlock()
+
 	r.mu.Lock()
 	delete(r.sessions, cs.SessionID)
+	for _, id := range ids {
+		// Only clear if the index still points at THIS session (a fast
+		// re-add under a different session would be tolerated).
+		if r.tunnelIndex[id] == cs {
+			delete(r.tunnelIndex, id)
+		}
+	}
 	r.mu.Unlock()
 }
 
-// AddTunnel records a tunnel under a session.
+// AddTunnel records a tunnel under a session and indexes it on the registry.
 func (r *Registry) AddTunnel(cs *ClientSession, t *Tunnel) {
 	cs.mu.Lock()
 	if cs.Tunnels == nil {
@@ -105,13 +131,32 @@ func (r *Registry) AddTunnel(cs *ClientSession, t *Tunnel) {
 	}
 	cs.Tunnels[t.ID] = t
 	cs.mu.Unlock()
+
+	r.mu.Lock()
+	r.tunnelIndex[t.ID] = cs
+	r.mu.Unlock()
 }
 
-// RemoveTunnel drops a tunnel from a session.
+// RemoveTunnel drops a tunnel from a session and from the registry index.
 func (r *Registry) RemoveTunnel(cs *ClientSession, tunnelID string) {
 	cs.mu.Lock()
 	delete(cs.Tunnels, tunnelID)
 	cs.mu.Unlock()
+
+	r.mu.Lock()
+	if r.tunnelIndex[tunnelID] == cs {
+		delete(r.tunnelIndex, tunnelID)
+	}
+	r.mu.Unlock()
+}
+
+// SessionByTunnelID probes the tunnel-ID index. Returns (cs, true) when the
+// tunnel is live, (nil, false) otherwise. O(1).
+func (r *Registry) SessionByTunnelID(tunnelID string) (*ClientSession, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cs, ok := r.tunnelIndex[tunnelID]
+	return cs, ok
 }
 
 // Sessions returns a snapshot slice of live sessions.

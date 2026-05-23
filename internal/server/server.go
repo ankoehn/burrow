@@ -362,6 +362,19 @@ type SessionSnapshot struct {
 	Tunnels                        []TunnelView
 }
 
+// LookupSessionByTunnelID returns the sessionID and userID that own the tunnel
+// with the given runtime ID, or ("", "", false) on miss. O(1) — probes the
+// Registry's tunnel index (v0.5.2 BACKLOG #1). Replaces the
+// O(N sessions x M tunnels-per-session) SnapshotSessions scan that
+// cmd/server/proxy_wiring.go::lookupSessionFields ran per proxied request.
+func (s *Server) LookupSessionByTunnelID(tunnelID string) (sessionID, userID string, ok bool) {
+	cs, found := s.reg.SessionByTunnelID(tunnelID)
+	if !found {
+		return "", "", false
+	}
+	return cs.SessionID, cs.UserID, true
+}
+
 // SnapshotSessions returns all live client sessions with their tunnels.
 func (s *Server) SnapshotSessions() []SessionSnapshot {
 	var out []SessionSnapshot
