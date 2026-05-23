@@ -92,6 +92,16 @@ const (
 	ActionServiceCustomDomainAdd    = "service.custom_domain.add"
 	ActionServiceCustomDomainUpdate = "service.custom_domain.update"
 	ActionServiceCustomDomainDelete = "service.custom_domain.delete"
+
+	// v0.5.0 Task 9: retention compaction job.
+	ActionRetentionCompact = "retention.compact"
+
+	// v0.5.0 Task 9: additional high-frequency leaf actions eligible for
+	// compaction (complementing ActionRedactionApplied and ActionGuardrailRefused
+	// which were already present).
+	ActionConnectionSessionSummary = "connection.session_summary"
+	ActionAICachePromoted          = "ai.cache.promoted"
+	ActionAIUpstreamError          = "ai.upstream_error"
 )
 
 // AllActions is the closed set of every audit action Burrow defines, in a
@@ -122,6 +132,8 @@ var AllActions = []string{
 	ActionMCPToolCall,
 	ActionServiceUpstreamCredentialBind, ActionServiceUpstreamCredentialUnbind,
 	ActionServiceCustomDomainAdd, ActionServiceCustomDomainUpdate, ActionServiceCustomDomainDelete,
+	ActionRetentionCompact,
+	ActionConnectionSessionSummary, ActionAICachePromoted, ActionAIUpstreamError,
 }
 
 // aggregatedActions is the set of actions that are sample-rated at 1/hour
