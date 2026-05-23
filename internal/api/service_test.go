@@ -1164,6 +1164,30 @@ func TestPostServicesBadAccessModeReturns400(t *testing.T) {
 	}
 }
 
+// TestPostServicesBurrowLoginWithoutAuthDomainReturns409 mirrors the
+// SetServiceAccessMode degraded-mode guard: an admin POST that asks for
+// access_mode=burrow_login while AuthDomain is unconfigured must be rejected
+// with 409 BEFORE the store is touched, since burrow_login auth cookies
+// require a known auth_domain to scope cookies to.
+func TestPostServicesBurrowLoginWithoutAuthDomainReturns409(t *testing.T) {
+	ss := &fakeServiceStore{}
+	// AuthDomain "" — degraded mode; burrow_login must be rejected.
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	r := c.post(t, "/api/v1/services", map[string]any{
+		"service_id":  "svc_bl1",
+		"access_mode": "burrow_login",
+	})
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusConflict {
+		t.Errorf("status %d body=%s; want 409", r.StatusCode, readBody(t, r))
+	}
+	if len(ss.createdSvcs) != 0 {
+		t.Errorf("store called despite degraded-mode guard: %#v", ss.createdSvcs)
+	}
+}
+
 // TestPostServicesUnauthenticatedReturns401 keeps the auth-ordering invariant:
 // unauthenticated requests get 401 before RequireAdmin's 403.
 func TestPostServicesUnauthenticatedReturns401(t *testing.T) {

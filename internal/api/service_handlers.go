@@ -356,12 +356,14 @@ type setAccessPolicyReq struct {
 // ─── v0.5.2 P3.6 / Task 9: admin POST /api/v1/services ──────────────────────
 
 // postServiceReq is the wire shape of POST /api/v1/services. service_id is
-// REQUIRED and validated against serviceIDRe; title, hostname, and access_mode
-// are optional (access_mode defaults to "public").
+// REQUIRED and validated against serviceIDRe; title and access_mode are
+// optional (access_mode defaults to "public"). Hostnames are NOT part of this
+// shape — public hostnames are composed from subdomain+AuthDomain at read
+// time, and custom hostnames are managed post-creation via
+// PUT /api/v1/services/{serviceID}/custom-domains (table: service_custom_domains).
 type postServiceReq struct {
 	ServiceID  string `json:"service_id"`
 	Title      string `json:"title,omitempty"`
-	Hostname   string `json:"hostname,omitempty"`
 	AccessMode string `json:"access_mode,omitempty"`
 }
 
@@ -377,6 +379,9 @@ var serviceIDRe = regexp.MustCompile(`^[a-z0-9_-]{3,64}$`)
 // admin POST surfaces the more intuitive "public" alias (mapped to "open"
 // in the stored row) so dashboards / e2e flows can use the shape from the
 // spec without translating.
+// NOTE: "mtls" is intentionally excluded — it requires mtls_ca_pem material
+// the POST body does not carry; admins set mtls via PUT /access-mode after
+// pre-provisioning the row + uploading the CA bundle.
 var postServiceAccessModes = map[string]string{
 	"public":       "open",
 	"open":         "open",
@@ -388,10 +393,11 @@ var postServiceAccessModes = map[string]string{
 // service row (v0.5.2 P3.6 / Task 9). Permission: admin (gated by
 // RequireAdmin in router.go; the handler does no second check).
 //
-// Body: { service_id (req), title?, hostname?, access_mode? }.
+// Body: { service_id (req), title?, access_mode? }.
 //   - service_id matches ^[a-z0-9_-]{3,64}$.
 //   - title is stored on the services.name column (max 120 chars).
 //   - access_mode defaults to "public" (mapped to the stored enum value "open").
+//   - hostnames are not part of this shape — see postServiceReq doc.
 //
 // On UNIQUE violation returns 409. On success returns 201 with
 // { id, created_at }. The audit event is `service.create` with payload
@@ -450,7 +456,7 @@ func (d Deps) PostService(w http.ResponseWriter, r *http.Request) {
 		UserID:       userID(r.Context()),
 		Name:         in.Title,
 		Type:         "http", // pre-provisioned rows are http by default; tcp services are bound by the client at connect time
-		Subdomain:    "",     // hostname is informational here; subdomain stays empty until the client connects
+		Subdomain:    "",     // empty until the client connects; public hostname is composed at read time, custom hostnames live in service_custom_domains
 		AccessMode:   storedMode,
 		APIKeyHeader: "Authorization",
 		CreatedAt:    now,

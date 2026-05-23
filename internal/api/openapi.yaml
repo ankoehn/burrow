@@ -594,7 +594,6 @@ paths:
               properties:
                 service_id:  { type: string, pattern: '^[a-z0-9_-]{3,64}$' }
                 title:       { type: string, maxLength: 120 }
-                hostname:    { type: string }
                 access_mode: { type: string, enum: [public, open, api_key, burrow_login] }
       responses:
         '201':
