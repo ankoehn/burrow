@@ -48,6 +48,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
@@ -56,6 +57,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -72,6 +74,7 @@ import (
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/metrics"
 	"github.com/ankoehn/burrow/internal/proxy"
+	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/webhook"
 )
@@ -459,6 +462,36 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 	t.Run("D_custom_domain_route", func(t *testing.T) {
 		const customHost = "foo.example.com"
 
+		// Fresh test CA + leaf for customHost. The CA is pooled into the
+		// visitor client's RootCAs so the handshake actually verifies the
+		// per-domain cert presented by the proxy via GetCertificate — no
+		// InsecureSkipVerify. The leaf is parsed into a tls.Certificate and
+		// served from a stub customdomain.DBStore.
+		caCert, caKey, caPool, _ := generateTestCA(t)
+		leafCertPEM, leafKeyPEM := genTestLeaf(t, caCert, caKey, []string{customHost})
+		leafTLS, err := tls.X509KeyPair([]byte(leafCertPEM), []byte(leafKeyPEM))
+		if err != nil {
+			t.Fatalf("X509KeyPair: %v", err)
+		}
+
+		// Stub DBStore: returns the leaf row for customHost, miss otherwise.
+		// The customdomain.Store re-parses CertPEM/KeyPEM internally via
+		// tls.X509KeyPair, so we hand it the same PEM bytes we just signed.
+		cdDB := stubCustomDomainDB{
+			rows: map[string]customdomain.DomainRow{
+				customHost: {
+					ID:        "test-row-1",
+					ServiceID: "late-bound-after-boot",
+					Hostname:  customHost,
+					CertPEM:   leafCertPEM,
+					KeyPEM:    leafKeyPEM,
+					NotAfter:  time.Now().Add(24 * time.Hour),
+				},
+			},
+		}
+		cdStore := customdomain.New(cdDB)
+		_ = leafTLS // kept around in case future assertions want the parsed cert directly
+
 		// In-test lookup: map customHost -> serviceID. The real production
 		// adapter calls v05.CustomDomainStore.LookupBySNI; this stub mirrors
 		// its (serviceID, ok, err) contract verbatim. Misses return ok=false.
@@ -470,7 +503,10 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 			return "", false, nil
 		}
 
-		s := bootE2EStack(t, withCustomDomainLookup(lookup))
+		s := bootE2EStack(t,
+			withCustomDomainLookup(lookup),
+			withCustomDomainCertStore(cdStore),
+		)
 		lookupServiceID = s.serviceID // late-bound: bootE2EStack assigns serviceID
 
 		const body = "ok-from-custom-domain"
@@ -479,13 +515,12 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 			_, _ = io.WriteString(w, body)
 		})
 
-		// visitorClient already routes dial to the proxy regardless of URL
-		// host and sets SNI from the URL host with InsecureSkipVerify, so a
-		// GET to https://foo.example.com:<port>/ exercises the custom-domain
-		// branch without DNS or a CA-rooted cert chain. The wildcard cert
-		// presented by the proxy ingress will not match foo.example.com,
-		// but InsecureSkipVerify=true in visitorClient suppresses validation.
-		hc := s.visitorClient(t)
+		// Build a dedicated verifying client for this subtest — pools the
+		// fresh test CA into RootCAs and sets SNI = customHost. The dial
+		// indirection still targets the proxy's loopback port so no DNS
+		// lookup occurs. This proves the SNI handshake selected the per-domain
+		// cert (any failure here = handshake didn't pick up the store cert).
+		hc := verifyingVisitorClient(t, s.proxyAddr, customHost, caPool)
 		url := "https://" + customHost + ":" + s.proxyPort + "/custom-domain-probe"
 		resp, err := hc.Get(url)
 		if err != nil {
@@ -1012,4 +1047,66 @@ func genTestLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, dn
 	}
 	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
 	return certPEM, keyPEM
+}
+
+// stubCustomDomainDB satisfies customdomain.DBStore for the per-domain cert
+// seam test. It returns rows from an in-memory map keyed by lowercase
+// hostname; misses return ok=false (the contract LookupBySNI expects).
+type stubCustomDomainDB struct {
+	rows map[string]customdomain.DomainRow
+}
+
+func (s stubCustomDomainDB) LookupCustomDomainByHostname(_ context.Context, hostname string) (customdomain.DomainRow, bool, error) {
+	row, ok := s.rows[strings.ToLower(hostname)]
+	if !ok {
+		return customdomain.DomainRow{}, false, nil
+	}
+	return row, true, nil
+}
+
+// verifyingVisitorClient is the verifying counterpart to e2eStack.visitorClient.
+// It pools the supplied roots into the TLS config (no InsecureSkipVerify) and
+// sets SNI = serverName. The dial closure still targets proxyAddr (loopback)
+// regardless of the URL host so no DNS resolution occurs. Used by the custom-
+// domain route subtest to prove the SNI handshake actually selected the per-
+// domain cert returned by customdomain.CertCallback.
+func verifyingVisitorClient(t *testing.T, proxyAddr, serverName string, roots *x509.CertPool) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", proxyAddr)
+		},
+		DialTLSContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			conn, err := d.DialContext(ctx, "tcp", proxyAddr)
+			if err != nil {
+				return nil, err
+			}
+			tlsConn := tls.Client(conn, &tls.Config{
+				ServerName: serverName,
+				RootCAs:    roots,
+				MinVersion: tls.VersionTLS12,
+			})
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			return tlsConn, nil
+		},
+		ForceAttemptHTTP2:     false,
+		ResponseHeaderTimeout: 5 * time.Second,
+	}
+	return &http.Client{
+		Transport: tr,
+		Jar:       jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Timeout: 15 * time.Second,
+	}
 }

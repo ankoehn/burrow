@@ -49,6 +49,7 @@ import (
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
 	"github.com/ankoehn/burrow/internal/proxy"
+	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 )
@@ -177,6 +178,13 @@ type bootE2ECfg struct {
 	// existing e2e contract for tests that never enable cache.semantic. The
 	// v0.5.0 semantic cache e2e test passes a chromem-backed cache here.
 	semCache semantic.Cache
+	// cdCertStore, when non-nil, is wired into the proxy ingress listener's
+	// TLS config via customdomain.CertCallback(store, &wildcardCert). The
+	// callback returns per-domain certs on an SNI hit and falls back to the
+	// wildcard on a miss — mirroring the production wiring in
+	// cmd/server/main.go. Default (nil) preserves the v0.3.0 listener shape
+	// (static Certificates: []tls.Certificate{wildcard}).
+	cdCertStore *customdomain.Store
 }
 
 // withConnLogSink returns a bootE2EStack option that registers a proxy
@@ -212,6 +220,20 @@ func withSemanticCache(c semantic.Cache) bootE2EStackOption {
 func withCustomDomainLookup(fn func(ctx context.Context, host string) (string, bool, error)) bootE2EStackOption {
 	return func(c *bootE2ECfg) {
 		c.extraProxyOpts = append(c.extraProxyOpts, proxy.WithCustomDomainLookup(fn))
+	}
+}
+
+// withCustomDomainCertStore returns a bootE2EStack option that wires the
+// given customdomain.Store into the proxy ingress TLS listener. The proxy
+// listener's tls.Config is built with GetCertificate =
+// customdomain.CertCallback(store, &wildcardCert) — so SNI hits return the
+// per-domain cert from the store and misses fall back to the wildcard.
+// This is the test-side analogue of cmd/server/main.go's proxy listener wiring
+// for v0.5.0 custom domains. Default (no option) preserves the static-cert
+// listener shape used by every other e2e test.
+func withCustomDomainCertStore(store *customdomain.Store) bootE2EStackOption {
+	return func(c *bootE2ECfg) {
+		c.cdCertStore = store
 	}
 }
 
@@ -335,13 +357,23 @@ func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 		t.Fatal("control server never bound")
 	}
 
-	// 6. Real proxy ingress with gate, TLS wildcard cert.
+	// 6. Real proxy ingress with gate, TLS wildcard cert. When a
+	// customdomain.Store option is provided, wire GetCertificate so SNI
+	// matched per-domain certs are served from the store with the wildcard
+	// as fallback — mirroring cmd/server/main.go.
 	proxyLn, err := tls.Listen("tcp", "127.0.0.1:0", func() *tls.Config {
 		cert, err := tls.LoadX509KeyPair(proxyCertPath, proxyKeyPath)
 		if err != nil {
 			t.Fatalf("load proxy cert: %v", err)
 		}
-		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		tcfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.cdCertStore != nil {
+			wildcard := cert
+			tcfg.GetCertificate = customdomain.CertCallback(cfg.cdCertStore, &wildcard)
+		} else {
+			tcfg.Certificates = []tls.Certificate{cert}
+		}
+		return tcfg
 	}())
 	if err != nil {
 		t.Fatalf("proxy listen: %v", err)
