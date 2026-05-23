@@ -184,6 +184,19 @@ func withConnLogSink(sink proxy.ConnLogSink) bootE2EStackOption {
 	}
 }
 
+// withCustomDomainLookup returns a bootE2EStack option that registers a
+// proxy custom-domain routing closure. This is the test-side analogue of
+// the production wiring in cmd/server/main.go that maps an inbound Host
+// header (when not <label>.<authDomain>) to a serviceID via
+// v05.CustomDomainStore. The F-14 seam test installs this option so the
+// proxy's host != ".<authDomain>" branch actually routes through to a
+// live tunnel instead of falling through to notFound.
+func withCustomDomainLookup(fn func(ctx context.Context, host string) (string, bool, error)) bootE2EStackOption {
+	return func(c *bootE2ECfg) {
+		c.extraProxyOpts = append(c.extraProxyOpts, proxy.WithCustomDomainLookup(fn))
+	}
+}
+
 // bootE2EStack stands up the whole real-stack chain. Always uses TLS on the
 // proxy (per plan: "dev wildcard cert + auth_domain test.local").
 func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {

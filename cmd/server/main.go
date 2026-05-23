@@ -526,6 +526,25 @@ func main() {
 				// concrete connlog.Entry — kept here (not in internal/proxy)
 				// so the proxy package stays import-free of connlog.
 				connLogSink := connlog.NewSQLSink(db.Wrap(database), log)
+				// v0.5.0 F-14: wire the custom-domain routing hook. The proxy
+				// invokes this closure when the inbound Host header does NOT
+				// end with ".<authDomain>" (proxy.go:285 — the dead-code
+				// branch the hook activates). The closure adapts
+				// v05.CustomDomainStore.LookupBySNI (which returns a Cert with
+				// a ServiceID field) into the (serviceID, ok, err) shape the
+				// proxy expects. On a miss the proxy falls through to its
+				// existing notFound path; on a real DB / parse error it
+				// returns 502 (logged with host + err).
+				customDomainLookup := func(ctx context.Context, host string) (string, bool, error) {
+					if v05.CustomDomainStore == nil {
+						return "", false, nil
+					}
+					cert, ok, err := v05.CustomDomainStore.LookupBySNI(ctx, host)
+					if err != nil || !ok {
+						return "", ok, err
+					}
+					return cert.ServiceID, true, nil
+				}
 				proxyOpts := []proxy.Option{
 					proxy.WithGate(gate),
 					// v0.4.0 Task 25: wire the AI middleware chain into the
@@ -535,6 +554,7 @@ func main() {
 					// invariants byte-for-byte for v0.3.0 traffic.
 					proxy.WithAIChain(v04.AIChain),
 					proxy.WithConnLogSink(proxyConnLogAdapter{sink: connLogSink}),
+					proxy.WithCustomDomainLookup(customDomainLookup),
 				}
 				if ingressPort != "" {
 					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))
