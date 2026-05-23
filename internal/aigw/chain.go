@@ -7,15 +7,15 @@
 //
 // # Chain order (spec Part B + Task 10 plan)
 //
-//	1. detect()        — tag the request: openai|anthropic|mcp|unknown
-//	2. ipgeo()         — STUB in Task 10 (Task 16 swaps in the real impl)
-//	3. ratelimit()     — STUB in Task 10 (Task 11 swaps in the real impl)
-//	4. redact()        — Task 5; rewrites the body
-//	5. guardrails()    — Task 6; may refuse
-//	6. cache.lookup()  — Task 4; on HIT short-circuits
-//	7. inspector.pre() — Task 8; buffers req
-//	8. route()         — Task 7; picks an upstream (logging seam in Task 10)
-//	9. proxy() + inspector.post() + meter() — meter+capture during stream
+//  1. detect()        — tag the request: openai|anthropic|mcp|unknown
+//  2. ipgeo()         — STUB in Task 10 (Task 16 swaps in the real impl)
+//  3. ratelimit()     — STUB in Task 10 (Task 11 swaps in the real impl)
+//  4. redact()        — Task 5; rewrites the body
+//  5. guardrails()    — Task 6; may refuse
+//  6. cache.lookup()  — Task 4; on HIT short-circuits
+//  7. inspector.pre() — Task 8; buffers req
+//  8. route()         — Task 7; picks an upstream (logging seam in Task 10)
+//  9. proxy() + inspector.post() + meter() — meter+capture during stream
 //
 // # Pass-through invariant
 //
@@ -62,6 +62,8 @@ import (
 
 	"github.com/ankoehn/burrow/internal/aimeter"
 	"github.com/ankoehn/burrow/internal/cache/exact"
+	"github.com/ankoehn/burrow/internal/cache/semantic"
+	"github.com/ankoehn/burrow/internal/credinject"
 	"github.com/ankoehn/burrow/internal/guardrails"
 	"github.com/ankoehn/burrow/internal/inspector"
 	"github.com/ankoehn/burrow/internal/redact"
@@ -108,6 +110,7 @@ type Service struct {
 // nil sub-section disables that middleware. Mirrors spec Part B.7.
 type ServiceAIConfig struct {
 	Cache      *exact.Settings      // nil = cache disabled
+	Semantic   *semantic.Settings   // nil = semantic cache disabled (Task 16)
 	Redaction  *RedactionConfig     // nil = redaction disabled
 	Guardrails *guardrails.Settings // nil = guardrails disabled
 	Inspector  *InspectorConfig     // nil = inspector disabled
@@ -166,14 +169,16 @@ const DefaultMaxRequestBodyBytes int64 = 8 * 1024 * 1024
 //
 // Chain is safe for concurrent use after construction.
 type Chain struct {
-	Loader     ConfigLoader       // nil = no AI features wired
-	Cache      *exact.Cache       // nil = cache feature unavailable
-	Redact     *redact.Engine     // nil = redaction feature unavailable
-	Guardrails *guardrails.Engine // nil = guardrails feature unavailable
-	Inspector  *inspector.Manager // nil = inspector feature unavailable
-	Router     *route.Router      // nil = routing strategies unavailable
-	Meter      aimeter.Sink       // nil = metering disabled
-	Log        *slog.Logger
+	Loader       ConfigLoader         // nil = no AI features wired
+	Cache        *exact.Cache         // nil = cache feature unavailable
+	Semantic     semantic.Cache       // nil = semantic cache unavailable (NoopCache skips silently)
+	CredInjector *credinject.Injector // nil = credential injection disabled
+	Redact       *redact.Engine       // nil = redaction feature unavailable
+	Guardrails   *guardrails.Engine   // nil = guardrails feature unavailable
+	Inspector    *inspector.Manager   // nil = inspector feature unavailable
+	Router       *route.Router        // nil = routing strategies unavailable
+	Meter        aimeter.Sink         // nil = metering disabled
+	Log          *slog.Logger
 
 	// IPGeo and RateLimit are stubs for Tasks 16 and 11. They wrap the
 	// downstream handler; the default (nil) is treated as pure pass-through.
@@ -189,8 +194,14 @@ type Chain struct {
 // NewChain returns a Chain with the given dependencies. Any nil dep is
 // treated as "feature unavailable" and the corresponding step is skipped at
 // request time — operators can wire only the subset they care about.
+//
+// When sem is non-nil (including NoopCache{}), NewChain wires the exact
+// cache's OnMiss hook to call sem.Promote so that every successful
+// exact-cache Store is automatically indexed for vector search.
 func NewChain(
 	cache *exact.Cache,
+	sem semantic.Cache,
+	credInjector *credinject.Injector,
 	redactEngine *redact.Engine,
 	guardrailsEngine *guardrails.Engine,
 	inspectorMgr *inspector.Manager,
@@ -201,15 +212,35 @@ func NewChain(
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Chain{
-		Cache:      cache,
-		Redact:     redactEngine,
-		Guardrails: guardrailsEngine,
-		Inspector:  inspectorMgr,
-		Router:     router,
-		Meter:      meter,
-		Log:        log,
+	ch := &Chain{
+		Cache:        cache,
+		Semantic:     sem,
+		CredInjector: credInjector,
+		Redact:       redactEngine,
+		Guardrails:   guardrailsEngine,
+		Inspector:    inspectorMgr,
+		Router:       router,
+		Meter:        meter,
+		Log:          log,
 	}
+	// Wire the exact cache's OnMiss hook to semantic.Promote. The hook fires
+	// in a detached goroutine (context.Background()) inside exact.Cache.Store,
+	// so the promote step never blocks the proxy hot path.
+	// We only wire when sem is non-nil; NoopCache.Promote is a no-op but
+	// we still wire it to allow for later swap without restart.
+	if cache != nil && sem != nil {
+		semRef := sem
+		cache.SetOnMiss(func(ctx context.Context, key string, body []byte) {
+			// The OnMiss hook receives the exact-cache key and the stored body.
+			// We don't have the prompt here (only the response body), so we
+			// pass the key as the promptFingerprint — semantic.Promote uses this
+			// as the index key. Actual promote with full prompt bytes happens
+			// in the chain body (see below in run()); this hook is the fallback
+			// path for any Store that happens outside the chain.
+			_ = semRef.Promote(ctx, "", key, body, semantic.Settings{})
+		})
+	}
+	return ch
 }
 
 // IsAIPassThrough reports whether the given AIConfig has every section
@@ -376,7 +407,7 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	// Step 4: redact — rewrites the body before cache + metering.
 	// ---------------------------------------------------------------
 	var (
-		redactedBody []byte    = body
+		redactedBody []byte = body
 		redactHits   []redact.RuleHit
 		redactDrop   *redact.Rule
 	)
@@ -476,6 +507,61 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	}
 
 	// ---------------------------------------------------------------
+	// Step 6b: semantic cache lookup — runs on exact-cache MISS.
+	// When cfg.Semantic is enabled and c.Semantic is wired, we ask the
+	// vector tier whether any stored prompt is sufficiently similar to
+	// the current one. On a hit:
+	//   - fallback_policy=return_cached_marked → serve with Burrow-Cache: similar
+	//   - fallback_policy=treat_as_miss        → fall through to MISS path
+	// Any error degrades silently to the MISS path (spec A.1.6).
+	// ---------------------------------------------------------------
+	if cacheStatus == "MISS" && cfg.Semantic != nil && cfg.Semantic.Enabled && c.Semantic != nil {
+		candidate, semHit, semErr := c.Semantic.Lookup(r.Context(), svc.ID, redactedBody, *cfg.Semantic)
+		if semErr != nil {
+			c.Log.Warn("aigw: semantic cache lookup failed",
+				slog.String("service_id", svc.ID),
+				slog.String("err", semErr.Error()))
+		}
+		if semHit && cfg.Semantic.FallbackPolicy == "return_cached_marked" {
+			// Fetch the backing exact-cache entry using the candidate's key hash.
+			exactEntry, exactHit, exactErr := c.Cache.Lookup(r.Context(), candidate.ExactKeyHash)
+			if exactErr != nil {
+				c.Log.Warn("aigw: semantic exact entry fetch failed",
+					slog.String("service_id", svc.ID),
+					slog.String("err", exactErr.Error()))
+			}
+			if exactHit {
+				// Serve the semantically-similar response with spec-mandated headers.
+				for k, v := range exactEntry.Headers {
+					w.Header().Set(k, v)
+				}
+				w.Header().Set("Burrow-Cache", "similar")
+				simStr := strconv.FormatFloat(candidate.Similarity, 'f', 2, 64)
+				w.Header().Set("Burrow-Cache-Similarity", simStr)
+				age := int(time.Since(exactEntry.CreatedAt) / time.Second)
+				if age < 0 {
+					age = 0
+				}
+				w.Header().Set("Burrow-Cache-Age", strconv.Itoa(age))
+				status := exactEntry.Status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write(exactEntry.Body)
+				cacheHdr := make(http.Header, len(exactEntry.Headers))
+				for k, v := range exactEntry.Headers {
+					cacheHdr.Set(k, v)
+				}
+				c.captureEntry(svc, r, body, redactedBody, redactHits, kind, status, exactEntry.Body, cacheHdr, 0, false, "similar", fromReplay)
+				c.recordMeter(r.Context(), svc, kind, 0, 0, int64(len(redactedBody)), int64(len(exactEntry.Body)), false, true, status)
+				return
+			}
+		}
+		// treat_as_miss, exact fetch miss, or error → fall through.
+	}
+
+	// ---------------------------------------------------------------
 	// Step 7: inspector.pre — buffer request meta + body. Performed
 	// implicitly by capturing the entry on response completion below.
 	// ---------------------------------------------------------------
@@ -498,6 +584,23 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 				slog.String("service_id", pick.ServiceID),
 				slog.String("model", pick.ConcreteModel),
 			)
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// Step 8b: credinject — strips the visitor's credential header and
+	// injects the upstream's real credential (spec B.3). Runs AFTER
+	// route so the injected header format matches the chosen upstream.
+	// Skipped when c.CredInjector is nil (nil-safe).
+	// ---------------------------------------------------------------
+	if c.CredInjector != nil {
+		if _, err := c.CredInjector.Apply(r.Context(), svc.ID, r); err != nil {
+			c.Log.Warn("aigw: credential injection failed",
+				slog.String("service_id", svc.ID),
+				slog.String("err", err.Error()))
+			// Fail open: continue without injected credential so the upstream
+			// receives the request unchanged. The upstream will 401/403 if its
+			// credential is absent.
 		}
 	}
 
@@ -583,10 +686,25 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 					CreatedAt:  time.Now().UTC(),
 					TTLSeconds: cfg.Cache.TTLSeconds,
 				}
-				if err := c.Cache.Store(r.Context(), key, entry); err != nil {
+				storeErr := c.Cache.Store(r.Context(), key, entry)
+				if storeErr != nil {
 					c.Log.Warn("aigw: cache store failed",
 						slog.String("service_id", svc.ID),
-						slog.String("err", err.Error()))
+						slog.String("err", storeErr.Error()))
+				}
+				// After a successful Store, promote into the semantic index so
+				// future similar prompts can hit via the vector-similarity tier.
+				// Promote is called synchronously here (post-stream, post-Store)
+				// so it never delays the visitor path. The semantic cache
+				// degrades silently on error (spec A.1.6).
+				if storeErr == nil && cfg.Semantic != nil && cfg.Semantic.Enabled &&
+					cfg.Semantic.PromoteOnMiss && c.Semantic != nil {
+					promoteCtx := context.Background()
+					if err := c.Semantic.Promote(promoteCtx, svc.ID, key, redactedBody, *cfg.Semantic); err != nil {
+						c.Log.Warn("aigw: semantic promote failed",
+							slog.String("service_id", svc.ID),
+							slog.String("err", err.Error()))
+					}
 				}
 			}
 		}

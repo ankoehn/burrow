@@ -21,6 +21,8 @@ import (
 	"github.com/ankoehn/burrow/internal/aigw"
 	"github.com/ankoehn/burrow/internal/aimeter"
 	"github.com/ankoehn/burrow/internal/cache/exact"
+	"github.com/ankoehn/burrow/internal/cache/semantic"
+	"github.com/ankoehn/burrow/internal/credinject"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/guardrails"
 	"github.com/ankoehn/burrow/internal/inspector"
@@ -162,7 +164,7 @@ func TestChain_PassThrough_GoldenRoundTrip(t *testing.T) {
 		_, _ = w.Write([]byte("hello-from-upstream"))
 	})
 
-	chain := aigw.NewChain(nil, nil, nil, nil, nil, nil, testLog())
+	chain := aigw.NewChain(nil, nil, nil, nil, nil, nil, nil, nil, testLog())
 	// Service.AIConfig is zero — all sections nil → pass-through.
 	svc := aigw.Service{ID: "svc1"}
 
@@ -219,7 +221,7 @@ func TestChain_CacheHit_AfterRedactionMissThenHit(t *testing.T) {
 	cache := freshCache(t)
 	sink := newMemSink()
 
-	chain := aigw.NewChain(cache, redactEngine, nil, nil, nil, sink, testLog())
+	chain := aigw.NewChain(cache, nil, nil, redactEngine, nil, nil, nil, sink, testLog())
 
 	svc := aigw.Service{
 		ID:           "svc-cache",
@@ -320,7 +322,7 @@ func TestChain_Guardrails_Refuse403(t *testing.T) {
 	})
 
 	gengine := guardrails.NewEngine()
-	chain := aigw.NewChain(nil, nil, gengine, nil, nil, nil, testLog())
+	chain := aigw.NewChain(nil, nil, nil, nil, gengine, nil, nil, nil, testLog())
 
 	svc := aigw.Service{
 		ID: "svc-grd",
@@ -363,7 +365,7 @@ func TestChain_InspectorCaptures(t *testing.T) {
 		t.Fatalf("redact: %v", err)
 	}
 	mgr := inspector.NewManager()
-	chain := aigw.NewChain(nil, redactEngine, nil, mgr, nil, nil, testLog())
+	chain := aigw.NewChain(nil, nil, nil, redactEngine, nil, mgr, nil, nil, testLog())
 
 	svc := aigw.Service{
 		ID: "svc-insp",
@@ -434,7 +436,7 @@ func TestChain_SSE_FlushInvariant(t *testing.T) {
 	mgr := inspector.NewManager()
 	sink := newMemSink()
 
-	chain := aigw.NewChain(nil, nil, nil, mgr, nil, sink, testLog())
+	chain := aigw.NewChain(nil, nil, nil, nil, nil, mgr, nil, sink, testLog())
 	chain.Loader = staticLoader{
 		svc: aigw.Service{
 			ID: "svc-sse",
@@ -511,7 +513,7 @@ func TestChain_CacheSkipsTruncatedResponse(t *testing.T) {
 	})
 
 	cache := freshCache(t)
-	chain := aigw.NewChain(cache, nil, nil, nil, nil, nil, testLog())
+	chain := aigw.NewChain(cache, nil, nil, nil, nil, nil, nil, nil, testLog())
 
 	svc := aigw.Service{
 		ID:           "svc-cache-trunc",
@@ -578,7 +580,7 @@ func TestChain_LimitsRequestBodyAt8MB(t *testing.T) {
 
 	// Inspector enabled so the chain definitely enters the AI path.
 	mgr := inspector.NewManager()
-	chain := aigw.NewChain(nil, nil, nil, mgr, nil, nil, testLog())
+	chain := aigw.NewChain(nil, nil, nil, nil, nil, mgr, nil, nil, testLog())
 
 	svc := aigw.Service{
 		ID: "svc-limit",
@@ -621,7 +623,7 @@ func TestChain_GuardrailCaptureIncludesBody(t *testing.T) {
 
 	mgr := inspector.NewManager()
 	gengine := guardrails.NewEngine()
-	chain := aigw.NewChain(nil, nil, gengine, mgr, nil, nil, testLog())
+	chain := aigw.NewChain(nil, nil, nil, nil, gengine, mgr, nil, nil, testLog())
 
 	svc := aigw.Service{
 		ID: "svc-grd-safe",
@@ -661,5 +663,256 @@ func TestChain_GuardrailCaptureIncludesBody(t *testing.T) {
 	}
 	if e.BytesIn == 0 {
 		t.Errorf("entry.BytesIn should be > 0, got 0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers for Tasks 16 tests: semantic cache stub + credinject stubs.
+// ---------------------------------------------------------------------------
+
+// stubSemanticCache is a controllable in-memory semantic cache for tests.
+// It returns a fixed candidate on Lookup when hitCandidate is set, and records
+// Promote calls for later assertion.
+type stubSemanticCache struct {
+	hitCandidate *semantic.Candidate // non-nil → hit on every Lookup
+	promotes     []stubPromoteCall
+}
+
+type stubPromoteCall struct {
+	serviceID    string
+	exactKeyHash string
+	prompt       []byte
+}
+
+func (s *stubSemanticCache) Lookup(_ context.Context, _ string, _ []byte, _ semantic.Settings) (semantic.Candidate, bool, error) {
+	if s.hitCandidate != nil {
+		return *s.hitCandidate, true, nil
+	}
+	return semantic.Candidate{}, false, nil
+}
+
+func (s *stubSemanticCache) Promote(_ context.Context, serviceID, exactKeyHash string, prompt []byte, _ semantic.Settings) error {
+	s.promotes = append(s.promotes, stubPromoteCall{serviceID: serviceID, exactKeyHash: exactKeyHash, prompt: prompt})
+	return nil
+}
+
+func (s *stubSemanticCache) ClearService(_ context.Context, _ string) error { return nil }
+func (s *stubSemanticCache) Stats(_ context.Context, _ string) (semantic.Stats, error) {
+	return semantic.Stats{}, nil
+}
+
+// stubCredStore is a minimal in-test credinject.Store backed by a fixed binding.
+type stubCredStore struct {
+	bind  credinject.Binding
+	bound bool
+}
+
+func (s *stubCredStore) GetBinding(_ context.Context, _ string) (credinject.Binding, bool, error) {
+	return s.bind, s.bound, nil
+}
+func (s *stubCredStore) PutBinding(_ context.Context, _ credinject.Binding) error { return nil }
+func (s *stubCredStore) DeleteBinding(_ context.Context, _ string) error          { return nil }
+
+// stubVaultMap satisfies credinject.Vault from a plain map.
+type stubVaultMap struct{ m map[string]string }
+
+func (v stubVaultMap) Get(slot string) (string, bool) { val, ok := v.m[slot]; return val, ok }
+func (v stubVaultMap) Slots() []string                { return nil }
+
+// ---------------------------------------------------------------------------
+// Test 9: semantic cache HIT with fallback_policy=return_cached_marked
+// emits Burrow-Cache: similar + Burrow-Cache-Similarity headers.
+// ---------------------------------------------------------------------------
+
+func TestChainSemanticHitWritesSimilarHeader(t *testing.T) {
+	// Upstream serves a known response on the first (MISS) call.
+	var upstreamHits atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "43")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"c-1","choices":[{"message":{}}]}`))
+	})
+
+	cache := freshCache(t)
+
+	// Seed the exact cache with a stored entry so the semantic hit can fetch it.
+	const exactKey = "global:seedkey1234abcd"
+	seedEntry := exact.Entry{
+		Body:       []byte(`{"id":"c-1","choices":[{"message":{}}]}`),
+		Status:     http.StatusOK,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		CreatedAt:  time.Now().UTC(),
+		TTLSeconds: 300,
+	}
+	if err := cache.Store(context.Background(), exactKey, seedEntry); err != nil {
+		t.Fatalf("seed exact cache: %v", err)
+	}
+
+	semCache := &stubSemanticCache{
+		hitCandidate: &semantic.Candidate{
+			ExactKeyHash: exactKey,
+			Similarity:   0.93,
+		},
+	}
+
+	chain := aigw.NewChain(cache, semCache, nil, nil, nil, nil, nil, nil, testLog())
+
+	svc := aigw.Service{
+		ID:           "svc-sem",
+		APIKeyHeader: "Authorization",
+		AIConfig: aigw.ServiceAIConfig{
+			Cache: &exact.Settings{
+				Enabled:       true,
+				AppliesPer:    "global",
+				TTLSeconds:    300,
+				MaxEntries:    100,
+				MaxPerEntryKB: 64,
+			},
+			Semantic: &semantic.Settings{
+				Enabled:        true,
+				FallbackPolicy: "return_cached_marked",
+				PromoteOnMiss:  true,
+			},
+		},
+	}
+
+	req := httptest.NewRequest("POST", "https://abc.example.com/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4","prompt":"what is the capital of France?"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := runChain(t, chain, upstream, svc, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Burrow-Cache"); got != "similar" {
+		t.Errorf("Burrow-Cache: want %q, got %q", "similar", got)
+	}
+	if got := rec.Header().Get("Burrow-Cache-Similarity"); got == "" {
+		t.Error("Burrow-Cache-Similarity header missing")
+	}
+	// Upstream must NOT have been hit — semantic cache served the response.
+	if upstreamHits.Load() != 0 {
+		t.Errorf("upstream hit %d times; want 0 (semantic served)", upstreamHits.Load())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: credinject step strips visitor credential and injects upstream key.
+// ---------------------------------------------------------------------------
+
+func TestChainCredInjectStripsAuthAndAppliesSlot(t *testing.T) {
+	// Upstream captures the Authorization header it received.
+	var gotAuth string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	vault := stubVaultMap{m: map[string]string{"OPENAI": "sk-real-key"}}
+	store := &stubCredStore{
+		bind: credinject.Binding{
+			ServiceID:    "svc-cred",
+			Slot:         "OPENAI",
+			HeaderName:   "Authorization",
+			HeaderFormat: "Bearer {key}",
+		},
+		bound: true,
+	}
+	injector := credinject.New(vault, store, testLog())
+
+	chain := aigw.NewChain(nil, nil, injector, nil, nil, nil, nil, nil, testLog())
+
+	svc := aigw.Service{
+		ID:           "svc-cred",
+		APIKeyHeader: "Authorization",
+		AIConfig: aigw.ServiceAIConfig{
+			// At least one non-nil AI config section so the chain enters run().
+			Inspector: &aigw.InspectorConfig{Enabled: false},
+		},
+	}
+
+	req := httptest.NewRequest("POST", "https://abc.example.com/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4","prompt":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer visitor-key")
+
+	rec := runChain(t, chain, upstream, svc, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rec.Code)
+	}
+	// Upstream must see the injected key, not the visitor's key.
+	if gotAuth != "Bearer sk-real-key" {
+		t.Errorf("upstream Authorization: want %q, got %q", "Bearer sk-real-key", gotAuth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11: pass-through invariant — with semantic=NoopCache + credInjector=nil
+// the chain behaves byte-for-byte like v0.4.0 (no extra headers injected).
+// ---------------------------------------------------------------------------
+
+func TestChainPassThroughWhenAllStepsDisabled(t *testing.T) {
+	var (
+		gotMethod  string
+		gotPath    string
+		gotBody    []byte
+		gotAuthHdr string
+	)
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		gotAuthHdr = r.Header.Get("Authorization")
+		w.Header().Set("X-Upstream", "yes")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("response-body"))
+	})
+
+	// NewChain with NoopCache as sem and nil credInjector.
+	noopSem := semantic.NoopCache{}
+	chain := aigw.NewChain(nil, noopSem, nil, nil, nil, nil, nil, nil, testLog())
+
+	// Service with no AI features (all nil) → IsAIPassThrough = true → exact pass-through.
+	svc := aigw.Service{ID: "svc-passthrough"}
+
+	req := httptest.NewRequest("POST", "https://abc.example.com/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4","prompt":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer visitor-key")
+
+	rec := runChain(t, chain, upstream, svc, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rec.Code)
+	}
+	if got := rec.Body.String(); got != "response-body" {
+		t.Errorf("body: want %q, got %q", "response-body", got)
+	}
+	if got := rec.Header().Get("X-Upstream"); got != "yes" {
+		t.Errorf("X-Upstream: want %q, got %q", "yes", got)
+	}
+	// Burrow-Cache must be absent — no cache features enabled.
+	if got := rec.Header().Get("Burrow-Cache"); got != "" {
+		t.Errorf("Burrow-Cache header should be absent on pass-through, got %q", got)
+	}
+	// Visitor's Authorization must pass through unchanged (no credinject).
+	if gotAuthHdr != "Bearer visitor-key" {
+		t.Errorf("upstream Authorization: want %q, got %q", "Bearer visitor-key", gotAuthHdr)
+	}
+	if string(gotBody) != `{"model":"gpt-4","prompt":"hello"}` {
+		t.Errorf("upstream body: got %q", gotBody)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("method: want POST, got %q", gotMethod)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Errorf("path: got %q", gotPath)
 	}
 }

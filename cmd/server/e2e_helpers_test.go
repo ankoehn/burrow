@@ -292,7 +292,7 @@ func bootE2EStack(t *testing.T) *e2eStack {
 	// never query usage_events are unaffected.
 	meterSink := aimeter.NewSQLSink(db.Wrap(d))
 	meterSink.Log = s.log
-	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, meterSink, s.log)
+	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	handler := proxy.New(
 		dialer, checker, e2eAuthDomain, s.log,

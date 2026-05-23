@@ -211,7 +211,7 @@ func bootInspectorStack(t *testing.T) *inspectorStack {
 	meterSink.Log = s.log
 	inspectorMgr := inspector.NewManager()
 	s.inspectorMgr = inspectorMgr
-	aiChain := aigw.NewChain(cacheEngine, nil, nil, inspectorMgr, nil, meterSink, s.log)
+	aiChain := aigw.NewChain(cacheEngine, nil, nil, nil, nil, inspectorMgr, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	s.aiChain = aiChain
 
@@ -465,9 +465,9 @@ type inspectorReplayResp struct {
 // inspectorCompareResp is the wire shape returned by
 // POST .../replay-compare.
 type inspectorCompareResp struct {
-	Original inspectorEntry  `json:"original"`
-	Replayed inspectorEntry  `json:"replayed"`
-	Diff     inspectorDiff   `json:"diff"`
+	Original inspectorEntry `json:"original"`
+	Replayed inspectorEntry `json:"replayed"`
+	Diff     inspectorDiff  `json:"diff"`
 }
 
 type inspectorDiff struct {

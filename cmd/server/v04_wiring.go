@@ -155,6 +155,8 @@ func buildV04Stack(
 	// --- aigw.Chain (composes 3–9) -----------------------------------------
 	aiChain := aigw.NewChain(
 		cacheEngine,
+		nil, // semantic.Cache — wired in Task 17 (cmd/server startup)
+		nil, // credinject.Injector — wired in Task 17 (cmd/server startup)
 		redactEngine,
 		guardrailsEngine,
 		inspectorMgr,
@@ -449,7 +451,7 @@ func (m *metricsBuf) Header() http.Header {
 	}
 	return m.hdr
 }
-func (m *metricsBuf) WriteHeader(int)            {}
+func (m *metricsBuf) WriteHeader(int)             {}
 func (m *metricsBuf) Write(p []byte) (int, error) { m.b = append(m.b, p...); return len(p), nil }
 func (m *metricsBuf) String() string              { return string(m.b) }
 
