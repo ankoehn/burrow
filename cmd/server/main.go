@@ -34,6 +34,7 @@ import (
 	"github.com/ankoehn/burrow/internal/events"
 	"github.com/ankoehn/burrow/internal/logging"
 	"github.com/ankoehn/burrow/internal/proxy"
+	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 	"github.com/ankoehn/burrow/internal/retention"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
@@ -390,6 +391,19 @@ func main() {
 			// live tunnel registry + audit query store + metrics recorder.
 			v04.MCPServer = BuildMCPServer(cfg, st, v04, mcpTunnelAdapter{s: srv}, db.Wrap(database), log)
 
+			// v0.5.0 Task 17: build every new v0.5.0 component and wire the
+			// semantic cache + credinject injector into the aigw.Chain.
+			v05, err := buildV05Stack(ctx, db.Wrap(database), v04.Metrics, log)
+			if err != nil {
+				return err
+			}
+			// Patch the chain fields that were constructed as nil placeholders
+			// in buildV04Stack (see the "wired in Task 17" comments there).
+			// This must happen before any request is served — safe here because
+			// no listener has been started yet.
+			v04.AIChain.Semantic = v05.SemanticCache
+			v04.AIChain.CredInjector = v05.CredInjector
+
 			// v0.5.0 Task 9: daily retention compaction job.
 			// Fires once per day at 00:30 UTC (spec N); ctx cancellation
 			// exits the Tick loop before database.Close() (LIFO defer order).
@@ -458,6 +472,19 @@ func main() {
 						URLRedacted: dbURLForStatus(cfg, backend),
 						Alpha:       cfg.ExperimentalPostgres && backend.Driver() == "postgres",
 					},
+					// v0.5.0 Task 17 wiring — new Deps surfaces for Tasks 3-11.
+					// SemanticEngine: nil in the default build (handlers degrade
+					// gracefully); the chromem-backed engine would be set here
+					// under -tags=semantic_cache once a concrete SemanticEngine
+					// adapter is wired. For now, the NoopCache is in the chain
+					// but the API surface doesn't expose stats (returns zeros).
+					ServiceAIConfigs:   db.Wrap(database),
+					CredentialVault:    v05.CredVault,
+					CredentialDB:       db.Wrap(database),
+					CredentialServices: db.Wrap(database),
+					CustomDomains:      db.Wrap(database),
+					CustomDomainCache:  v05.CustomDomainStore,
+					ConnLogDB:          v05.ConnLogDB,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
@@ -517,7 +544,15 @@ func main() {
 					ReadHeaderTimeout: 10 * time.Second,
 				}
 				if proxyTLSEnabled {
-					proxySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+					// v0.5.0 Task 17: wire the custom-domain GetCertificate
+					// callback so SNI-matched per-domain certs are served
+					// alongside the operator wildcard cert. On a miss the
+					// wildcard is used (nil wildcard falls through to
+					// Certificates[0] in the stdlib).
+					proxySrv.TLSConfig = &tls.Config{
+						MinVersion:     tls.VersionTLS12,
+						GetCertificate: customdomain.CertCallback(v05.CustomDomainStore, nil),
+					}
 				}
 			}
 
