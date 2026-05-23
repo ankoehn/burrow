@@ -89,7 +89,7 @@ func TestSemanticCacheSettingsHasSemanticBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("response missing top-level 'semantic' key; keys=%v", jsonKeys(got))
 	}
-	var sem semanticSettingsJSON
+	var sem SemanticSettings
 	if err := json.Unmarshal(semRaw, &sem); err != nil {
 		t.Fatalf("decode semantic: %v", err)
 	}

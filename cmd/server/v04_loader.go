@@ -26,6 +26,7 @@ import (
 	"log/slog"
 
 	"github.com/ankoehn/burrow/internal/aigw"
+	"github.com/ankoehn/burrow/internal/api"
 	"github.com/ankoehn/burrow/internal/cache/exact"
 	"github.com/ankoehn/burrow/internal/cache/semantic"
 	"github.com/ankoehn/burrow/internal/db"
@@ -111,7 +112,7 @@ func decodeServiceAIConfig(blob []byte) (aigw.ServiceAIConfig, error) {
 		}
 		if err := json.Unmarshal(raw, &inner); err == nil &&
 			len(inner.Semantic) > 0 && string(inner.Semantic) != "null" {
-			var sem semanticSettingsWire
+			var sem api.SemanticSettings
 			if err := json.Unmarshal(inner.Semantic, &sem); err != nil {
 				return aigw.ServiceAIConfig{}, fmt.Errorf("cache.semantic: %w", err)
 			}
@@ -178,17 +179,6 @@ func decodeServiceAIConfig(blob []byte) (aigw.ServiceAIConfig, error) {
 	return out, nil
 }
 
-// semanticSettingsWire is the JSON shape of the cache.semantic sub-block.
-// Mirrors the wire shape used by the API surface (internal/api/semantic_handlers.go
-// .semanticSettingsJSON) so a single blob round-trips losslessly: API PUT in,
-// chain consumes via Loader, semantic.Settings out.
-type semanticSettingsWire struct {
-	Enabled         bool    `json:"enabled"`
-	MinSimilarity   float64 `json:"min_similarity"`
-	EmbeddingMode   string  `json:"embedding_mode"`
-	EmbeddingURL    string  `json:"embedding_url"`
-	EmbeddingModel  string  `json:"embedding_model"`
-	FallbackPolicy  string  `json:"fallback_policy"`
-	PromoteOnMiss   bool    `json:"promote_on_miss"`
-	MaxIndexEntries int     `json:"max_index_entries"`
-}
+// The cache.semantic sub-block wire shape lives in internal/api/cache_settings_wire.go
+// as api.SemanticSettings — shared with the runtime handler so a PUT in via
+// the API surface round-trips losslessly through this loader to semantic.Settings.

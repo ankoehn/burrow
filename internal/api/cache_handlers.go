@@ -67,7 +67,7 @@ const cacheSettingsKey = "cache.settings"
 // with the override flag set when the per-service cache block is non-empty.
 type cacheSettingsResp struct {
 	Global     cacheSettingsJSON         `json:"global"`
-	Semantic   semanticSettingsJSON      `json:"semantic"`
+	Semantic   SemanticSettings          `json:"semantic"`
 	PerService []cachePerServiceSettings `json:"per_service"`
 }
 

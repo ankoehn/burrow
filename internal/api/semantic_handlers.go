@@ -51,24 +51,13 @@ type ServiceAIConfigStore interface {
 	UpsertServiceAIConfig(ctx context.Context, serviceID string, config []byte) error
 }
 
-// semanticSettingsJSON is the wire shape of the semantic cache settings block
-// returned in the top-level "semantic" key of GET /api/v1/cache/settings
-// (spec A.4 / spec A.3 defaults).
-type semanticSettingsJSON struct {
-	Enabled         bool    `json:"enabled"`
-	MinSimilarity   float64 `json:"min_similarity"`
-	EmbeddingMode   string  `json:"embedding_mode"`
-	EmbeddingURL    string  `json:"embedding_url"`
-	EmbeddingModel  string  `json:"embedding_model"`
-	FallbackPolicy  string  `json:"fallback_policy"`
-	PromoteOnMiss   bool    `json:"promote_on_miss"`
-	MaxIndexEntries int     `json:"max_index_entries"`
-}
-
 // semanticDefaultSettings are the spec A.3 global defaults for the semantic
 // cache. Returned when no per-service override is configured and also used
 // as the fallback when the stored blob is missing/malformed.
-var semanticDefaultSettings = semanticSettingsJSON{
+//
+// The wire type SemanticSettings is shared with cmd/server (see
+// cache_settings_wire.go) so a PUT in / GET out round-trips byte-for-byte.
+var semanticDefaultSettings = SemanticSettings{
 	Enabled:         false,
 	MinSimilarity:   0.85,
 	EmbeddingMode:   "local",
