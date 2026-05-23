@@ -1,0 +1,94 @@
+# test-only — never deploy this shape.
+# test/integration/full/compose.full.yml
+# 4-container e2e harness: relay + client-ai + client-tcp + client-multi + mockoai.
+
+name: burrow-e2e-full
+
+services:
+  relay:
+    build:
+      context: ../../..
+      dockerfile: test/integration/full/Dockerfile.relay
+    image: burrow-e2e-relay-full:dev
+    environment:
+      BURROW_ADMIN_EMAIL: admin@e2e.local
+      BURROW_ADMIN_PASSWORD: e2e-pass
+    volumes:
+      - token-share:/run/burrow
+      - relay-data:/data
+      - ./certs:/certs:ro
+    ports:
+      - "9001-9004:9001-9004"      # tcp tunnels (ai=9001, tcp=9002, multi-a=9003, multi-b=9004)
+      - "8080:8080"                # dashboard (plain HTTP under --dev-certs)
+      - "8443:8443"                # HTTPS proxy ingress (wildcard cert)
+      - "7800:7800"                # MCP (v0.4)
+    networks:
+      e2e:
+        aliases:
+          # In-network DNS: any of these *.test.local hostnames resolve to the
+          # relay container. The wildcard cert at /certs covers all of them.
+          - relay.test.local
+          - client-ai.test.local
+          - client-tcp.test.local
+          - client-multi.test.local
+          - test.local
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  mockoai:
+    build:
+      context: ./mockoai
+      dockerfile: Dockerfile
+    image: burrow-e2e-mockoai:dev
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  client-ai:
+    build:
+      context: ../../..
+      dockerfile: test/integration/full/Dockerfile.client-ai
+    image: burrow-e2e-client-ai:dev
+    depends_on:
+      relay: { condition: service_healthy }
+      mockoai: { condition: service_healthy }
+    volumes:
+      - token-share:/run/burrow:ro
+    networks: [e2e]
+
+  client-tcp:
+    build:
+      context: ../../..
+      dockerfile: test/integration/full/Dockerfile.client-tcp
+    image: burrow-e2e-client-tcp:dev
+    depends_on:
+      relay: { condition: service_healthy }
+    volumes:
+      - token-share:/run/burrow:ro
+    networks: [e2e]
+
+  client-multi:
+    build:
+      context: ../../..
+      dockerfile: test/integration/full/Dockerfile.client-multi
+    image: burrow-e2e-client-multi:dev
+    depends_on:
+      relay: { condition: service_healthy }
+    volumes:
+      - token-share:/run/burrow:ro
+    networks: [e2e]
+
+volumes:
+  token-share:
+  relay-data:
+
+networks:
+  e2e:
+    driver: bridge
