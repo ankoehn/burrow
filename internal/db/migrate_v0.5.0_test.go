@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMigrate0011Through0017Schema(t *testing.T) {
+func TestMigrate0011Through0018Schema(t *testing.T) {
 	x := testDB(t) // opens + migrates a temp DB; FK ON via Open()
 	d := x.DB()
 	ctx := context.Background()
@@ -33,6 +33,8 @@ func TestMigrate0011Through0017Schema(t *testing.T) {
 			VALUES('c1','http_proxy','1.2.3.4',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,0,'closed_clean')`,
 		`INSERT INTO connection_log_rollups(day,service_id,kind,sessions)
 			VALUES('2026-05-20','s1','http_proxy',1)`,
+		`INSERT INTO connection_log_rollup_top_ips(day,service_id,kind,ip,sessions)
+			VALUES('2026-05-20','s1','http_proxy','10.0.0.1',1)`,
 		`UPDATE webhooks SET payload_template='' WHERE id='nonexistent'`,
 	}
 	for _, q := range cases {
