@@ -6,7 +6,7 @@ CREATE TABLE webhooks (
     url                  TEXT NOT NULL,
     secret_hash          TEXT NOT NULL,            -- sha256 of plaintext (shown once at create)
     events               JSONB NOT NULL,            -- JSON array of event keys
-    paused               BOOLEAN NOT NULL DEFAULT false,
+    paused               INTEGER NOT NULL DEFAULT 0,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     first_failure_at     TIMESTAMP WITH TIME ZONE,
     created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
