@@ -34,6 +34,7 @@ import (
 	"github.com/ankoehn/burrow/internal/events"
 	"github.com/ankoehn/burrow/internal/logging"
 	"github.com/ankoehn/burrow/internal/proxy"
+	"github.com/ankoehn/burrow/internal/retention"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 	"github.com/ankoehn/burrow/internal/version"
@@ -385,6 +386,19 @@ func main() {
 			// cfg.MCPListen is non-empty. The ToolStore adapter binds to the
 			// live tunnel registry + audit query store + metrics recorder.
 			v04.MCPServer = BuildMCPServer(cfg, st, v04, mcpTunnelAdapter{s: srv}, db.Wrap(database), log)
+
+			// v0.5.0 Task 9: daily retention compaction job.
+			// Fires once per day at 00:30 UTC (spec N); ctx cancellation
+			// exits the Tick loop before database.Close() (LIFO defer order).
+			reaperWg.Add(1)
+			go func() {
+				defer reaperWg.Done()
+				dbWrapped := db.Wrap(database)
+				loader := retention.NewDBLoader(dbWrapped)
+				auditAdapter := retention.NewAuditLoggerAdapter(v04.AuditLogger)
+				compactor := retention.New(dbWrapped, loader, auditAdapter, log)
+				compactor.Tick(ctx, "00:30")
+			}()
 
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
