@@ -569,29 +569,37 @@ func (s *SQLSink) upsertTopIPs(ctx context.Context, dayStr, serviceID, kind stri
 	rows.Close()
 
 	// Two-phase: delete prior aux rows for this group, then insert the new
-	// top-N. The delete is unconditional so a previously larger top-N (or a
-	// previously different set of IPs) does not leak rows. Concurrent reads
-	// will briefly see an empty top-IPs set for the group; this is acceptable
-	// because Rollup is a daily compaction (not a hot path) and the read
-	// surface always reflects the latest compaction's view.
-	if _, err := s.b.DB().ExecContext(ctx,
+	// top-N — wrapped in a single transaction so concurrent readers never
+	// observe an empty top-IPs window during the DELETE->INSERT gap (v0.5.2
+	// BACKLOG #3). The delete is unconditional so a previously larger top-N
+	// (or a previously different set of IPs) does not leak rows.
+	tx, err := s.b.DB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("top_ips begin tx: %w", err)
+	}
+	defer tx.Rollback() // no-op after Commit
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM connection_log_rollup_top_ips
 		  WHERE day = ? AND service_id = ? AND kind = ?`,
 		dayStr, serviceID, kind,
 	); err != nil {
 		return fmt.Errorf("top_ips clear: %w", err)
 	}
+	// Post-DELETE the INSERTs cannot conflict on (day, service_id, kind, ip),
+	// so the ON CONFLICT DO UPDATE clause from v0.5.1 was dead code; dropped
+	// here for clarity (v0.5.2 BACKLOG #3 second half).
 	for _, r := range top {
-		if _, err := s.b.DB().ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO connection_log_rollup_top_ips
 			  (day, service_id, kind, ip, sessions)
-			 VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(day, service_id, kind, ip) DO UPDATE SET
-			   sessions = excluded.sessions`,
+			 VALUES (?, ?, ?, ?, ?)`,
 			dayStr, serviceID, kind, r.ip, r.sessions,
 		); err != nil {
-			return fmt.Errorf("top_ips upsert: %w", err)
+			return fmt.Errorf("top_ips insert: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("top_ips commit: %w", err)
 	}
 	return nil
 }

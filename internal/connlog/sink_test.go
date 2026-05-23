@@ -432,3 +432,119 @@ func TestRollupIdempotentAndComputesP95(t *testing.T) {
 		t.Fatalf("after 2nd rollup: want 1 row, got %d", rowCount)
 	}
 }
+
+// TestUpsertTopIPsIsTransactional pins the v0.5.2 BACKLOG #3 fix: upsertTopIPs
+// must be atomic so a concurrent reader cannot observe an empty top-IPs window
+// during the DELETE-then-INSERT sequence.
+//
+// Setup: seed enough source IPs to fill the top-10 window, then call
+// upsertTopIPs once to populate the aux table. A goroutine polls reads of the
+// aux table while the main goroutine calls upsertTopIPs again. With the
+// pre-fix non-transactional implementation, the reader observes 0 rows during
+// the gap; with the transactional fix, the reader always observes the full
+// window.
+func TestUpsertTopIPsIsTransactional(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+
+	seedUser(t, x, "u1")
+	seedService(t, x, "s1", "u1")
+
+	sink := NewSQLSink(x, nil)
+
+	day := time.Date(2026, 3, 17, 0, 0, 0, 0, time.UTC)
+	dayStr := day.Format("2006-01-02")
+	base := day.Add(1 * time.Hour)
+
+	// Seed 12 distinct source IPs with varied session counts so the top-10
+	// truncation triggers a deterministic 10-row window. IP "10.0.0.<n>" has
+	// n+1 sessions (n=0..11).
+	id := 0
+	for n := 0; n < 12; n++ {
+		ip := fmt.Sprintf("10.0.0.%d", n)
+		for s := 0; s <= n; s++ {
+			start := base.Add(time.Duration(id) * time.Millisecond)
+			end := start.Add(50 * time.Millisecond)
+			_, err := x.DB().ExecContext(ctx,
+				`INSERT INTO connection_logs
+				  (id, kind, service_id, source_ip, started_at, ended_at,
+				   duration_ms, bytes_in, bytes_out, status)
+				 VALUES (?,?,?,?,?,?,?,0,0,'closed_clean')`,
+				fmt.Sprintf("tx-%03d", id),
+				"http_proxy", "s1", ip,
+				start.UTC(), end.UTC(), 50,
+			)
+			if err != nil {
+				t.Fatalf("insert[%d]: %v", id, err)
+			}
+			id++
+		}
+	}
+
+	// Initial population of the aux table.
+	if err := sink.upsertTopIPs(ctx, dayStr, "s1", "http_proxy"); err != nil {
+		t.Fatalf("upsertTopIPs (initial): %v", err)
+	}
+
+	// Confirm we have 10 rows up front.
+	var pre int
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		dayStr,
+	).Scan(&pre)
+	if pre != 10 {
+		t.Fatalf("setup: want 10 aux rows, got %d", pre)
+	}
+
+	// Concurrent reader: polls the aux table while the writer re-upserts.
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var sawEmpty int
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			var cnt int
+			err := x.DB().QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+				  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+				dayStr,
+			).Scan(&cnt)
+			if err != nil {
+				continue
+			}
+			if cnt == 0 {
+				sawEmpty++
+			}
+		}
+	}()
+
+	// Run the writer several times to widen the race window.
+	for i := 0; i < 25; i++ {
+		if err := sink.upsertTopIPs(ctx, dayStr, "s1", "http_proxy"); err != nil {
+			t.Fatalf("upsertTopIPs (loop %d): %v", i, err)
+		}
+	}
+	close(stop)
+	<-done
+
+	if sawEmpty > 0 {
+		t.Errorf("reader observed empty top-IPs window %d times — upsertTopIPs is not transactional", sawEmpty)
+	}
+
+	// Final assertion: aux table still has the full 10-row window.
+	var post int
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		dayStr,
+	).Scan(&post)
+	if post != 10 {
+		t.Errorf("post-writes: want 10 aux rows, got %d", post)
+	}
+}
