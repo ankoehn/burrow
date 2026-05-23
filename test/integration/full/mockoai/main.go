@@ -78,6 +78,22 @@ func handler() http.Handler {
 			"object": "list", "model": req.Model, "data": items,
 		})
 	})
+	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "msg_mock",
+			"type":        "message",
+			"role":        "assistant",
+			"content":     []map[string]string{{"type": "text", "text": "Hello from mockoai (Anthropic)."}},
+			"model":       "claude-mock",
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 4, "output_tokens": 8},
+		})
+	})
 	return mux
 }
 

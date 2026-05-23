@@ -49,3 +49,18 @@ func TestEmbeddings(t *testing.T) {
 		t.Fatalf("body missing data array: %s", rec.Body.String())
 	}
 }
+
+func TestAnthropicMessages(t *testing.T) {
+	body := strings.NewReader(`{"model":"claude-mock","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"type":"message"`) {
+		t.Fatalf("missing type=message: %s", rec.Body.String())
+	}
+}
