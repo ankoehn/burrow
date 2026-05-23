@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
-import { resetDb } from "@/mocks/db";
+import { resetDb, db } from "@/mocks/db";
 import { Route, Routes } from "react-router-dom";
 import { CustomDomainsPanel } from "./CustomDomains";
+import type { CustomDomainStatus } from "@/lib/contract";
 
 // Wrap in a route so we can supply serviceId from the URL
 function mount(serviceId = "svc_ai001") {
@@ -27,13 +28,41 @@ describe("CustomDomainsPanel", () => {
     const hostname = await screen.findByText("foo.example.com");
     expect(hostname).toBeTruthy();
 
-    // status badge
-    const badge = await screen.findByText("active");
+    // status badge — human label, not snake_case (v0.5.2 Task 10)
+    const badge = await screen.findByText("Active");
     expect(badge).toBeTruthy();
 
     // truncated fingerprint: first 12 chars of "deadbeef0123456789abcdef" + "…"
     const fp = await screen.findByText("deadbeef0123…");
     expect(fp).toBeTruthy();
+  });
+
+  it("renders the four-state badge labels (v0.5.2 Task 10)", async () => {
+    // Seed one row per status in the MSW DB before mounting.
+    const cases: { status: CustomDomainStatus; label: string }[] = [
+      { status: "active", label: "Active" },
+      { status: "pending", label: "Pending" },
+      { status: "cert_expiring", label: "Expiring" },
+      { status: "cert_expired", label: "Expired" },
+    ];
+    db.customDomains = cases.map((c, i) => ({
+      id: `dom_${c.status}`,
+      service_id: "svc_ai001",
+      hostname: `host-${i}.example.com`,
+      cert_sha256: `cert${i}deadbeef`,
+      not_before: "2026-05-01T00:00:00Z",
+      not_after: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: `2026-05-${10 + i}T00:00:00Z`,
+      updated_at: `2026-05-${10 + i}T00:00:00Z`,
+      status: c.status,
+      status_updated_at: `2026-05-${10 + i}T00:00:00Z`,
+    }));
+
+    mount();
+    for (const c of cases) {
+      const el = await screen.findByText(c.label);
+      expect(el).toBeTruthy();
+    }
   });
 
   it("Add domain dialog opens", async () => {

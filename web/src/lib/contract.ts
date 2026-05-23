@@ -477,7 +477,16 @@ export interface RoutingPolicyV5 {
 }
 
 // Custom domains (spec Part D).
-export type CustomDomainStatus = "active" | "expiring_soon" | "expired";
+//
+// v0.5.2 Task 10: status is the closed enum from the
+// internal/proxy/customdomain state machine. `pending` is reserved for
+// future ACME / auto-renew flows; the cert-bearing rows transition
+// between `active`, `cert_expiring`, and `cert_expired` via the daily tick.
+export type CustomDomainStatus =
+  | "pending"
+  | "active"
+  | "cert_expiring"
+  | "cert_expired";
 
 export interface CustomDomain {
   id: string;
@@ -489,6 +498,7 @@ export interface CustomDomain {
   created_at: string;
   updated_at: string;
   status: CustomDomainStatus;
+  status_updated_at: string;
 }
 
 export interface CreateCustomDomainInput {

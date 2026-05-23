@@ -66,42 +66,58 @@ type CustomDomainCacheInvalidator interface {
 // domainResp is the JSON wire shape for a single custom domain (no key_pem).
 // A separate struct is used deliberately so key_pem can never accidentally
 // appear in a serialised response.
+//
+// Status / status_updated_at (v0.5.2 Task 10) reflect the state-machine
+// column populated by the daily customdomain.StatusTick. The closed enum is:
+// "pending" | "active" | "cert_expiring" | "cert_expired".
 type domainResp struct {
-	ID         string    `json:"id"`
-	ServiceID  string    `json:"service_id"`
-	Hostname   string    `json:"hostname"`
-	CertSHA256 string    `json:"cert_sha256"`
-	NotBefore  time.Time `json:"not_before"`
-	NotAfter   time.Time `json:"not_after"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Status     string    `json:"status"` // "active" | "expiring_soon" | "expired"
+	ID              string    `json:"id"`
+	ServiceID       string    `json:"service_id"`
+	Hostname        string    `json:"hostname"`
+	CertSHA256      string    `json:"cert_sha256"`
+	NotBefore       time.Time `json:"not_before"`
+	NotAfter        time.Time `json:"not_after"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Status          string    `json:"status"`
+	StatusUpdatedAt time.Time `json:"status_updated_at"`
 }
 
-// computeStatus returns the domain status string at the current moment.
+// computeStatus returns the live cert status at `now` for a freshly-validated
+// cert (PUT/POST path) — the persisted column may not yet reflect this
+// because the daily tick has not run. Mirrors
+// customdomain.ComputeStatus exactly so the two paths agree.
 func computeStatus(notAfter time.Time) string {
 	now := time.Now()
-	if notAfter.Before(now) {
-		return "expired"
+	if !notAfter.After(now) {
+		return "cert_expired"
 	}
-	if notAfter.Before(now.Add(14 * 24 * time.Hour)) {
-		return "expiring_soon"
+	if notAfter.Sub(now) <= 14*24*time.Hour {
+		return "cert_expiring"
 	}
 	return "active"
 }
 
 // toDomainResp projects db.ServiceCustomDomain → domainResp (no key_pem).
+// The persisted Status / StatusUpdatedAt columns are surfaced as-is; an
+// empty Status (older rows pre-v0.5.2) is filled in from computeStatus so
+// the wire never carries an empty enum value.
 func toDomainResp(d db.ServiceCustomDomain) domainResp {
+	status := d.Status
+	if status == "" {
+		status = computeStatus(d.NotAfter)
+	}
 	return domainResp{
-		ID:         d.ID,
-		ServiceID:  d.ServiceID,
-		Hostname:   d.Hostname,
-		CertSHA256: d.CertSHA256,
-		NotBefore:  d.NotBefore,
-		NotAfter:   d.NotAfter,
-		CreatedAt:  d.CreatedAt,
-		UpdatedAt:  d.UpdatedAt,
-		Status:     computeStatus(d.NotAfter),
+		ID:              d.ID,
+		ServiceID:       d.ServiceID,
+		Hostname:        d.Hostname,
+		CertSHA256:      d.CertSHA256,
+		NotBefore:       d.NotBefore,
+		NotAfter:        d.NotAfter,
+		CreatedAt:       d.CreatedAt,
+		UpdatedAt:       d.UpdatedAt,
+		Status:          status,
+		StatusUpdatedAt: d.StatusUpdatedAt,
 	}
 }
 

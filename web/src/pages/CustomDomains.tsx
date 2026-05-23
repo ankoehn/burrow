@@ -17,14 +17,31 @@ const REJECTION_MESSAGES: Record<CustomDomainRejection["reason"], string> = {
   expired: "The certificate's validity window has already ended.",
 };
 
+// v0.5.2 Task 10: 4-state badge map for the custom-domain status enum.
+// Uses existing badge tokens — pending is neutral (idle), cert_expiring is
+// idle (yellow-ish), cert_expired is suspended (red), active is connected
+// (green). Exhaustive switch — the `never` annotation guarantees TS will
+// complain if a new state is added to CustomDomainStatus without a badge.
 function statusBadgeKind(status: CustomDomain["status"]): string {
   switch (status) {
     case "active":        return "status-connected";
-    case "expiring_soon": return "status-idle";
-    case "expired":       return "status-suspended";
-    default:              return "status-suspended";
+    case "pending":       return "status-idle";
+    case "cert_expiring": return "status-idle";
+    case "cert_expired":  return "status-suspended";
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
   }
 }
+
+// Human label for each status — keeps snake_case out of the UI.
+const STATUS_LABEL: Record<CustomDomain["status"], string> = {
+  active:        "Active",
+  pending:       "Pending",
+  cert_expiring: "Expiring",
+  cert_expired:  "Expired",
+};
 
 function truncateFp(fp: string): string {
   if (fp.length <= 12) return fp;
@@ -141,7 +158,7 @@ export function CustomDomainsPanel({ serviceId }: { serviceId: string }) {
                 <td className="mono" style={{ fontSize: 13 }}>{d.hostname}</td>
                 <td>
                   <Badge kind={statusBadgeKind(d.status)}>
-                    {d.status}
+                    {STATUS_LABEL[d.status]}
                   </Badge>
                 </td>
                 <td>{formatTimestamp(d.not_after)}</td>

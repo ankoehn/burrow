@@ -251,7 +251,8 @@ function seed(): MockDb {
         slot_present: true,
       },
     },
-    // v0.5.0 custom domains (spec Part D).
+    // v0.5.0 custom domains (spec Part D). v0.5.2 Task 10 added
+    // status_updated_at and the four-state enum.
     customDomains: [
       {
         id: "dom_001",
@@ -263,6 +264,7 @@ function seed(): MockDb {
         created_at: "2026-05-19T00:00:00Z",
         updated_at: "2026-05-19T00:00:00Z",
         status: "active",
+        status_updated_at: "2026-05-19T00:00:00Z",
       },
     ],
     // v0.5.0 retention settings (spec Part F).

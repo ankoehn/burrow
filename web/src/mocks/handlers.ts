@@ -980,6 +980,7 @@ export const handlers = [
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       status,
+      status_updated_at: new Date().toISOString(),
     };
     db.customDomains.push(row);
     return json(row, 201);

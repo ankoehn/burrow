@@ -622,15 +622,18 @@ func TestDomainRespNoKeyPEM(t *testing.T) {
 	}
 }
 
-// TestComputeStatus verifies the status computation.
+// TestComputeStatus verifies the status computation. v0.5.2 Task 10
+// updates the wire enum from "expired"/"expiring_soon" to
+// "cert_expired"/"cert_expiring" — the four-state machine in
+// internal/proxy/customdomain.
 func TestComputeStatus(t *testing.T) {
 	cases := []struct {
 		name     string
 		notAfter time.Time
 		want     string
 	}{
-		{"expired", time.Now().Add(-time.Hour), "expired"},
-		{"expiring_soon", time.Now().Add(3 * 24 * time.Hour), "expiring_soon"},
+		{"cert_expired", time.Now().Add(-time.Hour), "cert_expired"},
+		{"cert_expiring", time.Now().Add(3 * 24 * time.Hour), "cert_expiring"},
 		{"active", time.Now().Add(30 * 24 * time.Hour), "active"},
 	}
 	for _, tc := range cases {
