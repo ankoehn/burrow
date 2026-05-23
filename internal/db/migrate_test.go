@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -217,5 +218,126 @@ func TestMigration0002Foundation(t *testing.T) {
 	// settings table usable
 	if _, err := db.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES('k','v')`); err != nil {
 		t.Fatalf("settings table: %v", err)
+	}
+}
+
+// TestMigrateDriverFilter verifies that the driver filter in MigrateForDriver
+// selects the correct file set: SQLite sees only *.sql (not *.postgres.sql),
+// and the postgres suffix files exist in the embed.FS.
+func TestMigrateDriverFilter(t *testing.T) {
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	var sqliteFiles, postgresFiles []string
+	for _, e := range entries {
+		n := e.Name()
+		if n == "." || e.IsDir() {
+			continue
+		}
+		if hasSuffix(n, ".postgres.sql") {
+			postgresFiles = append(postgresFiles, n)
+		} else if hasSuffix(n, ".sql") {
+			sqliteFiles = append(sqliteFiles, n)
+		}
+	}
+
+	// Expect exactly 17 SQLite files and 17 Postgres files.
+	if len(sqliteFiles) != 17 {
+		t.Errorf("want 17 sqlite migration files, got %d: %v", len(sqliteFiles), sqliteFiles)
+	}
+	if len(postgresFiles) != 17 {
+		t.Errorf("want 17 postgres migration files, got %d: %v", len(postgresFiles), postgresFiles)
+	}
+
+	// Each SQLite file must have a matching postgres twin.
+	for _, sf := range sqliteFiles {
+		// 0001_init.sql  ->  0001_init.postgres.sql
+		twin := sf[:len(sf)-len(".sql")] + ".postgres.sql"
+		found := false
+		for _, pf := range postgresFiles {
+			if pf == twin {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no postgres twin for %s (expected %s)", sf, twin)
+		}
+	}
+}
+
+// hasSuffix is an alias for strings.HasSuffix, used inside the test file.
+func hasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+// TestMigrationParitySQLiteAndPostgres checks that BOTH migration ladders apply
+// cleanly. The Postgres half requires a live Postgres URL in $BURROW_TEST_POSTGRES_URL;
+// without it, the Postgres assertion is SKIPped.
+//
+// This test is always compiled (no build tag) so the parity check is visible in
+// coverage reports. When the env var is set the test also verifies the expected
+// table list on both sides.
+func TestMigrationParitySQLiteAndPostgres(t *testing.T) {
+	// --- SQLite side (always runs) ---
+	sqlitePath := filepath.Join(t.TempDir(), "parity.db")
+	sqDB, err := Open(sqlitePath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer sqDB.Close()
+	if err := MigrateForDriver(sqDB, "sqlite"); err != nil {
+		t.Fatalf("sqlite migration ladder: %v", err)
+	}
+
+	// Core tables that must exist after the full ladder.
+	coreTables := []string{
+		"users", "sessions", "client_tokens", "tunnels",
+		"roles", "settings", "services",
+		"audit_events", "webhooks", "automation_tokens",
+	}
+	for _, tbl := range coreTables {
+		var name string
+		err := sqDB.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("sqlite: table %s missing: %v", tbl, err)
+		}
+	}
+
+	// --- Postgres side (skipped without URL) ---
+	pgURL := os.Getenv("BURROW_TEST_POSTGRES_URL")
+	if pgURL == "" {
+		t.Skip("BURROW_TEST_POSTGRES_URL not set; skipping postgres parity check")
+	}
+
+	// Task 14 wires the actual pgx driver; here we just verify MigrateForDriver
+	// would select the postgres files. We open via database/sql with a driver
+	// that must already be registered (e.g. "pgx" from Task 14's build tag).
+	pgDB, err := sql.Open("pgx", pgURL)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer pgDB.Close()
+	if err := pgDB.Ping(); err != nil {
+		t.Fatalf("postgres ping: %v", err)
+	}
+	if err := MigrateForDriver(pgDB, "postgres"); err != nil {
+		t.Fatalf("postgres migration ladder: %v", err)
+	}
+
+	// Verify a subset of tables exist.
+	for _, tbl := range coreTables {
+		var name string
+		err := pgDB.QueryRow(
+			`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name=$1`,
+			tbl,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("postgres: table %s missing: %v", tbl, err)
+		}
 	}
 }

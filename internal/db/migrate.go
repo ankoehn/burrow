@@ -11,26 +11,61 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// Migrate applies every embedded migration not yet recorded, idempotently.
+// Migrate applies every embedded SQLite migration not yet recorded, idempotently.
+// It is a convenience wrapper around MigrateForDriver with driver="sqlite".
 func Migrate(d *sql.DB) error {
-	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+	return MigrateForDriver(d, "sqlite")
+}
+
+// MigrateForDriver applies embedded migrations for the given driver ("sqlite" or "postgres").
+//
+// SQLite migrations use files ending in exactly ".sql" (but not ".postgres.sql").
+// Postgres migrations use files ending in ".postgres.sql".
+//
+// The version key recorded in schema_migrations is the bare filename (e.g.
+// "0001_init.sql" for sqlite, "0001_init.postgres.sql" for postgres), so the
+// two ladders are independent and can coexist in the same embed.FS.
+func MigrateForDriver(d *sql.DB, driver string) error {
+	placeholder := "?"
+	if driver == "postgres" {
+		placeholder = "$1"
+	}
+
+	createDDL := `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version TEXT PRIMARY KEY, applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW())`
+	if driver != "postgres" {
+		createDDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`
+	}
+
+	if _, err := d.Exec(createDDL); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
+
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("list embedded migrations: %w", err)
 	}
+
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".sql") {
-			names = append(names, e.Name())
+		n := e.Name()
+		if driver == "postgres" {
+			if strings.HasSuffix(n, ".postgres.sql") {
+				names = append(names, n)
+			}
+		} else {
+			// SQLite: include .sql files but exclude .postgres.sql
+			if strings.HasSuffix(n, ".sql") && !strings.HasSuffix(n, ".postgres.sql") {
+				names = append(names, n)
+			}
 		}
 	}
 	sort.Strings(names)
+
 	for _, name := range names {
 		var seen string
-		err := d.QueryRow(`SELECT version FROM schema_migrations WHERE version=?`, name).Scan(&seen)
+		err := d.QueryRow(`SELECT version FROM schema_migrations WHERE version=`+placeholder, name).Scan(&seen)
 		if err == nil {
 			continue // already applied
 		}
@@ -53,7 +88,7 @@ func Migrate(d *sql.DB) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations(version) VALUES(?)`, name); err != nil {
+		if _, err := tx.Exec(`INSERT INTO schema_migrations(version) VALUES(`+placeholder+`)`, name); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record %s: %w", name, err)
 		}
