@@ -35,3 +35,17 @@ func TestChatCompletionsSSE(t *testing.T) {
 		t.Fatalf("expected SSE chunks + [DONE], got %q", out)
 	}
 }
+
+func TestEmbeddings(t *testing.T) {
+	body := strings.NewReader(`{"model":"mock-embed","input":["a","b"]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", body)
+	req.Header.Set("Content-Type", "application/json")
+	handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"data"`) {
+		t.Fatalf("body missing data array: %s", rec.Body.String())
+	}
+}

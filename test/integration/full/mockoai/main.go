@@ -8,6 +8,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -48,6 +50,33 @@ func handler() http.Handler {
 		if flusher != nil {
 			flusher.Flush()
 		}
+	})
+	mux.HandleFunc("/v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Input []string `json:"input"`
+			Model string   `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		// Deterministic 4-dim vectors (SHA256 first 4 bytes / 255 each).
+		type item struct {
+			Object    string    `json:"object"`
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		}
+		items := make([]item, len(req.Input))
+		for i, s := range req.Input {
+			h := sha256.Sum256([]byte(s))
+			items[i] = item{Object: "embedding", Index: i,
+				Embedding: []float64{float64(h[0]) / 255, float64(h[1]) / 255, float64(h[2]) / 255, float64(h[3]) / 255}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list", "model": req.Model, "data": items,
+		})
 	})
 	return mux
 }
