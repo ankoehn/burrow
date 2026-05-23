@@ -81,6 +81,41 @@ describe("Connection logs page (§v0.5.0 Part E)", () => {
     ).toBe(true);
   });
 
+  it("Rollups view renders '—' for both undefined and empty top_source_ips (BACKLOG_0.5.2 #6)", async () => {
+    // v0.5.2 BACKLOG #6: pre-fix the cell rendered "" for undefined and "—"
+    // for empty []. Post-fix the empty-state rendering is uniform: any group
+    // with no source-IPs (undefined OR empty array) shows "—".
+    //
+    // Seed is 3 rows at dayOffset(2)/dayOffset(1)/dayOffset(0); the default
+    // 24h date filter shows only the last two (indexes 1 and 2). To exercise
+    // both empty-state branches we put `undefined` on index 1 and `[]` on
+    // index 2, with index 0 untouched (it's filtered out anyway).
+    db.connectionLogRollups = [
+      { ...db.connectionLogRollups[0]! }, // filtered out by 24h preset
+      { ...db.connectionLogRollups[1]!, top_source_ips: undefined },
+      { ...db.connectionLogRollups[2]!, top_source_ips: [] },
+    ];
+    mount();
+    await screen.findByRole("table", { name: /connection logs/i });
+    const toggle = await screen.findByRole("checkbox", { name: /rollups/i });
+    await userEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.getByText("Top source IPs")).toBeInTheDocument();
+    });
+
+    const cells = screen.getAllByTestId("top-source-ips");
+    // We expect 2 visible cells (one per row in the 24h window) and BOTH
+    // must render "—" — the undefined branch (pre-fix rendered "") AND the
+    // empty-array branch (already rendered "—" pre-fix).
+    expect(cells.length).toBeGreaterThanOrEqual(2);
+    const texts = cells.map((c) => c.textContent ?? "");
+    const dashCount = texts.filter((t) => t === "—").length;
+    expect(dashCount).toBeGreaterThanOrEqual(2);
+    // Crucially: no cell renders as "" (blank) — that would be the pre-fix
+    // asymmetric branch on undefined.
+    expect(texts.some((t) => t === "")).toBe(false);
+  });
+
   it("Rollups view omits Top source IPs header when ALL rows lack the field", async () => {
     // Strip top_source_ips from every seeded row to simulate the operator
     // having connection_logs.rollup_include_top_ips=false globally.

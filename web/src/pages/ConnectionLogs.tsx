@@ -260,13 +260,16 @@ export default function ConnectionLogs() {
                     <td className="mono small">{r.p95_duration_ms}</td>
                     {rollupRows.some((rr) => rr.top_source_ips !== undefined) && (
                       <td className="mono small" data-testid="top-source-ips">
-                        {r.top_source_ips === undefined
-                          ? ""
-                          : r.top_source_ips.length === 0
-                            ? "—"
-                            : r.top_source_ips
-                                .map((t) => `${t.ip} (${t.sessions})`)
-                                .join(", ")}
+                        {/* v0.5.2 BACKLOG #6: render "—" uniformly for both
+                            undefined and empty []. Pre-fix the undefined
+                            branch rendered "" (blank cell) while the empty
+                            branch rendered "—" — visually inconsistent for
+                            two semantically-equivalent empty states. */}
+                        {!r.top_source_ips || r.top_source_ips.length === 0
+                          ? "—"
+                          : r.top_source_ips
+                              .map((t) => `${t.ip} (${t.sessions})`)
+                              .join(", ")}
                       </td>
                     )}
                   </tr>
