@@ -602,6 +602,185 @@ func TestV050DefaultBuildE2E(t *testing.T) {
 		}
 	})
 
+	// --- Part E2 — connection log: closed_error (upstream returns 500) -----
+	//
+	// P2.3 seam test: visitor request whose upstream returns 500. The proxy's
+	// ErrorHandler (or post-ServeHTTP status capture) must set logStatus to
+	// "closed_error" before recordOnClose fires.
+	t.Run("E2_connection_log_status_closed_error", func(t *testing.T) {
+		var realSink *connlog.SQLSink
+		adapter := proxyConnLogTestAdapter{sinkFn: func() *connlog.SQLSink { return realSink }}
+
+		s := bootE2EStack(t, withConnLogSink(adapter))
+		realSink = connlog.NewSQLSink(db.Wrap(s.db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+		// Upstream returns 500.
+		s.setUpstreamHandler(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "upstream error", http.StatusInternalServerError)
+		})
+
+		hc := s.visitorClient(t)
+		url := "https://" + s.hostWithPort() + "/error-probe"
+		resp, err := hc.Get(url)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		// The proxy surfaces the upstream 500 (or a 502 bad gateway); either is acceptable —
+		// what we care about is the logged status, not the visitor response code.
+
+		wrapped := db.Wrap(s.db)
+		deadline := time.Now().Add(5 * time.Second)
+		var rows []db.ConnectionLog
+		for time.Now().Before(deadline) {
+			r, err := connlog.ListConnectionLogs(context.Background(), wrapped, connlog.ConnLogQuery{
+				ServiceID: s.serviceID,
+				Kind:      string(connlog.KindHTTPProxy),
+				Limit:     10,
+			})
+			if err != nil {
+				t.Fatalf("ListConnectionLogs: %v", err)
+			}
+			rows = r
+			if len(rows) >= 1 {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if len(rows) < 1 {
+			t.Fatalf("no rows in connection_logs for service_id=%s after 5s", s.serviceID)
+		}
+		got := rows[0]
+		if got.Status != string(connlog.StatusClosedError) {
+			t.Errorf("status=%q want %q (upstream returned 500)", got.Status, connlog.StatusClosedError)
+		}
+	})
+
+	// --- Part E3 — connection log: closed_idle (upstream hangs past timeout) -
+	//
+	// P2.3 seam test: visitor request whose upstream hangs for 10 s. With the
+	// proxy idle timeout set to 2 s, the proxy's context deadline fires first.
+	// The proxy must record logStatus == "closed_idle".
+	t.Run("E3_connection_log_status_closed_idle", func(t *testing.T) {
+		var realSink *connlog.SQLSink
+		adapter := proxyConnLogTestAdapter{sinkFn: func() *connlog.SQLSink { return realSink }}
+
+		// 2s idle timeout: tight enough for a fast test, wide enough to survive CI jitter.
+		s := bootE2EStack(t, withConnLogSink(adapter), withProxyIdleTimeout(2*time.Second))
+		realSink = connlog.NewSQLSink(db.Wrap(s.db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+		// Upstream hangs (well past the 2s idle timeout).
+		s.setUpstreamHandler(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(10 * time.Second):
+				w.WriteHeader(http.StatusOK)
+			case <-r.Context().Done():
+				// Context cancelled — request timed out from proxy side.
+			}
+		})
+
+		hc := s.visitorClient(t)
+		url := "https://" + s.hostWithPort() + "/idle-probe"
+		resp, err := hc.Get(url)
+		// The visitor will receive an error (proxy timeout) or a 502; either is fine.
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+
+		wrapped := db.Wrap(s.db)
+		deadline := time.Now().Add(8 * time.Second)
+		var rows []db.ConnectionLog
+		for time.Now().Before(deadline) {
+			r, err := connlog.ListConnectionLogs(context.Background(), wrapped, connlog.ConnLogQuery{
+				ServiceID: s.serviceID,
+				Kind:      string(connlog.KindHTTPProxy),
+				Limit:     10,
+			})
+			if err != nil {
+				t.Fatalf("ListConnectionLogs: %v", err)
+			}
+			rows = r
+			if len(rows) >= 1 {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if len(rows) < 1 {
+			t.Fatalf("no rows in connection_logs for service_id=%s after 8s", s.serviceID)
+		}
+		got := rows[0]
+		if got.Status != string(connlog.StatusClosedIdle) {
+			t.Errorf("status=%q want %q (upstream hung past idle timeout)", got.Status, connlog.StatusClosedIdle)
+		}
+	})
+
+	// --- Part E4 — connection log: rejected (access deny regression pin) ----
+	//
+	// P2.3 regression pin: early access-deny path must still record "rejected".
+	// This was already green before P2.3; pinning it here ensures the new
+	// closed_error / closed_idle wiring doesn't accidentally override it.
+	//
+	// The test uses a service registered as "api_key" access mode and sends a
+	// request with no key → AccessChecker denies → logStatus stays "rejected".
+	t.Run("E4_connection_log_status_rejected", func(t *testing.T) {
+		var realSink *connlog.SQLSink
+		adapter := proxyConnLogTestAdapter{sinkFn: func() *connlog.SQLSink { return realSink }}
+
+		s := bootE2EStack(t, withConnLogSink(adapter))
+		realSink = connlog.NewSQLSink(db.Wrap(s.db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+		// bootE2EStack registers the tunnel as "open" access mode. To exercise
+		// the rejection path we need to update the service's access mode to
+		// "api_key" so the AccessChecker denies a key-less request.
+		// Note: the API key itself is stored in service_api_keys (not a column
+		// on services), so we only update access_mode here. A request with no
+		// Authorization header is rejected before any key lookup.
+		if _, err := s.db.ExecContext(context.Background(),
+			`UPDATE services SET access_mode='api_key' WHERE id=?`,
+			s.serviceID,
+		); err != nil {
+			t.Fatalf("update access_mode: %v", err)
+		}
+
+		// Visitor sends request with no API key → access denied.
+		hc := s.visitorClient(t)
+		url := "https://" + s.hostWithPort() + "/reject-probe"
+		resp, err := hc.Get(url)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		wrapped := db.Wrap(s.db)
+		deadline := time.Now().Add(5 * time.Second)
+		var rows []db.ConnectionLog
+		for time.Now().Before(deadline) {
+			r, err := connlog.ListConnectionLogs(context.Background(), wrapped, connlog.ConnLogQuery{
+				ServiceID: s.serviceID,
+				Kind:      string(connlog.KindHTTPProxy),
+				Limit:     10,
+			})
+			if err != nil {
+				t.Fatalf("ListConnectionLogs: %v", err)
+			}
+			rows = r
+			if len(rows) >= 1 {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if len(rows) < 1 {
+			t.Fatalf("no rows in connection_logs for service_id=%s after 5s", s.serviceID)
+		}
+		got := rows[0]
+		if got.Status != string(connlog.StatusRejected) {
+			t.Errorf("status=%q want %q (access denied by api_key mode)", got.Status, connlog.StatusRejected)
+		}
+	})
+
 	// --- Part F — retention settings PUT then GET --------------------------
 	t.Run("F_retention_put_get", func(t *testing.T) {
 		code, body := env.do(t, http.MethodPut, "/api/v1/settings/retention",

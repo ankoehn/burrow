@@ -215,6 +215,17 @@ func withCustomDomainLookup(fn func(ctx context.Context, host string) (string, b
 	}
 }
 
+// withProxyIdleTimeout returns a bootE2EStack option that sets a per-request
+// idle timeout on the proxy. Used by P2.3 tests (E2/E3) to exercise the
+// closed_idle status path without waiting for the production-default timeout.
+// A 2-second value is tight enough for a fast test but generous enough to
+// survive CI scheduling jitter.
+func withProxyIdleTimeout(d time.Duration) bootE2EStackOption {
+	return func(c *bootE2ECfg) {
+		c.extraProxyOpts = append(c.extraProxyOpts, proxy.WithProxyIdleTimeout(d))
+	}
+}
+
 // bootE2EStack stands up the whole real-stack chain. Always uses TLS on the
 // proxy (per plan: "dev wildcard cert + auth_domain test.local").
 func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {

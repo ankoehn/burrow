@@ -94,15 +94,21 @@ type Proxy struct {
 	// conn-level byte accounting and deferred Record call are implemented in
 	// serveResolved / serveCustomDomain.
 	//
-	// Full instrumentation (byte-counting transport wrapper, status mapping,
-	// closed_idle timeout detection) is wired by Task 17 (cmd/server). This
-	// field declares the Sink attachment point so Task 17 can wire it without
-	// changes to this file.
-	//
 	// ConnLogSink is an interface alias to avoid importing internal/connlog
 	// from the proxy package (which would add connlog to the data-plane import
 	// graph). The concrete *connlog.SQLSink satisfies it.
 	connLogSink ConnLogSink
+
+	// v0.5.1 P2.3: per-request idle timeout. When > 0, serveResolved and
+	// serveCustomDomain wrap the inbound request context with a
+	// context.WithTimeout of this duration before forwarding to the upstream.
+	// If the upstream does not send response headers within this window, the
+	// context fires → ErrorHandler receives context.DeadlineExceeded →
+	// logStatus is set to "closed_idle".
+	//
+	// Production default: 0 (no timeout). Tests use 2 s via WithProxyIdleTimeout.
+	// The zero value preserves all pre-P2.3 behaviour byte-for-byte.
+	idleTimeout time.Duration
 }
 
 // ConnLogSink is the interface the proxy uses to record a per-request
@@ -120,16 +126,23 @@ type ConnLogSink interface {
 }
 
 // Connection-log status values the proxy emits. Mirrors connlog.Status
-// but kept here as plain string constants so the proxy stays import-free
-// of connlog. The adapter in cmd/server converts these into the typed
-// connlog.Status equivalents byte-for-byte.
+// byte-for-byte but kept here as plain string constants so the proxy stays
+// import-free of connlog. The adapter in cmd/server converts these into the
+// typed connlog.Status equivalents.
 //
-// Full status mapping (closed_error / closed_idle) is a v0.5.1 polish item;
-// v0.5.0 records only the two terminal states reachable from the
-// access-deny early return (Rejected) and the normal end-of-request
-// (ClosedClean).
+// Precedence (highest wins):
+//
+//	closed_error > closed_idle > closed_clean
+//
+// "closed_error" wins even if the context deadline also fired, because the
+// upstream actually flushed a response (even if it was a 5xx).  If the
+// deadline fires before any response is written, "closed_idle" is recorded.
+// The early access-deny path always sets "rejected" before any upstream
+// contact occurs — it is never overridden.
 const (
 	StatusClosedClean = "closed_clean"
+	StatusClosedError = "closed_error"
+	StatusClosedIdle  = "closed_idle"
 	StatusRejected    = "rejected"
 )
 
@@ -154,12 +167,21 @@ type ConnLogEntry struct {
 }
 
 // WithConnLogSink registers the v0.5.0 connection-log sink. When non-nil,
-// the proxy will call sink.Record on each closed request. Full byte-counting
-// instrumentation (bytes_in / bytes_out via transport wrapper, status
-// mapping, idle timeout) is wired by Task 17 (cmd/server). In v0.5.0 Task 8
-// this option registers the field; Task 17 activates the Record calls.
+// the proxy will call sink.Record on each closed request.
 func WithConnLogSink(sink ConnLogSink) Option {
 	return func(p *Proxy) { p.connLogSink = sink }
+}
+
+// WithProxyIdleTimeout sets a per-request idle timeout (v0.5.1 P2.3). When
+// d > 0, each inbound request context is wrapped with context.WithTimeout(d)
+// before being forwarded upstream. If the upstream does not respond within d,
+// the context deadline fires and the connection log records "closed_idle".
+//
+// Production callers should leave this at 0 (no timeout) unless they
+// intentionally want to enforce a maximum upstream response-header latency.
+// Tests set 2 s so the idle-timeout seam test completes quickly.
+func WithProxyIdleTimeout(d time.Duration) Option {
+	return func(p *Proxy) { p.idleTimeout = d }
 }
 
 // New constructs a Proxy.
@@ -371,6 +393,17 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 		return
 	}
 
+	// v0.5.1 P2.3: wrap context with per-request idle timeout when configured.
+	// The cancel is called at function return (deferred); the deferred
+	// recordOnClose runs first (defer is LIFO) so it sees the final logStatus
+	// value before the context is released.
+	if p.idleTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.idleTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+
 	upstreamHost := res.LocalHost
 	if upstreamHost == "" {
 		upstreamHost = host
@@ -404,8 +437,21 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 			DisableCompression: true,
 			ForceAttemptHTTP2:  false,
 		},
+		// v0.5.1 P2.3: status mapping in ErrorHandler.
+		//
+		// Precedence: closed_error > closed_idle > closed_clean.
+		// - context.DeadlineExceeded (idle timeout fired) → closed_idle.
+		// - Any other upstream error → closed_error.
+		// The post-ServeHTTP 5xx check below also promotes closed_clean →
+		// closed_error when the upstream successfully responded but with a
+		// ≥500 status code (ErrorHandler is NOT called in that case).
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			p.log.Warn("proxy custom domain upstream error", "host", host, "err", err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				logStatus = StatusClosedIdle
+			} else {
+				logStatus = StatusClosedError
+			}
 			if errors.Is(err, ErrNotFound) {
 				p.notFound(w)
 				return
@@ -418,9 +464,19 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 
 	if p.aiChain != nil {
 		p.aiChain.Dispatch(w, r, res.ServiceID, res.LocalHost, res.APIKeyHeader, rp)
+		// Post-dispatch 5xx promotion: if the upstream responded with ≥500 and
+		// the ErrorHandler was NOT called, promote closed_clean → closed_error.
+		// closed_error and closed_idle are never downgraded (precedence rule).
+		if logStatus == StatusClosedClean && ww.statusCode >= 500 {
+			logStatus = StatusClosedError
+		}
 		return
 	}
 	rp.ServeHTTP(w, r)
+	// Post-ServeHTTP 5xx promotion (same rule as above).
+	if logStatus == StatusClosedClean && ww.statusCode >= 500 {
+		logStatus = StatusClosedError
+	}
 }
 
 // serveResolved handles a request after subdomain-based dialer.Lookup has
@@ -466,6 +522,17 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 		w.WriteHeader(status)
 		_, _ = fmt.Fprint(w, body)
 		return
+	}
+
+	// v0.5.1 P2.3: wrap context with per-request idle timeout when configured.
+	// The cancel is called at function return (deferred); the deferred
+	// recordOnClose runs first (defer is LIFO) so it sees the final logStatus
+	// value before the context is released.
+	if p.idleTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.idleTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
 	}
 
 	// Determine upstream Host value.
@@ -536,8 +603,21 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 			ForceAttemptHTTP2: false,
 		},
 
+		// v0.5.1 P2.3: status mapping in ErrorHandler.
+		//
+		// Precedence: closed_error > closed_idle > closed_clean.
+		// - context.DeadlineExceeded (idle timeout fired) → closed_idle.
+		// - Any other upstream error → closed_error.
+		// The post-ServeHTTP 5xx check below also promotes closed_clean →
+		// closed_error when the upstream successfully responded but with a
+		// ≥500 status code (ErrorHandler is NOT called in that case).
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			p.log.Warn("proxy upstream error", "subdomain", label, "err", err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				logStatus = StatusClosedIdle
+			} else {
+				logStatus = StatusClosedError
+			}
 			if errors.Is(err, ErrNotFound) {
 				p.notFound(w)
 				return
@@ -556,10 +636,20 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 	if p.aiChain != nil {
 		p.aiChain.Dispatch(w, r,
 			res.ServiceID, res.LocalHost, res.APIKeyHeader, rp)
+		// Post-dispatch 5xx promotion: if the upstream responded with ≥500 and
+		// the ErrorHandler was NOT called, promote closed_clean → closed_error.
+		// closed_error and closed_idle are never downgraded (precedence rule).
+		if logStatus == StatusClosedClean && ww.statusCode >= 500 {
+			logStatus = StatusClosedError
+		}
 		return
 	}
 
 	rp.ServeHTTP(w, r)
+	// Post-ServeHTTP 5xx promotion (same rule as above).
+	if logStatus == StatusClosedClean && ww.statusCode >= 500 {
+		logStatus = StatusClosedError
+	}
 }
 
 // notFound writes the canonical 404 for this package: text/plain "tunnel not
@@ -748,13 +838,27 @@ func (b *countingBody) bytes() int64 { return b.n }
 // Hijack returns an io.Writer wrapped net.Conn that continues to count
 // bytes — without this, hijacked responses (WebSocket frames, raw TCP
 // upgrades) would record bytes_out = 0 forever.
+//
+// statusCode captures the HTTP status code written by WriteHeader. It is
+// used by P2.3 to distinguish closed_error (upstream returned ≥500) from
+// closed_clean. The zero value means WriteHeader was never called (e.g. a
+// 200 response with no explicit WriteHeader call); in that case the
+// post-ServeHTTP check skips the 5xx test.
 type countingResponseWriter struct {
 	http.ResponseWriter
-	n int64
+	n          int64
+	statusCode int // set by WriteHeader; 0 = not yet called
 }
 
 func newCountingResponseWriter(w http.ResponseWriter) *countingResponseWriter {
 	return &countingResponseWriter{ResponseWriter: w}
+}
+
+func (w *countingResponseWriter) WriteHeader(code int) {
+	if w.statusCode == 0 {
+		w.statusCode = code
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *countingResponseWriter) Write(p []byte) (int, error) {
