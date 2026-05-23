@@ -7,10 +7,59 @@ before:
     - sh -c 'cd web && npm ci && npm run build'
 
 builds:
+  # Default server: no build tags. v0.4.0 features + v0.5.0 features with
+  # semantic cache disabled (NoopCache) and SQLite-only. The headline binary.
   - id: server
     main: ./cmd/server
     binary: burrowd
     env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
+      - -X github.com/ankoehn/burrow/internal/version.Commit={{.Commit}}
+      - -X github.com/ankoehn/burrow/internal/version.Date={{.Date}}
+
+  # Opt-in semantic cache: adds chromem-go. Same platform matrix as default.
+  - id: server-semantic
+    main: ./cmd/server
+    binary: burrowd
+    env: [CGO_ENABLED=0]
+    tags: [semantic_cache]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X github.com/ankoehn/burrow/internal/version.Version={{.Version}}
+      - -X github.com/ankoehn/burrow/internal/version.Commit={{.Commit}}
+      - -X github.com/ankoehn/burrow/internal/version.Date={{.Date}}
+
+  # Opt-in Postgres backend: adds pgx/v5. Alpha in v0.5.0 — see release notes
+  # for the v0.5.1 P1 placeholder-rewriter that this binary needs to be
+  # functional. The build itself is green; only DML against Postgres fails
+  # until v0.5.1 lands.
+  - id: server-postgres
+    main: ./cmd/server
+    binary: burrowd
+    env: [CGO_ENABLED=0]
+    tags: [postgres]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64, arm]
     goarm: ["7"]
@@ -58,6 +107,28 @@ archives:
       {{- if eq .Arch "arm" }}armv7
       {{- else }}{{ .Arch }}{{ end }}_
       {{- .Version }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+  - id: server-semantic
+    ids: [server-semantic]
+    formats: [tar.gz]
+    name_template: >-
+      burrowd_{{ .Os }}_
+      {{- if eq .Arch "arm" }}armv7
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}_semantic
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+  - id: server-postgres
+    ids: [server-postgres]
+    formats: [tar.gz]
+    name_template: >-
+      burrowd_{{ .Os }}_
+      {{- if eq .Arch "arm" }}armv7
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}_postgres
     format_overrides:
       - goos: windows
         formats: [zip]
