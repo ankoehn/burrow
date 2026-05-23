@@ -9,7 +9,15 @@ const err = (status: number, message: string) => HttpResponse.json({ error: mess
 const noContent = () => new HttpResponse(null, { status: 204 });
 
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
-const WHITELIST = ["smtp.host", "smtp.port", "smtp.username", "smtp.from", "smtp.tls"];
+const WHITELIST = [
+  "smtp.host",
+  "smtp.port",
+  "smtp.username",
+  "smtp.from",
+  "smtp.tls",
+  // v0.5.1 Q12 (UI toggle landed in v0.5.2): connection-log privacy toggle.
+  "connection_logs.rollup_include_top_ips",
+];
 
 // Gate: replicate 401 -> 403(csrf) -> 403(admin) ordering.
 function gate(req: Request, opts: { admin?: boolean } = {}): Response | null {
