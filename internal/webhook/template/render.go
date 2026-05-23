@@ -13,10 +13,9 @@
 //
 // # Security invariants
 //
-//   - The only functions available are the seven in allowedFuncs (printf,
+//   - The only functions available are the twelve in allowedFuncs (printf,
 //     lower, upper, title, replace, trim, split, now, default, b64enc, b64dec, json).
-//     Counted: 12 total (the spec table says seven; we implement exactly the
-//     spec-listed names and no others).
+//     Any function name not in this closed set causes Parse to return an error.
 //   - Template nesting ({{ template "x" . }}) is rejected at parse time
 //     because no associated templates are defined in the initial parse call
 //     and text/template returns an error for undefined names.
@@ -121,12 +120,12 @@ var knownEventFields = map[string]map[string]any{
 	"cert.expiring":              {"Domain": "", "ExpiryDays": 0},
 	"audit.exported":             {"ActorEmail": "", "RecordCount": 0},
 	"backup.completed":           {"Path": "", "SizeBytes": 0},
-	"ai.upstream_error":          {"ServiceID": "", "BackendServiceID": "", "Status": 0, "Error": "", "RetryCount": 0},
-	"ai.cache_promotion":         {"ServiceID": "", "ExactKeyHash": "", "PromptFingerprint": "", "Similarity": 0.0},
-	"audit.policy_change":        {"ActorEmail": "", "Action": "", "Before": nil, "After": nil},
-	"service.created":            {"ServiceID": "", "Name": "", "Kind": "", "AccessMode": ""},
-	"service.deleted":            {"ServiceID": "", "Name": ""},
-	"connection.session_summary": {"ServiceID": "", "Kind": "", "WindowStart": "", "WindowEnd": "", "Sessions": 0, "BytesIn": 0, "BytesOut": 0},
+	"ai.upstream_error":          {"service_id": "", "backend_service_id": "", "status": 0, "error": "", "retry_count": 0},
+	"ai.cache_promotion":         {"service_id": "", "exact_key_hash": "", "prompt_fingerprint": "", "similarity_to_first": 0.0},
+	"audit.policy_change":        {"actor_email": "", "action": "", "before": nil, "after": nil},
+	"service.created":            {"service_id": "", "name": "", "type": "", "access_mode": ""},
+	"service.deleted":            {"service_id": "", "name": ""},
+	"connection.session_summary": {"service_id": "", "kind": "", "window_start": "", "window_end": "", "sessions": 0, "bytes_in": 0, "bytes_out": 0, "avg_duration_ms": 0, "p95_duration_ms": 0, "top_source_ips": []map[string]any{}},
 }
 
 // Render compiles src and executes it with fields as the template dot value.

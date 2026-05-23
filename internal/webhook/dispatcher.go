@@ -634,14 +634,24 @@ func newDeliveryID() string {
 // v0.5.0 Task 10: new event helpers + per-event rate-limiting
 // ---------------------------------------------------------------------------
 
+// TopSourceIP is one entry in the top-N source-IP list carried by
+// RollupData. Up to 10 entries, sorted by session count descending (spec E.3).
+type TopSourceIP struct {
+	IP       string `json:"ip"`
+	Sessions int    `json:"sessions"`
+}
+
 // RollupData carries the aggregated session metrics for the
 // connection.session_summary event. Populated by the hourly tick in Task 17.
+// TopSourceIPs holds up to 10 entries sorted by session count descending
+// (spec E.3 — each entry has {ip, sessions}).
 type RollupData struct {
 	Sessions      int64
 	BytesIn       int64
 	BytesOut      int64
 	AvgDurationMs int64
 	P95DurationMs int64
+	TopSourceIPs  []TopSourceIP
 }
 
 // emitRateLimiter is a per-event-per-serviceID in-process rate limiter.
@@ -685,63 +695,75 @@ func dispatcherRateLimiter() *emitRateLimiter {
 
 // EmitAIUpstreamError publishes an "ai.upstream_error" webhook event on
 // behalf of the given service. Rate-limited to 1/h per serviceID.
+// Payload keys are snake_case per spec H.2/E.3.
 func (d *Dispatcher) EmitAIUpstreamError(serviceID, backendServiceID string, status int, errMsg string, retryCount int) {
 	const event = "ai.upstream_error"
 	if !dispatcherRateLimiter().allow(event, serviceID, time.Hour) {
 		return
 	}
 	d.Publish(context.Background(), event, map[string]any{
-		"ServiceID":        serviceID,
-		"BackendServiceID": backendServiceID,
-		"Status":           status,
-		"Error":            errMsg,
-		"RetryCount":       retryCount,
+		"service_id":         serviceID,
+		"backend_service_id": backendServiceID,
+		"status":             status,
+		"error":              errMsg,
+		"retry_count":        retryCount,
 	})
 }
 
 // EmitAICachePromotion publishes an "ai.cache_promotion" webhook event.
 // Rate-limited to 1/h per serviceID.
+// Payload keys are snake_case per spec H.2/E.3.
+//
+// NOTE: the webhook event name is "ai.cache_promotion" (spec H.2) while the
+// audit action constant is ActionAICachePromoted = "ai.cache.promoted" (spec L).
+// Both names refer to the same underlying cache-promotion event; the split is
+// deliberate — webhook events use dot-separated lowercase segments with an
+// underscore within segment names, whereas audit action strings use only dots.
 func (d *Dispatcher) EmitAICachePromotion(serviceID, exactKeyHash, promptFingerprint string, similarity float64) {
 	const event = "ai.cache_promotion"
 	if !dispatcherRateLimiter().allow(event, serviceID, time.Hour) {
 		return
 	}
 	d.Publish(context.Background(), event, map[string]any{
-		"ServiceID":         serviceID,
-		"ExactKeyHash":      exactKeyHash,
-		"PromptFingerprint": promptFingerprint,
-		"Similarity":        similarity,
+		"service_id":          serviceID,
+		"exact_key_hash":      exactKeyHash,
+		"prompt_fingerprint":  promptFingerprint,
+		"similarity_to_first": similarity,
 	})
 }
 
 // EmitAuditPolicyChange publishes an "audit.policy_change" webhook event.
 // Not rate-limited (admin-initiated, low-volume).
+// Payload keys are snake_case per spec H.2/E.3.
 func (d *Dispatcher) EmitAuditPolicyChange(actorEmail, action string, before, after any) {
 	d.Publish(context.Background(), "audit.policy_change", map[string]any{
-		"ActorEmail": actorEmail,
-		"Action":     action,
-		"Before":     before,
-		"After":      after,
+		"actor_email": actorEmail,
+		"action":      action,
+		"before":      before,
+		"after":       after,
 	})
 }
 
 // EmitServiceCreated publishes a "service.created" webhook event.
 // Not rate-limited (admin-initiated, low-volume).
+// Payload keys are snake_case per spec H.2/E.3; the event type field is "type"
+// (not "kind") per spec H.2 table.
 func (d *Dispatcher) EmitServiceCreated(serviceID, name, kind, accessMode string) {
 	d.Publish(context.Background(), "service.created", map[string]any{
-		"ServiceID":  serviceID,
-		"Name":       name,
-		"Kind":       kind,
-		"AccessMode": accessMode,
+		"service_id":  serviceID,
+		"name":        name,
+		"type":        kind,
+		"access_mode": accessMode,
 	})
 }
 
 // EmitServiceDeleted publishes a "service.deleted" webhook event.
 // Not rate-limited (admin-initiated, low-volume).
+// Payload keys are snake_case per spec H.2/E.3.
 func (d *Dispatcher) EmitServiceDeleted(serviceID, name string) {
 	d.Publish(context.Background(), "service.deleted", map[string]any{
-		"ServiceID": serviceID,
-		"Name":      name,
+		"service_id": serviceID,
+		"name":       name,
 	})
 }
 
@@ -752,17 +774,20 @@ func (d *Dispatcher) EmitServiceDeleted(serviceID, name string) {
 //
 // Not rate-limited at the event-helper level — the caller (Task 17's hourly
 // tick) controls the cadence.
+// Payload keys are snake_case per spec H.2/E.3; top_source_ips holds up to
+// 10 entries sorted by session count descending.
 func (d *Dispatcher) EmitConnectionSessionSummary(serviceID, kind string, windowStart, windowEnd time.Time, rollup RollupData) {
 	d.Publish(context.Background(), "connection.session_summary", map[string]any{
-		"ServiceID":     serviceID,
-		"Kind":          kind,
-		"WindowStart":   windowStart.UTC().Format(time.RFC3339),
-		"WindowEnd":     windowEnd.UTC().Format(time.RFC3339),
-		"Sessions":      rollup.Sessions,
-		"BytesIn":       rollup.BytesIn,
-		"BytesOut":      rollup.BytesOut,
-		"AvgDurationMs": rollup.AvgDurationMs,
-		"P95DurationMs": rollup.P95DurationMs,
+		"service_id":      serviceID,
+		"kind":            kind,
+		"window_start":    windowStart.UTC().Format(time.RFC3339),
+		"window_end":      windowEnd.UTC().Format(time.RFC3339),
+		"sessions":        rollup.Sessions,
+		"bytes_in":        rollup.BytesIn,
+		"bytes_out":       rollup.BytesOut,
+		"avg_duration_ms": rollup.AvgDurationMs,
+		"p95_duration_ms": rollup.P95DurationMs,
+		"top_source_ips":  rollup.TopSourceIPs,
 	})
 }
 

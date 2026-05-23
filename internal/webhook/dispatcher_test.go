@@ -692,8 +692,15 @@ func TestDispatcherFiresAiUpstreamErrorEvent(t *testing.T) {
 		if !ok {
 			t.Fatalf("body.data not a map: %T", env["data"])
 		}
-		if data["ServiceID"] != "svc-1" {
-			t.Errorf("ServiceID = %v want svc-1", data["ServiceID"])
+		// Keys must be snake_case per spec H.2/E.3.
+		if data["service_id"] != "svc-1" {
+			t.Errorf("service_id = %v want svc-1", data["service_id"])
+		}
+		if data["backend_service_id"] != "be-1" {
+			t.Errorf("backend_service_id = %v want be-1", data["backend_service_id"])
+		}
+		if rc, _ := data["retry_count"].(float64); rc != 3 {
+			t.Errorf("retry_count = %v want 3", data["retry_count"])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no delivery within 2s")
@@ -751,7 +758,7 @@ func TestDispatcherPayloadTemplate(t *testing.T) {
 		Name:            "templated",
 		URL:             srv.URL,
 		Events:          `["service.created"]`,
-		PayloadTemplate: `svc={{.ServiceID}},name={{.Name}}`,
+		PayloadTemplate: `svc={{.service_id}},name={{.name}}`,
 	})
 	d := New(store, &fakeSecrets{id: "wh1", plaintext: "s"}, nil, nil)
 	d.SetRetryBackoff(nil)
@@ -765,6 +772,93 @@ func TestDispatcherPayloadTemplate(t *testing.T) {
 		s := string(body)
 		if s != "svc=svc-42,name=my-service" {
 			t.Errorf("rendered body = %q want svc=svc-42,name=my-service", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no delivery within 2s")
+	}
+}
+
+// TestDispatcherConnectionSessionSummary_SnakeCaseAndTopSourceIPs confirms
+// that EmitConnectionSessionSummary delivers snake_case keys and includes
+// top_source_ips in the payload per spec E.3/H.2.
+func TestDispatcherConnectionSessionSummary_SnakeCaseAndTopSourceIPs(t *testing.T) {
+	got := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store := newFakeStore()
+	store.addWebhook(db.Webhook{
+		ID:     "wh-css",
+		Name:   "session-summary",
+		URL:    srv.URL,
+		Events: `["connection.session_summary"]`,
+	})
+	d := New(store, &fakeSecrets{id: "wh-css", plaintext: "s"}, nil, nil)
+	d.SetRetryBackoff(nil)
+	d.Start()
+	defer d.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	rollup := RollupData{
+		Sessions:      42,
+		BytesIn:       1024,
+		BytesOut:      2048,
+		AvgDurationMs: 150,
+		P95DurationMs: 400,
+		TopSourceIPs: []TopSourceIP{
+			{IP: "10.0.0.1", Sessions: 20},
+			{IP: "10.0.0.2", Sessions: 15},
+		},
+	}
+	d.EmitConnectionSessionSummary("svc-99", "http", now, now.Add(time.Hour), rollup)
+
+	select {
+	case body := <-got:
+		var env map[string]any
+		if err := json.Unmarshal(body, &env); err != nil {
+			t.Fatalf("body not JSON: %v", err)
+		}
+		data, ok := env["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("body.data not a map: %T", env["data"])
+		}
+		// Assert snake_case keys are present.
+		if data["service_id"] != "svc-99" {
+			t.Errorf("service_id = %v want svc-99", data["service_id"])
+		}
+		if data["window_start"] == "" || data["window_start"] == nil {
+			t.Error("window_start must be set")
+		}
+		if data["sessions"] == nil {
+			t.Error("sessions must be set")
+		}
+		if data["bytes_in"] == nil {
+			t.Error("bytes_in must be set")
+		}
+		if data["avg_duration_ms"] == nil {
+			t.Error("avg_duration_ms must be set")
+		}
+		if data["p95_duration_ms"] == nil {
+			t.Error("p95_duration_ms must be set")
+		}
+		// Assert top_source_ips is a non-empty slice with the right shape.
+		ips, ok := data["top_source_ips"].([]any)
+		if !ok {
+			t.Fatalf("top_source_ips not a slice: %T", data["top_source_ips"])
+		}
+		if len(ips) != 2 {
+			t.Fatalf("top_source_ips len = %d want 2", len(ips))
+		}
+		first, ok := ips[0].(map[string]any)
+		if !ok {
+			t.Fatalf("top_source_ips[0] not a map: %T", ips[0])
+		}
+		if first["ip"] != "10.0.0.1" {
+			t.Errorf("top_source_ips[0].ip = %v want 10.0.0.1", first["ip"])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no delivery within 2s")

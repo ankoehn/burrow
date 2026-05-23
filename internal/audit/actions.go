@@ -100,8 +100,13 @@ const (
 	// compaction (complementing ActionRedactionApplied and ActionGuardrailRefused
 	// which were already present).
 	ActionConnectionSessionSummary = "connection.session_summary"
-	ActionAICachePromoted          = "ai.cache.promoted"
-	ActionAIUpstreamError          = "ai.upstream_error"
+	// ActionAICachePromoted is the audit action string (spec L) for a cache
+	// promotion. Note the deliberate name split: the corresponding webhook event
+	// is "ai.cache_promotion" (spec H.2) — webhook event names use underscores
+	// within segments, whereas audit actions use only dots. Both names refer to
+	// the same underlying event.
+	ActionAICachePromoted = "ai.cache.promoted"
+	ActionAIUpstreamError = "ai.upstream_error"
 )
 
 // AllActions is the closed set of every audit action Burrow defines, in a
