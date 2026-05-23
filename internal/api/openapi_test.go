@@ -801,6 +801,10 @@ func (*fullDepsStub) ListConnectionLogRollupTopIPs(context.Context, string, stri
 	stubPanic("ConnectionLogStore.ListConnectionLogRollupTopIPs")
 	return nil, nil
 }
+func (*fullDepsStub) ListConnectionLogRollupTopIPsBatch(context.Context, []connlog.TopIPsGroup) (map[connlog.TopIPsGroup][]connlog.TopIP, error) {
+	stubPanic("ConnectionLogStore.ListConnectionLogRollupTopIPsBatch")
+	return nil, nil
+}
 
 // CustomDomainStore (v0.5.0 Task 7).
 func (*fullDepsStub) InsertCustomDomain(context.Context, db.ServiceCustomDomain) (db.ServiceCustomDomain, error) {

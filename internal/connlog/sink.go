@@ -363,12 +363,73 @@ type TopIP struct {
 	Sessions int64  `json:"sessions"`
 }
 
+// TopIPsGroup identifies one (day, service_id, kind) rollup group; used as a
+// composite map key by the batched top-IPs accessor (v0.5.2 BACKLOG #2).
+type TopIPsGroup struct {
+	Day       string
+	ServiceID string
+	Kind      string
+}
+
+// ListConnectionLogRollupTopIPsBatch returns the persisted top-source-IPs rows
+// for all requested (day, service_id, kind) groups in a single SQL query.
+// Groups with no aux rows are absent from the result map. Within each group
+// the rows are ordered most-frequent-first (sessions DESC, ip ASC).
+//
+// Replaces the N+1 pattern of calling ListConnectionLogRollupTopIPs once per
+// rollup row (v0.5.2 BACKLOG #2). At the 90-day x 10-service x 3-kind = 2,700
+// rollup-row scale this collapses from 2,701 to 2 round trips.
+func ListConnectionLogRollupTopIPsBatch(ctx context.Context, x *db.DB, groups []TopIPsGroup) (map[TopIPsGroup][]TopIP, error) {
+	out := make(map[TopIPsGroup][]TopIP, len(groups))
+	if len(groups) == 0 {
+		return out, nil
+	}
+	// Compose ((day=? AND service_id=? AND kind=?) OR (...) ...). Portable
+	// across SQLite (no row constructors in older builds) and Postgres (the
+	// v0.5.1 ?-rewriter handles the placeholder translation transparently).
+	var sb strings.Builder
+	sb.WriteString(
+		`SELECT day, service_id, kind, ip, sessions
+		   FROM connection_log_rollup_top_ips WHERE `)
+	args := make([]any, 0, len(groups)*3)
+	for i, g := range groups {
+		if i > 0 {
+			sb.WriteString(" OR ")
+		}
+		sb.WriteString("(day=? AND service_id=? AND kind=?)")
+		args = append(args, g.Day, g.ServiceID, g.Kind)
+	}
+	sb.WriteString(` ORDER BY day, service_id, kind, sessions DESC, ip ASC`)
+
+	rows, err := x.DB().QueryContext(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list top_ips batch: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g TopIPsGroup
+		var ip TopIP
+		if err := rows.Scan(&g.Day, &g.ServiceID, &g.Kind, &ip.IP, &ip.Sessions); err != nil {
+			return nil, fmt.Errorf("scan top_ip batch row: %w", err)
+		}
+		out[g] = append(out[g], ip)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list top_ips batch rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListConnectionLogRollupTopIPs returns the persisted top-source-IPs rows for
 // one (day, service_id, kind) group, ordered most-frequent-first. The list is
 // empty when (a) the toggle was off at the most recent Rollup compaction, or
 // (b) the group has never been rolled up. Callers that need the toggle
 // distinguished from a never-rolled-up group should consult settings
 // independently.
+//
+// Prefer ListConnectionLogRollupTopIPsBatch when fetching multiple groups —
+// this single-group accessor is retained for back-compat callers (CSV export
+// surfaces, ad-hoc diagnostics).
 func ListConnectionLogRollupTopIPs(ctx context.Context, x *db.DB, day, serviceID, kind string) ([]TopIP, error) {
 	rows, err := x.DB().QueryContext(ctx,
 		`SELECT ip, sessions FROM connection_log_rollup_top_ips

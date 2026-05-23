@@ -109,6 +109,19 @@ func (f *fakeConnLogStore) ListConnectionLogRollupTopIPs(_ context.Context, day,
 	return f.topIPs[day+"|"+serviceID+"|"+kind], nil
 }
 
+func (f *fakeConnLogStore) ListConnectionLogRollupTopIPsBatch(_ context.Context, groups []connlog.TopIPsGroup) (map[connlog.TopIPsGroup][]connlog.TopIP, error) {
+	if f.topIPs == nil {
+		return map[connlog.TopIPsGroup][]connlog.TopIP{}, nil
+	}
+	out := make(map[connlog.TopIPsGroup][]connlog.TopIP, len(groups))
+	for _, g := range groups {
+		if rows, ok := f.topIPs[g.Day+"|"+g.ServiceID+"|"+g.Kind]; ok {
+			out[g] = rows
+		}
+	}
+	return out, nil
+}
+
 // TestConnectionLogsGETReturnsEmptyWhenNone asserts that the list endpoint
 // returns an empty array when no rows exist.
 func TestConnectionLogsGETReturnsEmptyWhenNone(t *testing.T) {
@@ -381,6 +394,97 @@ func TestGetRollups_TopIPsToggle_EmptyButEnabled(t *testing.T) {
 	if string(topRaw) != "[]" {
 		t.Errorf("want top_source_ips=[], got %s", string(topRaw))
 	}
+}
+
+// TestGetRollups_TopIPsBatchedOneQuery pins the v0.5.2 BACKLOG #2 fix: when
+// the rollups handler returns N rows, the top-IPs fetch issues a single
+// batched call instead of N per-row calls (N+1 -> 2 queries).
+//
+// The fake records each call to ListConnectionLogRollupTopIPs vs the new
+// ListConnectionLogRollupTopIPsBatch; the assertion is that the batched
+// variant was invoked exactly once and the per-group variant zero times
+// regardless of how many rollup rows the handler walks.
+func TestGetRollups_TopIPsBatchedOneQuery(t *testing.T) {
+	day := "2026-02-01"
+	// Seed 5 rollup rows across 3 (day, service_id, kind) groups so the
+	// batched call has > 1 distinct group to coalesce.
+	rollups := []db.ConnectionLogRollup{
+		{Day: day, ServiceID: "s1", Kind: "http_proxy", Sessions: 10},
+		{Day: day, ServiceID: "s1", Kind: "control", Sessions: 2},
+		{Day: day, ServiceID: "s2", Kind: "http_proxy", Sessions: 7},
+		{Day: day, ServiceID: "s2", Kind: "tcp_proxy", Sessions: 4},
+		{Day: day, ServiceID: "s3", Kind: "http_proxy", Sessions: 1},
+	}
+	topIPs := []connlog.TopIP{{IP: "10.0.0.1", Sessions: 3}}
+	keyMap := map[string][]connlog.TopIP{}
+	for _, r := range rollups {
+		keyMap[r.Day+"|"+r.ServiceID+"|"+r.Kind] = topIPs
+	}
+	store := &countingConnLogStore{
+		fakeConnLogStore: fakeConnLogStore{rollups: rollups, topIPs: keyMap},
+	}
+	d := Deps{
+		Log:       discardLog(),
+		Users:     &fakeUserStore{role: "admin"},
+		ConnLogDB: store,
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.get(t, "/api/v1/connection-logs/rollups")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var out []connectionLogRollupResp
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if len(out) != len(rollups) {
+		t.Fatalf("want %d response rows, got %d", len(rollups), len(out))
+	}
+	// Verify all 5 rows carry their TopSourceIPs (sanity that the batch
+	// distribution wired correctly).
+	for i, row := range out {
+		if row.TopSourceIPs == nil || len(*row.TopSourceIPs) != 1 {
+			t.Errorf("row[%d] (%s/%s): want 1 top IP, got %+v",
+				i, row.ServiceID, row.Kind, row.TopSourceIPs)
+		}
+	}
+	// Query budget:
+	//   pre-fix: 1 rollup list + 5 per-group ListConnectionLogRollupTopIPs = 6
+	//   post-fix: 1 rollup list + 1 batched ListConnectionLogRollupTopIPsBatch = 2
+	if store.perGroupCalls != 0 {
+		t.Errorf("per-group ListConnectionLogRollupTopIPs called %d times; want 0", store.perGroupCalls)
+	}
+	if store.batchCalls != 1 {
+		t.Errorf("batched ListConnectionLogRollupTopIPsBatch called %d times; want 1", store.batchCalls)
+	}
+}
+
+// countingConnLogStore wraps fakeConnLogStore and counts which top-IPs
+// accessor the handler calls — the per-group method or the batched method.
+type countingConnLogStore struct {
+	fakeConnLogStore
+	perGroupCalls int
+	batchCalls    int
+}
+
+func (f *countingConnLogStore) ListConnectionLogRollupTopIPs(ctx context.Context, day, serviceID, kind string) ([]connlog.TopIP, error) {
+	f.perGroupCalls++
+	return f.fakeConnLogStore.ListConnectionLogRollupTopIPs(ctx, day, serviceID, kind)
+}
+
+func (f *countingConnLogStore) ListConnectionLogRollupTopIPsBatch(_ context.Context, groups []connlog.TopIPsGroup) (map[connlog.TopIPsGroup][]connlog.TopIP, error) {
+	f.batchCalls++
+	out := make(map[connlog.TopIPsGroup][]connlog.TopIP, len(groups))
+	for _, g := range groups {
+		if rows, ok := f.fakeConnLogStore.topIPs[g.Day+"|"+g.ServiceID+"|"+g.Kind]; ok {
+			out[g] = rows
+		}
+	}
+	return out, nil
 }
 
 // TestConnectionLogsExportNDJSON asserts the export endpoint streams NDJSON.

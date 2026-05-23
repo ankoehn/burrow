@@ -32,6 +32,10 @@ type ConnectionLogStore interface {
 	// calling — when the setting is "false" the handler omits the
 	// top_source_ips field entirely (NOT empty).
 	ListConnectionLogRollupTopIPs(ctx context.Context, day, serviceID, kind string) ([]connlog.TopIP, error)
+	// ListConnectionLogRollupTopIPsBatch returns the persisted top-source-IPs
+	// rows for all requested groups in a single round trip. Replaces the N+1
+	// per-row pattern on the rollups endpoint (v0.5.2 BACKLOG #2).
+	ListConnectionLogRollupTopIPsBatch(ctx context.Context, groups []connlog.TopIPsGroup) (map[connlog.TopIPsGroup][]connlog.TopIP, error)
 }
 
 // connLogDBAdapter wraps *db.DB + connlog helpers to satisfy ConnectionLogStore.
@@ -45,6 +49,9 @@ func (a connLogDBAdapter) ListConnectionLogRollups(ctx context.Context, q connlo
 }
 func (a connLogDBAdapter) ListConnectionLogRollupTopIPs(ctx context.Context, day, serviceID, kind string) ([]connlog.TopIP, error) {
 	return connlog.ListConnectionLogRollupTopIPs(ctx, a.x, day, serviceID, kind)
+}
+func (a connLogDBAdapter) ListConnectionLogRollupTopIPsBatch(ctx context.Context, groups []connlog.TopIPsGroup) (map[connlog.TopIPsGroup][]connlog.TopIP, error) {
+	return connlog.ListConnectionLogRollupTopIPsBatch(ctx, a.x, groups)
 }
 
 // NewConnLogDBAdapter wraps a *db.DB so it satisfies ConnectionLogStore.
@@ -287,17 +294,35 @@ func (d Deps) GetConnectionLogRollups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// When the toggle is enabled, fetch top-IPs for ALL rollup rows in a
+	// single batched query (v0.5.2 BACKLOG #2: N+1 -> 2 round trips). The
+	// result map is keyed by TopIPsGroup{Day, ServiceID, Kind}; a row with
+	// no aux data is absent from the map (-> empty []TopIP via lookup).
+	var topByGroup map[connlog.TopIPsGroup][]connlog.TopIP
+	if topIPsEnabled && len(rows) > 0 {
+		groups := make([]connlog.TopIPsGroup, 0, len(rows))
+		seen := make(map[connlog.TopIPsGroup]struct{}, len(rows))
+		for _, row := range rows {
+			g := connlog.TopIPsGroup{Day: row.Day, ServiceID: row.ServiceID, Kind: row.Kind}
+			if _, dup := seen[g]; dup {
+				continue
+			}
+			seen[g] = struct{}{}
+			groups = append(groups, g)
+		}
+		var berr error
+		topByGroup, berr = d.ConnLogDB.ListConnectionLogRollupTopIPsBatch(r.Context(), groups)
+		if berr != nil {
+			writeErr(w, http.StatusInternalServerError, "list rollups failed")
+			return
+		}
+	}
+
 	out := make([]connectionLogRollupResp, 0, len(rows))
 	for _, row := range rows {
 		resp := toConnectionLogRollupResp(row)
 		if topIPsEnabled {
-			ips, terr := d.ConnLogDB.ListConnectionLogRollupTopIPs(
-				r.Context(), row.Day, row.ServiceID, row.Kind,
-			)
-			if terr != nil {
-				writeErr(w, http.StatusInternalServerError, "list rollups failed")
-				return
-			}
+			ips := topByGroup[connlog.TopIPsGroup{Day: row.Day, ServiceID: row.ServiceID, Kind: row.Kind}]
 			// Pointer-to-slice: a non-nil pointer to an empty slice marshals
 			// as `[]`, a nil pointer is omitted by `omitempty`. This is the
 			// only way to express "toggle ON but no data" distinctly from
