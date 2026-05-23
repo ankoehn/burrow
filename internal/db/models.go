@@ -272,6 +272,12 @@ type ServiceCustomDomain struct {
 	NotAfter   time.Time
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// v0.5.2 Task 10: status state machine.
+	// Status is one of customdomain.StatusPending / StatusActive /
+	// StatusCertExpiring / StatusCertExpired. The daily tick walks
+	// cert-bearing rows and persists transitions via UpdateCustomDomainStatus.
+	Status          string
+	StatusUpdatedAt time.Time
 }
 
 // ConnectionLog is a row of the connection_logs table.

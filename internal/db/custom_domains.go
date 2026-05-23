@@ -71,11 +71,13 @@ func (x *DB) GetCustomDomain(ctx context.Context, serviceID, id string) (Service
 	var d ServiceCustomDomain
 	err := x.sqlDB.QueryRowContext(ctx,
 		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
-		        not_before, not_after, created_at, updated_at
+		        not_before, not_after, created_at, updated_at,
+		        status, status_updated_at
 		   FROM service_custom_domains WHERE id=? AND service_id=?`,
 		id, serviceID,
 	).Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
-		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt)
+		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt,
+		&d.Status, &d.StatusUpdatedAt)
 	if err == sql.ErrNoRows {
 		return ServiceCustomDomain{}, ErrNotFound
 	}
@@ -89,7 +91,8 @@ func (x *DB) GetCustomDomain(ctx context.Context, serviceID, id string) (Service
 func (x *DB) ListCustomDomains(ctx context.Context, serviceID string) ([]ServiceCustomDomain, error) {
 	rows, err := x.sqlDB.QueryContext(ctx,
 		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
-		        not_before, not_after, created_at, updated_at
+		        not_before, not_after, created_at, updated_at,
+		        status, status_updated_at
 		   FROM service_custom_domains WHERE service_id=?
 		   ORDER BY created_at`,
 		serviceID,
@@ -103,7 +106,8 @@ func (x *DB) ListCustomDomains(ctx context.Context, serviceID string) ([]Service
 	for rows.Next() {
 		var d ServiceCustomDomain
 		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
-			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt,
+			&d.Status, &d.StatusUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan custom domain: %w", err)
 		}
 		out = append(out, d)
@@ -131,11 +135,13 @@ func (x *DB) LookupCustomDomainByHostname(ctx context.Context, hostname string) 
 	var d ServiceCustomDomain
 	err := x.sqlDB.QueryRowContext(ctx,
 		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
-		        not_before, not_after, created_at, updated_at
+		        not_before, not_after, created_at, updated_at,
+		        status, status_updated_at
 		   FROM service_custom_domains WHERE hostname=?`,
 		hostname,
 	).Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
-		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt)
+		&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt,
+		&d.Status, &d.StatusUpdatedAt)
 	if err == sql.ErrNoRows {
 		return ServiceCustomDomain{}, ErrNotFound
 	}
@@ -150,7 +156,8 @@ func (x *DB) LookupCustomDomainByHostname(ctx context.Context, hostname string) 
 func (x *DB) ListExpiringCustomDomains(ctx context.Context, cutoff time.Time) ([]ServiceCustomDomain, error) {
 	rows, err := x.sqlDB.QueryContext(ctx,
 		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
-		        not_before, not_after, created_at, updated_at
+		        not_before, not_after, created_at, updated_at,
+		        status, status_updated_at
 		   FROM service_custom_domains WHERE not_after < ?
 		   ORDER BY not_after`,
 		cutoff,
@@ -164,7 +171,8 @@ func (x *DB) ListExpiringCustomDomains(ctx context.Context, cutoff time.Time) ([
 	for rows.Next() {
 		var d ServiceCustomDomain
 		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
-			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt,
+			&d.Status, &d.StatusUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan expiring custom domain: %w", err)
 		}
 		out = append(out, d)
@@ -177,7 +185,8 @@ func (x *DB) ListExpiringCustomDomains(ctx context.Context, cutoff time.Time) ([
 func (x *DB) ListAllCustomDomains(ctx context.Context) ([]ServiceCustomDomain, error) {
 	rows, err := x.sqlDB.QueryContext(ctx,
 		`SELECT id, service_id, hostname, cert_pem, key_pem, cert_sha256,
-		        not_before, not_after, created_at, updated_at
+		        not_before, not_after, created_at, updated_at,
+		        status, status_updated_at
 		   FROM service_custom_domains ORDER BY hostname`,
 	)
 	if err != nil {
@@ -189,12 +198,35 @@ func (x *DB) ListAllCustomDomains(ctx context.Context) ([]ServiceCustomDomain, e
 	for rows.Next() {
 		var d ServiceCustomDomain
 		if err := rows.Scan(&d.ID, &d.ServiceID, &d.Hostname, &d.CertPEM, &d.KeyPEM, &d.CertSHA256,
-			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.NotBefore, &d.NotAfter, &d.CreatedAt, &d.UpdatedAt,
+			&d.Status, &d.StatusUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan custom domain: %w", err)
 		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// UpdateCustomDomainStatus persists a status transition for the row matching
+// id. Status must be one of customdomain.StatusPending / StatusActive /
+// StatusCertExpiring / StatusCertExpired (enforced application-side; the
+// Postgres twin additionally enforces via CHECK). The status_updated_at
+// column is bumped to the current UTC timestamp. Returns ErrNotFound when
+// no row matches.
+func (x *DB) UpdateCustomDomainStatus(ctx context.Context, id, status string) error {
+	now := time.Now().UTC()
+	res, err := x.sqlDB.ExecContext(ctx,
+		`UPDATE service_custom_domains SET status=?, status_updated_at=? WHERE id=?`,
+		status, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update custom domain status: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // isDuplicateError reports whether err is a SQLite UNIQUE constraint violation.
