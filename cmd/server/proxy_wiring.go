@@ -125,6 +125,13 @@ type proxyDialerAdapter struct {
 // empty strings when no matching session is found (e.g. the tunnel just
 // disconnected). Safe to call concurrently — SnapshotSessions holds no lock
 // across the caller; it returns a copy.
+//
+// Hot-path cost: O(N sessions × M tunnels-per-session) per proxied request,
+// plus one full map copy inside SnapshotSessions. Acceptable for home-lab /
+// single-tenant deployments. At company scale, a
+// LookupSessionByTunnelID(tunnelID string) (sessionID, userID string, ok bool)
+// method on *server.Server that probes the registry's existing tunnel index
+// would eliminate the snapshot copy — tracked for v0.5.2 / v0.6.0.
 func (a proxyDialerAdapter) lookupSessionFields(tunnelID string) (userID, sessionID string) {
 	for _, ss := range a.srv.SnapshotSessions() {
 		for _, tv := range ss.Tunnels {
