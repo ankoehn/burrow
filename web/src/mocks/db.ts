@@ -414,12 +414,31 @@ function seedConnectionLogs(): ConnectionLog[] {
 // 3 rollup rows — one per day for the last 3 days, each a different service+kind.
 // Days computed relative to "today" so the default 24h preset always includes
 // the most recent rollup row.
+//
+// v0.5.1 Q12: the first two rows carry a top_source_ips field (toggle ON),
+// the third row leaves it undefined (toggle OFF for that group). This mirrors
+// the real backend's per-(day, service_id, kind) emission policy and lets the
+// component test assert both "field present" and "field omitted" branches.
 function seedConnectionLogRollups(): ConnectionLogRollup[] {
   const dayOffset = (d: number): string =>
     new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
   const days = [dayOffset(2), dayOffset(1), dayOffset(0)];
   const kinds: ConnectionLogRollup["kind"][] = ["http_proxy", "control", "tcp_proxy"];
   const svcIds = ["svc_web01", "svc_ai001", "svc_pg001"];
+  // Layout: index 0 = 2 days ago (toggle OFF, undefined); index 1 = 1 day ago
+  // (toggle ON, has data); index 2 = today (toggle ON, has data). The test's
+  // default 24h date filter selects rows from ~yesterday onward, so index 1
+  // and index 2 are visible and both carry top_source_ips data.
+  const topIPs: (ConnectionLogRollup["top_source_ips"])[] = [
+    undefined,
+    [
+      { ip: "192.168.1.1", sessions: 9 },
+    ],
+    [
+      { ip: "10.0.0.1", sessions: 42 },
+      { ip: "10.0.0.2", sessions: 17 },
+    ],
+  ];
   return days.map((day, i) => ({
     day,
     service_id: svcIds[i]!,
@@ -429,6 +448,7 @@ function seedConnectionLogRollups(): ConnectionLogRollup[] {
     bytes_out: 500_000 * (i + 1),
     avg_duration_ms: 300 + i * 100,
     p95_duration_ms: 900 + i * 200,
+    top_source_ips: topIPs[i],
   }));
 }
 

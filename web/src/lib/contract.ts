@@ -524,6 +524,14 @@ export interface ConnectionLog {
   reason: string;
 }
 
+// ConnectionLogRollupTopIP — one (ip, sessions) entry from the per-rollup
+// top-source-IPs array (v0.5.1 Q12 toggle). Sessions is the per-day
+// per-(service_id, kind) hit count attributed to ip.
+export interface ConnectionLogRollupTopIP {
+  ip: string;
+  sessions: number;
+}
+
 export interface ConnectionLogRollup {
   day: string;
   service_id: string;
@@ -533,6 +541,11 @@ export interface ConnectionLogRollup {
   bytes_out: number;
   avg_duration_ms: number;
   p95_duration_ms: number;
+  // top_source_ips: present when the connection_logs.rollup_include_top_ips
+  // setting is "true" or unset (default true). Absent when the operator has
+  // explicitly disabled the toggle. An empty array means the toggle is ON
+  // but no IPs have been aggregated yet for this group.
+  top_source_ips?: ConnectionLogRollupTopIP[];
 }
 
 // Retention settings (spec Part F).

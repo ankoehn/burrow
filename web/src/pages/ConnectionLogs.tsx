@@ -236,6 +236,13 @@ export default function ConnectionLogs() {
                   <th>Bytes out</th>
                   <th>Avg ms</th>
                   <th>P95 ms</th>
+                  {/* v0.5.1 Q12: render the "Top source IPs" column header
+                      only when at least one row in the page carries the
+                      top_source_ips field. When the operator has the toggle
+                      OFF, the API omits the field entirely → no header. */}
+                  {rollupRows.some((r) => r.top_source_ips !== undefined) && (
+                    <th>Top source IPs</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -251,6 +258,17 @@ export default function ConnectionLogs() {
                     <td className="mono small">{fmtBytes(r.bytes_out)}</td>
                     <td className="mono small">{r.avg_duration_ms}</td>
                     <td className="mono small">{r.p95_duration_ms}</td>
+                    {rollupRows.some((rr) => rr.top_source_ips !== undefined) && (
+                      <td className="mono small" data-testid="top-source-ips">
+                        {r.top_source_ips === undefined
+                          ? ""
+                          : r.top_source_ips.length === 0
+                            ? "—"
+                            : r.top_source_ips
+                                .map((t) => `${t.ip} (${t.sessions})`)
+                                .join(", ")}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
