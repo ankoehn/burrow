@@ -1455,6 +1455,27 @@ paths:
         '204': { description: Resumed. }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/v1/webhooks/{id}/preview:
+    post:
+      tags: [webhooks]
+      summary: Preview a payload template with caller-supplied fields
+      parameters: [ { $ref: '#/components/parameters/PathID' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '200':
+          description: Rendered template body and byte count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ────────────────────────────────────────────────────────────────────────
   # Automation (bearer-token API)
   # ────────────────────────────────────────────────────────────────────────

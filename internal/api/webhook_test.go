@@ -73,6 +73,7 @@ func (f *fakeWebhookStore) UpdateWebhook(_ context.Context, w db.Webhook) error 
 	cur.URL = w.URL
 	cur.Events = w.Events
 	cur.Paused = w.Paused
+	cur.PayloadTemplate = w.PayloadTemplate
 	f.webhooks[w.ID] = cur
 	return nil
 }
@@ -512,6 +513,9 @@ func TestWebhookHandler_NonAdmin_NoPerm_Forbidden(t *testing.T) {
 		{http.MethodPost, "/api/v1/webhooks/wh1/pause", nil},
 		{http.MethodPost, "/api/v1/webhooks/wh1/resume", nil},
 		{http.MethodGet, "/api/v1/webhooks/deliveries", nil},
+		// v0.5.0 Task 10: preview route is also gated by webhooks:manage.
+		{http.MethodPost, "/api/v1/webhooks/wh1/preview", map[string]any{
+			"event": "webhook.test", "fields": map[string]any{}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -563,6 +567,163 @@ func TestWebhookHandler_GetListError(t *testing.T) {
 	r := c.get(t, "/api/v1/webhooks")
 	if r.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d want 500", r.StatusCode)
+	}
+	r.Body.Close()
+}
+
+// ---------------------------------------------------------------------------
+// payload_template on POST / PUT
+// ---------------------------------------------------------------------------
+
+func TestWebhookHandler_PostWithPayloadTemplate(t *testing.T) {
+	_, c, store, _, _ := newWebhookTestServer(t, "admin")
+	body := map[string]any{
+		"name":             "templated",
+		"url":              "https://example.com/wh",
+		"events":           []string{"service.created"},
+		"payload_template": `{"svc":"{{.ServiceID}}"}`,
+	}
+	r := c.post(t, "/api/v1/webhooks", body)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var created webhookResp
+	json.NewDecoder(r.Body).Decode(&created)
+	r.Body.Close()
+
+	stored := store.webhooks[created.ID]
+	if stored.PayloadTemplate != `{"svc":"{{.ServiceID}}"}` {
+		t.Errorf("PayloadTemplate not stored: %q", stored.PayloadTemplate)
+	}
+}
+
+func TestWebhookHandler_PutWithPayloadTemplate(t *testing.T) {
+	_, c, store, _, _ := newWebhookTestServer(t, "admin")
+	store.webhooks["wh1"] = db.Webhook{
+		ID: "wh1", Name: "x", URL: "https://example.com",
+		SecretHash: "h", Events: `["service.created"]`,
+		CreatedAt: time.Now(),
+	}
+	r := c.put(t, "/api/v1/webhooks/wh1", map[string]any{
+		"name":             "x",
+		"url":              "https://example.com",
+		"events":           []string{"service.created"},
+		"payload_template": `svc={{.ServiceID}}`,
+	})
+	if r.StatusCode != http.StatusNoContent {
+		t.Fatalf("PUT status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	r.Body.Close()
+	if store.webhooks["wh1"].PayloadTemplate != `svc={{.ServiceID}}` {
+		t.Errorf("PayloadTemplate not updated: %q", store.webhooks["wh1"].PayloadTemplate)
+	}
+}
+
+func TestWebhookHandler_PostInvalidTemplate_Returns400(t *testing.T) {
+	_, c, _, _, _ := newWebhookTestServer(t, "admin")
+	r := c.post(t, "/api/v1/webhooks", map[string]any{
+		"name":             "bad-template",
+		"url":              "https://example.com/wh",
+		"events":           []string{"service.created"},
+		"payload_template": `{{exec "ls"}}`, // exec is not in allowlist
+	})
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid template status=%d want 400 body=%s", r.StatusCode, readBody(t, r))
+	}
+	r.Body.Close()
+}
+
+// ---------------------------------------------------------------------------
+// /preview endpoint
+// ---------------------------------------------------------------------------
+
+func TestWebhookPreviewRendersTemplateWithFields(t *testing.T) {
+	_, c, store, _, _ := newWebhookTestServer(t, "admin")
+	store.webhooks["wh1"] = db.Webhook{
+		ID: "wh1", Name: "x", URL: "https://example.com",
+		SecretHash:      "h",
+		Events:          `["ai.upstream_error"]`,
+		PayloadTemplate: `svc={{.ServiceID}},status={{.Status}}`,
+		CreatedAt:       time.Now(),
+	}
+	r := c.post(t, "/api/v1/webhooks/wh1/preview", map[string]any{
+		"event":  "ai.upstream_error",
+		"fields": map[string]any{"ServiceID": "svc-1", "Status": 502},
+	})
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var resp previewResp
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode preview response: %v", err)
+	}
+	r.Body.Close()
+	if resp.Rendered != "svc=svc-1,status=502" {
+		t.Errorf("rendered=%q want svc=svc-1,status=502", resp.Rendered)
+	}
+	if resp.SizeBytes != len(resp.Rendered) {
+		t.Errorf("size_bytes=%d want %d", resp.SizeBytes, len(resp.Rendered))
+	}
+}
+
+func TestWebhookPreviewDefaultBodyWhenNoTemplate(t *testing.T) {
+	_, c, store, _, _ := newWebhookTestServer(t, "admin")
+	store.webhooks["wh1"] = db.Webhook{
+		ID: "wh1", Name: "x", URL: "https://example.com",
+		SecretHash: "h", Events: `["service.created"]`,
+		// PayloadTemplate intentionally empty
+		CreatedAt: time.Now(),
+	}
+	r := c.post(t, "/api/v1/webhooks/wh1/preview", map[string]any{
+		"event":  "service.created",
+		"fields": map[string]any{"ServiceID": "svc-99"},
+	})
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", r.StatusCode, readBody(t, r))
+	}
+	var resp previewResp
+	json.NewDecoder(r.Body).Decode(&resp)
+	r.Body.Close()
+	// Default body must contain the event name and fields.
+	if !strings.Contains(resp.Rendered, "service.created") {
+		t.Errorf("default preview body missing event: %q", resp.Rendered)
+	}
+	if !strings.Contains(resp.Rendered, "svc-99") {
+		t.Errorf("default preview body missing field: %q", resp.Rendered)
+	}
+	if resp.SizeBytes != len(resp.Rendered) {
+		t.Errorf("size_bytes=%d want %d", resp.SizeBytes, len(resp.Rendered))
+	}
+}
+
+func TestWebhookPreview_404OnMissingWebhook(t *testing.T) {
+	_, c, _, _, _ := newWebhookTestServer(t, "admin")
+	r := c.post(t, "/api/v1/webhooks/missing/preview", map[string]any{
+		"event":  "webhook.test",
+		"fields": map[string]any{},
+	})
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d want 404", r.StatusCode)
+	}
+	r.Body.Close()
+}
+
+func TestWebhookPreview_400OnBadTemplate(t *testing.T) {
+	_, c, store, _, _ := newWebhookTestServer(t, "admin")
+	// Store a webhook with an ALREADY-bad template (simulates a corrupted store).
+	store.webhooks["wh1"] = db.Webhook{
+		ID: "wh1", Name: "x", URL: "https://example.com",
+		SecretHash:      "h",
+		Events:          `["webhook.test"]`,
+		PayloadTemplate: `{{exec "ls"}}`, // invalid at render time too
+		CreatedAt:       time.Now(),
+	}
+	r := c.post(t, "/api/v1/webhooks/wh1/preview", map[string]any{
+		"event":  "webhook.test",
+		"fields": map[string]any{},
+	})
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad template preview status=%d want 400 body=%s", r.StatusCode, readBody(t, r))
 	}
 	r.Body.Close()
 }

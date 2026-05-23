@@ -299,6 +299,8 @@ func NewRouter(d Deps) http.Handler {
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/pause", d.PostWebhookPause)
 			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/resume", d.PostWebhookResume)
 			r.With(d.requireWebhooksManage).Get("/webhooks/deliveries", d.GetWebhookDeliveries)
+			// v0.5.0 Task 10: payload-template preview endpoint.
+			r.With(d.requireWebhooksManage).Post("/webhooks/{id}/preview", d.PostWebhookPreview)
 			// v0.4.0 Task 18: automation API + bearer-tokens (spec Part M).
 			// Every route gates on admin OR
 			// automation:tokens:manage:own / :any (the store narrows what

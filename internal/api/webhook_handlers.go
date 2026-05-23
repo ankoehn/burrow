@@ -20,6 +20,7 @@ import (
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/webhook"
+	wtemplate "github.com/ankoehn/burrow/internal/webhook/template"
 )
 
 // WebhookStore is the narrow CRUD surface the webhook handlers consume.
@@ -135,15 +136,16 @@ func toWebhookResp(w db.Webhook) webhookResp {
 
 // webhookReq is the wire shape for POST + PUT bodies.
 type webhookReq struct {
-	Name   string   `json:"name"`
-	URL    string   `json:"url"`
-	Events []string `json:"events"`
-	Paused bool     `json:"paused"`
+	Name            string   `json:"name"`
+	URL             string   `json:"url"`
+	Events          []string `json:"events"`
+	Paused          bool     `json:"paused"`
+	PayloadTemplate string   `json:"payload_template,omitempty"` // v0.5.0: optional Go template
 }
 
 // validateWebhookReq returns "" on success or a user-visible 400 message.
 // Events must be non-empty and every entry must be in the spec-closed
-// vocabulary.
+// vocabulary. An optional payload_template is validated via wtemplate.Validate.
 func validateWebhookReq(in webhookReq) string {
 	if strings.TrimSpace(in.Name) == "" {
 		return "name is required"
@@ -164,6 +166,17 @@ func validateWebhookReq(in webhookReq) string {
 	for _, e := range in.Events {
 		if !webhook.IsClosedEvent(e) {
 			return "events contains an unknown event: " + e
+		}
+	}
+	// Validate the payload_template against the first subscribed event so
+	// function-misuse is caught at create/update time, not at delivery time.
+	if in.PayloadTemplate != "" {
+		event := ""
+		if len(in.Events) > 0 {
+			event = in.Events[0]
+		}
+		if err := wtemplate.Validate(event, in.PayloadTemplate); err != nil {
+			return "payload_template invalid: " + err.Error()
 		}
 	}
 	return ""
@@ -262,12 +275,13 @@ func (d Deps) PostWebhook(w http.ResponseWriter, r *http.Request) {
 	hash := sha256.Sum256([]byte(secret))
 	eventsJSON, _ := json.Marshal(in.Events)
 	row := db.Webhook{
-		ID:         uuid.NewString(),
-		Name:       in.Name,
-		URL:        in.URL,
-		SecretHash: hex.EncodeToString(hash[:]),
-		Events:     string(eventsJSON),
-		Paused:     in.Paused,
+		ID:              uuid.NewString(),
+		Name:            in.Name,
+		URL:             in.URL,
+		SecretHash:      hex.EncodeToString(hash[:]),
+		Events:          string(eventsJSON),
+		Paused:          in.Paused,
+		PayloadTemplate: in.PayloadTemplate,
 	}
 	if err := d.Webhooks.CreateWebhook(r.Context(), row); err != nil {
 		writeErr(w, http.StatusInternalServerError, "create webhook failed")
@@ -326,11 +340,12 @@ func (d Deps) PutWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	eventsJSON, _ := json.Marshal(in.Events)
 	row := db.Webhook{
-		ID:     id,
-		Name:   in.Name,
-		URL:    in.URL,
-		Events: string(eventsJSON),
-		Paused: in.Paused,
+		ID:              id,
+		Name:            in.Name,
+		URL:             in.URL,
+		Events:          string(eventsJSON),
+		Paused:          in.Paused,
+		PayloadTemplate: in.PayloadTemplate,
 	}
 	if err := d.Webhooks.UpdateWebhook(r.Context(), row); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -405,6 +420,95 @@ func (d Deps) PostWebhookTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- POST /api/v1/webhooks/{id}/preview ------------------------------------
+
+// previewReq is the wire shape for the preview endpoint.
+type previewReq struct {
+	Event  string         `json:"event"`
+	Fields map[string]any `json:"fields"`
+}
+
+// previewResp is the wire shape for the preview response.
+type previewResp struct {
+	Rendered  string `json:"rendered"`
+	SizeBytes int    `json:"size_bytes"`
+}
+
+// PostWebhookPreview handles POST /api/v1/webhooks/{id}/preview.
+//
+// If the webhook has a non-empty PayloadTemplate, it is rendered with the
+// caller-supplied fields. If the template is empty, the default v0.4.0
+// {"event":…,"data":…} body is produced using the provided fields.
+//
+// Returns 200 {"rendered":"…","size_bytes":N} on success, 400 when the
+// template fails to render, 404 when the webhook is not found.
+func (d Deps) PostWebhookPreview(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	if d.Webhooks == nil {
+		writeErr(w, http.StatusInternalServerError, "webhook store unavailable")
+		return
+	}
+	wh, err := d.Webhooks.GetWebhook(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var in previewReq
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+	}
+	if in.Fields == nil {
+		in.Fields = map[string]any{}
+	}
+
+	var rendered []byte
+	var sizeBytes int
+
+	if wh.PayloadTemplate != "" {
+		// Render the webhook's stored template with the caller-supplied fields.
+		rendered, sizeBytes, err = wtemplate.Render(wh.PayloadTemplate, in.Fields)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "template render error: "+err.Error())
+			return
+		}
+	} else {
+		// Default body: mirror the dispatcher's default {"event":…,"data":…} envelope.
+		defaultBody, merr := json.Marshal(map[string]any{
+			"event": in.Event,
+			"data":  in.Fields,
+		})
+		if merr != nil {
+			writeErr(w, http.StatusInternalServerError, "marshal default body failed")
+			return
+		}
+		rendered = defaultBody
+		sizeBytes = len(defaultBody)
+	}
+
+	writeJSON(w, http.StatusOK, previewResp{
+		Rendered:  string(rendered),
+		SizeBytes: sizeBytes,
+	})
 }
 
 // --- POST /api/v1/webhooks/{id}/pause + /resume -----------------------------
