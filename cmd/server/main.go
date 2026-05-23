@@ -526,7 +526,13 @@ func main() {
 				// adapter shim translates proxy.ConnLogEntry into the
 				// concrete connlog.Entry — kept here (not in internal/proxy)
 				// so the proxy package stays import-free of connlog.
-				connLogSink := connlog.NewSQLSink(db.Wrap(database), log)
+				//
+				// v0.5.1 P2.1 (Task 5): pass the store as the settings
+				// reader so SQLSink.Rollup honours the
+				// connection_logs.rollup_include_top_ips toggle. The
+				// settings reader is only consulted on the daily rollup
+				// compaction path, NOT the per-connection Record hot path.
+				connLogSink := connlog.NewSQLSink(db.Wrap(database), log).WithSettings(st)
 				// v0.5.0 F-14: wire the custom-domain routing hook. The proxy
 				// invokes this closure when the inbound Host header does NOT
 				// end with ".<authDomain>" (proxy.go:285 — the dead-code

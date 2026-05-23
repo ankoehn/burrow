@@ -226,6 +226,137 @@ func TestRecordHonoursDetachedContext(t *testing.T) {
 	t.Fatal("entry never landed in DB despite pre-cancelled caller context")
 }
 
+// fakeSettingsReader is a minimal in-memory settingsReader for tests.
+type fakeSettingsReader struct {
+	m map[string]string
+}
+
+func (f *fakeSettingsReader) GetSettings(_ context.Context) (map[string]string, error) {
+	if f.m == nil {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(f.m))
+	for k, v := range f.m {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// TestRollup_TopIPsToggle verifies the Q12 toggle behaviour:
+//   - When the setting is unset (default) or "true", Rollup populates the top
+//     10 source IPs per (day, service_id, kind) group into
+//     connection_log_rollup_top_ips.
+//   - When the setting flips to "false", the next Rollup deletes any existing
+//     rows for the affected (day, service_id, kind) groups AND skips the
+//     aggregation step.
+func TestRollup_TopIPsToggle(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+
+	seedUser(t, x, "u1")
+	seedService(t, x, "s1", "u1")
+
+	settings := &fakeSettingsReader{m: map[string]string{}}
+	sink := NewSQLSink(x, nil).WithSettings(settings)
+
+	day := time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)
+	base := day.Add(1 * time.Hour)
+
+	// Seed 15 distinct source IPs with varied session counts so the top-10
+	// truncation is observable. IP "1.2.3.<n>" has n+1 sessions (n=0..14).
+	id := 0
+	for n := 0; n < 15; n++ {
+		ip := fmt.Sprintf("1.2.3.%d", n)
+		for s := 0; s <= n; s++ {
+			start := base.Add(time.Duration(id) * time.Millisecond)
+			end := start.Add(50 * time.Millisecond)
+			_, err := x.DB().ExecContext(ctx,
+				`INSERT INTO connection_logs
+				  (id, kind, service_id, source_ip, started_at, ended_at,
+				   duration_ms, bytes_in, bytes_out, status)
+				 VALUES (?,?,?,?,?,?,?,0,0,'closed_clean')`,
+				fmt.Sprintf("toggle-%03d", id),
+				"http_proxy", "s1", ip,
+				start.UTC(), end.UTC(), 50,
+			)
+			if err != nil {
+				t.Fatalf("insert[%d]: %v", id, err)
+			}
+			id++
+		}
+	}
+
+	// Default (unset setting) → toggle is ON.
+	if err := sink.Rollup(ctx, day); err != nil {
+		t.Fatalf("Rollup(default): %v", err)
+	}
+	var topCount int
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		day.Format("2006-01-02"),
+	).Scan(&topCount)
+	if topCount != 10 {
+		t.Fatalf("default toggle ON: want 10 top-ip rows, got %d", topCount)
+	}
+
+	// Top row should be 1.2.3.14 with 15 sessions (largest group).
+	var topIP string
+	var topSessions int64
+	if err := x.DB().QueryRowContext(ctx,
+		`SELECT ip, sessions FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'
+		  ORDER BY sessions DESC LIMIT 1`,
+		day.Format("2006-01-02"),
+	).Scan(&topIP, &topSessions); err != nil {
+		t.Fatalf("query top row: %v", err)
+	}
+	if topIP != "1.2.3.14" || topSessions != 15 {
+		t.Errorf("want top=1.2.3.14/15, got %s/%d", topIP, topSessions)
+	}
+
+	// Flip OFF and re-run.
+	settings.m["connection_logs.rollup_include_top_ips"] = "false"
+	if err := sink.Rollup(ctx, day); err != nil {
+		t.Fatalf("Rollup(off): %v", err)
+	}
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		day.Format("2006-01-02"),
+	).Scan(&topCount)
+	if topCount != 0 {
+		t.Fatalf("toggle OFF: want 0 top-ip rows (deleted), got %d", topCount)
+	}
+
+	// Flip back ON via explicit "true" and re-run.
+	settings.m["connection_logs.rollup_include_top_ips"] = "true"
+	if err := sink.Rollup(ctx, day); err != nil {
+		t.Fatalf("Rollup(on): %v", err)
+	}
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollup_top_ips
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		day.Format("2006-01-02"),
+	).Scan(&topCount)
+	if topCount != 10 {
+		t.Fatalf("toggle ON re-enable: want 10 top-ip rows, got %d", topCount)
+	}
+
+	// The base connection_log_rollups row count must remain 1 across all
+	// toggles (the toggle only affects the aux table, not the per-group
+	// rollup).
+	var rollupCount int
+	_ = x.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM connection_log_rollups
+		  WHERE day=? AND service_id='s1' AND kind='http_proxy'`,
+		day.Format("2006-01-02"),
+	).Scan(&rollupCount)
+	if rollupCount != 1 {
+		t.Errorf("base rollup row count want 1, got %d", rollupCount)
+	}
+}
+
 // TestRollupIdempotentAndComputesP95 inserts 100 entries with durations
 // 100..199 ms for one service/day, runs Rollup twice, and asserts:
 //   - exactly 1 rollup row exists (idempotent),

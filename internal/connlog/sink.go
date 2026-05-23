@@ -73,10 +73,21 @@ type Sink interface {
 	Record(ctx context.Context, e Entry) error
 }
 
+// SettingsReader is the narrow read surface SQLSink needs to honour the
+// connection_logs.rollup_include_top_ips toggle (Q12, v0.5.1 Task 5). The
+// production caller satisfies it via *store.Store; tests use a small in-memory
+// fake. Optional: when settings is nil, Rollup behaves as if the toggle is
+// "true" (i.e. the default — top IPs ARE aggregated). This matches the
+// "missing row = enabled" default policy documented on the toggle.
+type SettingsReader interface {
+	GetSettings(ctx context.Context) (map[string]string, error)
+}
+
 // SQLSink is the production Sink backed by the Burrow SQLite database.
 type SQLSink struct {
-	b   *db.DB
-	log *slog.Logger
+	b        *db.DB
+	log      *slog.Logger
+	settings SettingsReader // optional; nil → default-true for the Q12 toggle.
 }
 
 // NewSQLSink constructs a SQLSink. log may be nil; slog.Default() is used in
@@ -86,6 +97,20 @@ func NewSQLSink(b *db.DB, log *slog.Logger) *SQLSink {
 		log = slog.Default()
 	}
 	return &SQLSink{b: b, log: log}
+}
+
+// WithSettings returns a SQLSink that consults s for compaction-time toggles.
+// The only toggle currently honoured is connection_logs.rollup_include_top_ips
+// (default true when the row is missing) which gates the top-source-IPs
+// aggregation in Rollup. Returning the receiver (after mutation) lets callers
+// chain the constructor in one line. Production callsite: cmd/server/main.go
+// — pass the *store.Store via this method right after NewSQLSink.
+func (s *SQLSink) WithSettings(r SettingsReader) *SQLSink {
+	if s == nil {
+		return nil
+	}
+	s.settings = r
+	return s
 }
 
 // Record persists e into connection_logs. The actual INSERT is run in a
@@ -387,6 +412,11 @@ func (s *SQLSink) Rollup(ctx context.Context, day time.Time) error {
 	// We need to close before re-querying.
 	groupRows.Close()
 
+	// Resolve the top-IPs toggle (Q12, v0.5.1 Task 5). Default true — missing
+	// row, missing settings reader, OR an unparseable value all evaluate to
+	// enabled. Only an explicit "false" disables the aggregation.
+	topIPsEnabled := s.topIPsEnabled(ctx)
+
 	// For each group, compute p95 from raw durations.
 	for _, g := range groupOrder {
 		p95, err := s.computeP95(ctx, dayStr, g.serviceID, g.kind)
@@ -410,6 +440,117 @@ func (s *SQLSink) Rollup(ctx context.Context, day time.Time) error {
 		)
 		if err != nil {
 			return fmt.Errorf("rollup upsert %s/%s: %w", g.serviceID, g.kind, err)
+		}
+
+		// Top source IPs sub-step (Q12).
+		if topIPsEnabled {
+			if err := s.upsertTopIPs(ctx, dayStr, g.serviceID, g.kind); err != nil {
+				return fmt.Errorf("rollup top_ips %s/%s: %w", g.serviceID, g.kind, err)
+			}
+		} else {
+			// Setting flipped off: scrub any pre-existing aux rows for this
+			// (day, service_id, kind) so the read path no longer surfaces
+			// stale top-IP data.
+			if _, err := s.b.DB().ExecContext(ctx,
+				`DELETE FROM connection_log_rollup_top_ips
+				  WHERE day = ? AND service_id = ? AND kind = ?`,
+				dayStr, g.serviceID, g.kind,
+			); err != nil {
+				return fmt.Errorf("rollup top_ips delete %s/%s: %w", g.serviceID, g.kind, err)
+			}
+		}
+	}
+	return nil
+}
+
+// topIPsEnabled returns the effective value of the
+// connection_logs.rollup_include_top_ips setting. Default-true policy: a
+// missing settings reader, a missing key, or any value other than "false"
+// evaluates to enabled.
+func (s *SQLSink) topIPsEnabled(ctx context.Context) bool {
+	if s == nil || s.settings == nil {
+		return true
+	}
+	m, err := s.settings.GetSettings(ctx)
+	if err != nil {
+		s.log.Warn("connlog: GetSettings failed; assuming top_ips=true",
+			slog.String("err", err.Error()))
+		return true
+	}
+	v, ok := m["connection_logs.rollup_include_top_ips"]
+	if !ok {
+		return true
+	}
+	return v != "false"
+}
+
+// topIPsLimit is the per-(day, service_id, kind) cap on top-source-IP rows
+// upserted by Rollup. Per the v0.5.1 plan / spec Q12.
+const topIPsLimit = 10
+
+// upsertTopIPs computes the top 10 source IPs by session count for the given
+// (day, serviceID, kind) group and upserts them into
+// connection_log_rollup_top_ips. Any pre-existing rows for that group that
+// are NOT in the new top-10 set are deleted (so a re-rolled day doesn't leak
+// stale low-count entries). Idempotent: re-running with the same underlying
+// connection_logs rows yields identical aux-table contents.
+func (s *SQLSink) upsertTopIPs(ctx context.Context, dayStr, serviceID, kind string) error {
+	rows, err := s.b.DB().QueryContext(ctx,
+		`SELECT source_ip, COUNT(*) AS sessions
+		   FROM connection_logs
+		  WHERE substr(started_at,1,10) = ?
+		    AND COALESCE(service_id,'') = ?
+		    AND kind = ?
+		  GROUP BY source_ip
+		  ORDER BY sessions DESC, source_ip ASC
+		  LIMIT ?`,
+		dayStr, serviceID, kind, topIPsLimit,
+	)
+	if err != nil {
+		return fmt.Errorf("top_ips query: %w", err)
+	}
+	type ipRow struct {
+		ip       string
+		sessions int64
+	}
+	var top []ipRow
+	for rows.Next() {
+		var r ipRow
+		if err := rows.Scan(&r.ip, &r.sessions); err != nil {
+			rows.Close()
+			return fmt.Errorf("top_ips scan: %w", err)
+		}
+		top = append(top, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("top_ips rows: %w", err)
+	}
+	rows.Close()
+
+	// Two-phase: delete prior aux rows for this group, then insert the new
+	// top-N. The delete is unconditional so a previously larger top-N (or a
+	// previously different set of IPs) does not leak rows. Concurrent reads
+	// will briefly see an empty top-IPs set for the group; this is acceptable
+	// because Rollup is a daily compaction (not a hot path) and the read
+	// surface always reflects the latest compaction's view.
+	if _, err := s.b.DB().ExecContext(ctx,
+		`DELETE FROM connection_log_rollup_top_ips
+		  WHERE day = ? AND service_id = ? AND kind = ?`,
+		dayStr, serviceID, kind,
+	); err != nil {
+		return fmt.Errorf("top_ips clear: %w", err)
+	}
+	for _, r := range top {
+		if _, err := s.b.DB().ExecContext(ctx,
+			`INSERT INTO connection_log_rollup_top_ips
+			  (day, service_id, kind, ip, sessions)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(day, service_id, kind, ip) DO UPDATE SET
+			   sessions = excluded.sessions`,
+			dayStr, serviceID, kind, r.ip, r.sessions,
+		); err != nil {
+			return fmt.Errorf("top_ips upsert: %w", err)
 		}
 	}
 	return nil

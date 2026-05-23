@@ -11,12 +11,20 @@ import (
 // allowedSettingKeys is the whitelist of non-secret settings the API will
 // read back and persist. smtp.password is intentionally absent — the SMTP
 // secret comes from BURROW_SMTP_PASSWORD(_FILE) and is NEVER stored in the DB.
+//
+// connection_logs.rollup_include_top_ips (Q12, v0.5.1 Task 5): when "true" or
+// missing, SQLSink.Rollup populates the top 10 source IPs per (day,
+// service_id, kind) into connection_log_rollup_top_ips and the rollups read
+// path emits a top_source_ips array. When "false", the aggregation is
+// skipped AND any pre-existing aux rows are scrubbed. Default-true policy:
+// the row need not be seeded.
 var allowedSettingKeys = map[string]bool{
 	"smtp.host":     true,
 	"smtp.port":     true,
 	"smtp.username": true,
 	"smtp.from":     true,
 	"smtp.tls":      true,
+	"connection_logs.rollup_include_top_ips": true,
 }
 
 // GetSettings returns the non-secret settings map (admin only). GET /api/v1/settings
