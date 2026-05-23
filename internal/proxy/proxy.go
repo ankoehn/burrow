@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/ankoehn/burrow/pkg/clientip"
 )
@@ -85,6 +86,64 @@ type Proxy struct {
 	// should receive the request, or ok=false when no custom domain matches.
 	// cmd/server wiring is deferred to Task 17.
 	customDomainLookup func(ctx context.Context, host string) (serviceID string, ok bool, err error)
+
+	// v0.5.0 Task 8: per-connection log sink. When non-nil, the proxy calls
+	// connLogSink.Record on each request close with kind=http_proxy. The
+	// conn-level byte accounting and deferred Record call are implemented in
+	// serveResolved / serveCustomDomain.
+	//
+	// Full instrumentation (byte-counting transport wrapper, status mapping,
+	// closed_idle timeout detection) is wired by Task 17 (cmd/server). This
+	// field declares the Sink attachment point so Task 17 can wire it without
+	// changes to this file.
+	//
+	// ConnLogSink is an interface alias to avoid importing internal/connlog
+	// from the proxy package (which would add connlog to the data-plane import
+	// graph). The concrete *connlog.SQLSink satisfies it.
+	connLogSink ConnLogSink
+}
+
+// ConnLogSink is the interface the proxy uses to record a per-request
+// connection log entry. *connlog.SQLSink satisfies it. Declared here (not in
+// internal/connlog) to keep the proxy package free of the connlog import on
+// the data-plane hot path — the concrete type is injected by cmd/server via
+// WithConnLogSink.
+//
+// Full instrumentation (byte-counting transport wrapper, closed_error /
+// closed_idle status detection, bytes_in / bytes_out accounting) is deferred
+// to Task 17. In v0.5.0 Task 8 the sink field is declared and the Option is
+// registered; the actual Record calls land in Task 17.
+type ConnLogSink interface {
+	Record(ctx context.Context, e ConnLogEntry) error
+}
+
+// ConnLogEntry is the subset of connlog.Entry the proxy needs to record an
+// http_proxy connection. cmd/server passes a thin adapter that converts this
+// into a connlog.Entry before calling connlog.SQLSink.Record. The adapter
+// lives in cmd/server so the proxy package stays import-free of connlog.
+type ConnLogEntry struct {
+	Kind            string // "http_proxy" | "tcp_proxy"
+	ServiceID       string
+	TunnelID        string
+	UserID          string
+	ClientSessionID string
+	SourceIP        string
+	UserAgent       string
+	StartedAt       time.Time
+	EndedAt         time.Time
+	BytesIn         int64
+	BytesOut        int64
+	Status          string // "closed_clean" | "closed_error" | "closed_idle" | "rejected"
+	Reason          string
+}
+
+// WithConnLogSink registers the v0.5.0 connection-log sink. When non-nil,
+// the proxy will call sink.Record on each closed request. Full byte-counting
+// instrumentation (bytes_in / bytes_out via transport wrapper, status
+// mapping, idle timeout) is wired by Task 17 (cmd/server). In v0.5.0 Task 8
+// this option registers the field; Task 17 activates the Record calls.
+func WithConnLogSink(sink ConnLogSink) Option {
+	return func(p *Proxy) { p.connLogSink = sink }
 }
 
 // New constructs a Proxy.

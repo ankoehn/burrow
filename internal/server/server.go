@@ -74,6 +74,19 @@ type TunnelView struct {
 	Connected  bool
 }
 
+// ControlSessionSink is the interface the server uses to record a
+// kind=control connection-log entry on yamux session close. The concrete
+// *connlog.SQLSink satisfies it via a thin cmd/server adapter. Declared here
+// (not in internal/connlog) to keep the server package import-free of
+// connlog on the data-plane path.
+//
+// Full instrumentation is wired by Task 17 (cmd/server). In v0.5.0 Task 8
+// this field is declared in Options so Task 17 can inject the sink without
+// changes to this file.
+type ControlSessionSink interface {
+	RecordControl(ctx context.Context, sessionID, userID, remoteAddr string, startedAt, endedAt time.Time)
+}
+
 // Options configures a Server.
 type Options struct {
 	Listen     string
@@ -94,6 +107,10 @@ type Options struct {
 	// → hostname "k7p2qx.tunnels.example.com"). When empty, Hostname is returned
 	// as "" (degraded mode — subdomain is still assigned on the tunnel).
 	AuthDomain string
+	// ConnLog is the optional connection-log sink for control sessions.
+	// When non-nil, handleConn emits a kind=control entry on yamux session
+	// close. Wired by Task 17 (cmd/server); nil means no logging.
+	ConnLog ControlSessionSink
 }
 
 // Server is the burrowd relay control server.
