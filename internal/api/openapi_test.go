@@ -425,6 +425,10 @@ func (*fullDepsStub) SetAccessPolicy(context.Context, string, string, string, []
 	stubPanic("SetAccessPolicy")
 	return nil
 }
+func (*fullDepsStub) CreateService(context.Context, db.Service) error {
+	stubPanic("CreateService")
+	return nil
+}
 
 // LiveTunnelLookup.
 func (*fullDepsStub) LookupByServiceID(string) (LiveTunnelSnapshot, bool) {

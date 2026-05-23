@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/store"
@@ -349,6 +351,141 @@ func (d Deps) GetAccessPolicy(w http.ResponseWriter, r *http.Request) {
 
 type setAccessPolicyReq struct {
 	Roles []string `json:"roles"`
+}
+
+// ─── v0.5.2 P3.6 / Task 9: admin POST /api/v1/services ──────────────────────
+
+// postServiceReq is the wire shape of POST /api/v1/services. service_id is
+// REQUIRED and validated against serviceIDRe; title, hostname, and access_mode
+// are optional (access_mode defaults to "public").
+type postServiceReq struct {
+	ServiceID  string `json:"service_id"`
+	Title      string `json:"title,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	AccessMode string `json:"access_mode,omitempty"`
+}
+
+// serviceIDRe is the validation regex for the pre-provisioning service_id.
+// Lowercase alphanum + underscore/hyphen, 3-64 chars. Tighter than the legacy
+// client-supplied name field (which the GetOrCreateService upsert path keeps
+// permissive). Mirrors the docs/openapi.yaml constraint exactly.
+var serviceIDRe = regexp.MustCompile(`^[a-z0-9_-]{3,64}$`)
+
+// postServiceAccessModes is the closed set of access_mode values accepted by
+// POST /services. Mirrors the openapi.yaml enum. "open"/"api_key"/
+// "burrow_login"/"mtls" are the runtime enum on the services row, but the
+// admin POST surfaces the more intuitive "public" alias (mapped to "open"
+// in the stored row) so dashboards / e2e flows can use the shape from the
+// spec without translating.
+var postServiceAccessModes = map[string]string{
+	"public":       "open",
+	"open":         "open",
+	"api_key":      "api_key",
+	"burrow_login": "burrow_login",
+}
+
+// PostService handles POST /api/v1/services — admin pre-provisioning of a
+// service row (v0.5.2 P3.6 / Task 9). Permission: admin (gated by
+// RequireAdmin in router.go; the handler does no second check).
+//
+// Body: { service_id (req), title?, hostname?, access_mode? }.
+//   - service_id matches ^[a-z0-9_-]{3,64}$.
+//   - title is stored on the services.name column (max 120 chars).
+//   - access_mode defaults to "public" (mapped to the stored enum value "open").
+//
+// On UNIQUE violation returns 409. On success returns 201 with
+// { id, created_at }. The audit event is `service.create` with payload
+// `{by_admin: true}` so downstream consumers can distinguish admin
+// pre-provisioning from the implicit client-side GetOrCreateService path.
+func (d Deps) PostService(w http.ResponseWriter, r *http.Request) {
+	// 8 KiB accommodates any reasonable title; far below the JSON timeout
+	// budget. Mirrors createAPIKey's MaxBytesReader posture.
+	r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
+	var in postServiceReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate service_id.
+	if !serviceIDRe.MatchString(in.ServiceID) {
+		writeErr(w, http.StatusBadRequest, "service_id must match ^[a-z0-9_-]{3,64}$")
+		return
+	}
+
+	// Default + validate access_mode.
+	if in.AccessMode == "" {
+		in.AccessMode = "public"
+	}
+	storedMode, ok := postServiceAccessModes[in.AccessMode]
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "access_mode must be one of: public, open, api_key, burrow_login")
+		return
+	}
+	if storedMode == "burrow_login" && d.AuthDomain == "" {
+		// Mirrors the SetServiceAccessMode rejection in the same handler
+		// file — burrow_login requires a configured auth_domain.
+		writeErr(w, http.StatusConflict, "burrow_login requires a configured auth_domain")
+		return
+	}
+
+	// Validate title length.
+	if len(in.Title) > 120 {
+		writeErr(w, http.StatusBadRequest, "title must be at most 120 chars")
+		return
+	}
+
+	// Store availability check.
+	if d.Services == nil {
+		writeErr(w, http.StatusInternalServerError, "service store unavailable")
+		return
+	}
+
+	// Compose the row. user_id is the authenticated admin so the service is
+	// owned by the operator that pre-provisioned it (consistent with how the
+	// client-side GetOrCreateService path scopes ownership to the caller).
+	now := time.Now().UTC()
+	row := db.Service{
+		ID:           in.ServiceID,
+		UserID:       userID(r.Context()),
+		Name:         in.Title,
+		Type:         "http", // pre-provisioned rows are http by default; tcp services are bound by the client at connect time
+		Subdomain:    "",     // hostname is informational here; subdomain stays empty until the client connects
+		AccessMode:   storedMode,
+		APIKeyHeader: "Authorization",
+		CreatedAt:    now,
+	}
+	if err := d.Services.CreateService(r.Context(), row); err != nil {
+		if errors.Is(err, db.ErrDuplicateService) {
+			writeErr(w, http.StatusConflict, "service already exists")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Audit (best-effort). The action is ActionServiceCreate ("service.create");
+	// the payload carries `by_admin: true` so consumers can distinguish admin
+	// pre-provisioning from the implicit client-side GetOrCreateService path.
+	if d.AuditAppender != nil {
+		lc := audit.LogContextFrom(r.Context())
+		_ = d.AuditAppender.Append(r.Context(), audit.Event{
+			ActorID: lc.ActorID, ActorEmail: lc.ActorEmail,
+			Action:    audit.ActionServiceCreate,
+			SubjectID: row.ID, SubjectLabel: row.Name,
+			Result:   "ok",
+			SourceIP: lc.SourceIP, UserAgent: lc.UserAgent, RequestID: lc.RequestID,
+			Payload: audit.MustJSON(map[string]any{
+				"by_admin":    true,
+				"access_mode": storedMode,
+			}),
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":         row.ID,
+		"created_at": now.Format(time.RFC3339),
+	})
 }
 
 // SetAccessPolicy handles PUT /api/v1/services/{serviceID}/access-policy.

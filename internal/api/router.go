@@ -380,6 +380,12 @@ func NewRouter(d Deps) http.Handler {
 				r.Put("/settings/retention", d.PutRetentionSettings)
 				r.Get("/clients", d.ListClients)
 				r.Get("/clients/{sessionID}", d.GetClient)
+				// v0.5.2 P3.6 / Task 9: admin-only service pre-provisioning.
+				// Lets dashboard / e2e flows POST a known service_id before any
+				// client connects; client-side GetOrCreateService continues to
+				// upsert against the same row when the client later connects
+				// with the same service id.
+				r.Post("/services", d.PostService)
 			})
 		})
 

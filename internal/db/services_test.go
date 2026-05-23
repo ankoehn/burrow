@@ -282,3 +282,52 @@ func TestSetServiceSubdomainUniqueCollision(t *testing.T) {
 		t.Logf("warning: collision error lacks 'UNIQUE'; Task 6 detection may need adjustment: %v", err)
 	}
 }
+
+// TestCreateServiceAdminPreProvisioning exercises the v0.5.2 P3.6 admin
+// pre-provisioning surface. The handler hands a fully-formed db.Service
+// (with the operator-supplied service_id as the PK) to CreateService and
+// expects a UNIQUE-constraint violation on the second insert to surface
+// as the typed ErrDuplicateService sentinel.
+func TestCreateServiceAdminPreProvisioning(t *testing.T) {
+	x := testDB(t)
+	ctx := context.Background()
+	mustUser(t, x, "admin1")
+
+	s := Service{
+		ID:           "svc_pre001",
+		UserID:       "admin1",
+		Name:         "Pre-provisioned",
+		Type:         "http",
+		AccessMode:   "open",
+		APIKeyHeader: "Authorization",
+	}
+	if err := x.CreateService(ctx, s); err != nil {
+		t.Fatalf("first CreateService: %v", err)
+	}
+
+	// Round-trip via GetServiceByID — the row should be visible exactly as inserted.
+	got, err := x.GetServiceByID(ctx, "svc_pre001")
+	if err != nil {
+		t.Fatalf("GetServiceByID: %v", err)
+	}
+	if got.Name != "Pre-provisioned" || got.AccessMode != "open" || got.UserID != "admin1" {
+		t.Errorf("unexpected stored row: %+v", got)
+	}
+	if got.CreatedAt.IsZero() {
+		t.Errorf("CreatedAt was not populated")
+	}
+
+	// Second insert with the same ID must surface ErrDuplicateService.
+	dupErr := x.CreateService(ctx, s)
+	if !errors.Is(dupErr, ErrDuplicateService) {
+		t.Fatalf("duplicate insert: got %v; want ErrDuplicateService", dupErr)
+	}
+
+	// A genuinely different ID under the same user (different name) must succeed.
+	s2 := s
+	s2.ID = "svc_pre002"
+	s2.Name = "Another"
+	if err := x.CreateService(ctx, s2); err != nil {
+		t.Fatalf("distinct-ID insert: %v", err)
+	}
+}

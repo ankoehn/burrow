@@ -50,6 +50,10 @@ type fakeServiceStore struct {
 	// SetAccessPolicy
 	setPolicyErr error
 
+	// CreateService (v0.5.2 P3.6)
+	createSvcErr error
+	createdSvcs  []db.Service
+
 	// last args captured for inspection
 	lastMode   string
 	lastHeader string
@@ -84,6 +88,23 @@ func (f *fakeServiceStore) GetAccessPolicy(_ context.Context, _, _, _ string) ([
 func (f *fakeServiceStore) SetAccessPolicy(_ context.Context, _, _, _ string, roles []string) error {
 	f.lastRoles = roles
 	return f.setPolicyErr
+}
+
+// CreateService is the v0.5.2 admin pre-provisioning surface (P3.6).
+// Records calls in createdSvcs so tests can assert what was inserted; on the
+// SECOND call with the same ID, returns db.ErrDuplicateService so the 409
+// test can simulate a duplicate without running the real DB.
+func (f *fakeServiceStore) CreateService(_ context.Context, s db.Service) error {
+	if f.createSvcErr != nil {
+		return f.createSvcErr
+	}
+	for _, prior := range f.createdSvcs {
+		if prior.ID == s.ID {
+			return db.ErrDuplicateService
+		}
+	}
+	f.createdSvcs = append(f.createdSvcs, s)
+	return nil
 }
 
 // fakeLiveTunnels satisfies LiveTunnelLookup.
@@ -974,6 +995,191 @@ func TestSetAccessMode_V3_LiveTunnelsNil(t *testing.T) {
 	}
 	if as.mode != "open" {
 		t.Errorf("mode: want open, got %q", as.mode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/services — admin pre-provisioning (v0.5.2 P3.6 / Task 9)
+// ---------------------------------------------------------------------------
+
+// TestPostServicesAdminCreatesService asserts the happy path: an admin caller
+// POSTs a {service_id, title, access_mode} body and the handler inserts the
+// row via ServiceStore.CreateService, returning 201 with {id, created_at}.
+func TestPostServicesAdminCreatesService(t *testing.T) {
+	ss := &fakeServiceStore{}
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	body := map[string]any{
+		"service_id":  "svc_pre001",
+		"title":       "Pre-provisioned",
+		"access_mode": "public",
+	}
+	r := c.post(t, "/api/v1/services", body)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d body=%s; want 201", r.StatusCode, readBody(t, r))
+	}
+	var got struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r.Body.Close()
+	if got.ID != "svc_pre001" {
+		t.Errorf("id=%q; want svc_pre001", got.ID)
+	}
+	if got.CreatedAt == "" {
+		t.Error("created_at empty")
+	}
+
+	// Confirm the fake store recorded the insert with the right shape.
+	if len(ss.createdSvcs) != 1 {
+		t.Fatalf("createdSvcs len=%d; want 1", len(ss.createdSvcs))
+	}
+	inserted := ss.createdSvcs[0]
+	if inserted.ID != "svc_pre001" {
+		t.Errorf("inserted.ID=%q", inserted.ID)
+	}
+	if inserted.Name != "Pre-provisioned" {
+		t.Errorf("inserted.Name=%q; want Pre-provisioned", inserted.Name)
+	}
+	// access_mode "public" is aliased to the stored enum value "open" on the
+	// services row — pin that mapping so the contract stays explicit.
+	if inserted.AccessMode != "open" {
+		t.Errorf("inserted.AccessMode=%q; want open (stored alias for public)", inserted.AccessMode)
+	}
+}
+
+// TestPostServicesDefaultsAccessModeWhenOmitted asserts that an admin caller
+// who omits access_mode gets the default — stored as "open" (the canonical
+// row value the runtime enforces).
+func TestPostServicesDefaultsAccessModeWhenOmitted(t *testing.T) {
+	ss := &fakeServiceStore{}
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	r := c.post(t, "/api/v1/services", map[string]any{"service_id": "svc_def"})
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d body=%s; want 201", r.StatusCode, readBody(t, r))
+	}
+	r.Body.Close()
+	if len(ss.createdSvcs) != 1 || ss.createdSvcs[0].AccessMode != "open" {
+		t.Errorf("default access_mode not applied: %#v", ss.createdSvcs)
+	}
+}
+
+// TestPostServicesNonAdminReturns403 asserts the non-admin caller is rejected
+// at the RequireAdmin gate with 403.
+func TestPostServicesNonAdminReturns403(t *testing.T) {
+	ss := &fakeServiceStore{}
+	d := Deps{
+		Users:    &fakeUserStore{role: "user"},
+		Services: ss,
+		Log:      discardLog(),
+	}
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	r := c.post(t, "/api/v1/services", map[string]any{"service_id": "svc_xyz"})
+	r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("status %d; want 403", r.StatusCode)
+	}
+	if len(ss.createdSvcs) != 0 {
+		t.Errorf("store called from non-admin path: %#v", ss.createdSvcs)
+	}
+}
+
+// TestPostServicesDuplicateReturns409 asserts that the SECOND POST for the
+// same service_id maps the ErrDuplicateService sentinel to HTTP 409.
+func TestPostServicesDuplicateReturns409(t *testing.T) {
+	ss := &fakeServiceStore{}
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	body := map[string]any{"service_id": "svc_dup"}
+	r1 := c.post(t, "/api/v1/services", body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusCreated {
+		t.Fatalf("first POST status %d; want 201", r1.StatusCode)
+	}
+	r2 := c.post(t, "/api/v1/services", body)
+	defer r2.Body.Close()
+	if r2.StatusCode != http.StatusConflict {
+		t.Errorf("second POST status %d body=%s; want 409", r2.StatusCode, readBody(t, r2))
+	}
+}
+
+// TestPostServicesBadServiceIDReturns400 covers each invalid shape the
+// `^[a-z0-9_-]{3,64}$` regex must reject.
+func TestPostServicesBadServiceIDReturns400(t *testing.T) {
+	ss := &fakeServiceStore{}
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	tooLong := strings.Repeat("a", 65) // 65 > 64-char max
+	cases := []string{
+		"",          // missing / empty
+		"ab",        // shorter than 3
+		tooLong,     // longer than 64
+		"has space", // whitespace
+		"UPPER",     // uppercase
+		"bad/slash", // path separator
+	}
+	for _, bad := range cases {
+		bad := bad
+		t.Run("id="+bad, func(t *testing.T) {
+			r := c.post(t, "/api/v1/services", map[string]any{"service_id": bad})
+			defer r.Body.Close()
+			if r.StatusCode != http.StatusBadRequest {
+				t.Errorf("service_id=%q got %d; want 400", bad, r.StatusCode)
+			}
+		})
+	}
+	if len(ss.createdSvcs) != 0 {
+		t.Errorf("store called for invalid service_id rows: %#v", ss.createdSvcs)
+	}
+}
+
+// TestPostServicesBadAccessModeReturns400 asserts that an out-of-enum
+// access_mode is rejected before the store is touched.
+func TestPostServicesBadAccessModeReturns400(t *testing.T) {
+	ss := &fakeServiceStore{}
+	srv, c := newServiceServer(t, newServiceDeps(ss, fakeLiveTunnels{}, ""))
+	defer srv.Close()
+
+	r := c.post(t, "/api/v1/services", map[string]any{
+		"service_id":  "svc_ok1",
+		"access_mode": "bogus",
+	})
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest {
+		t.Errorf("status %d; want 400", r.StatusCode)
+	}
+	if len(ss.createdSvcs) != 0 {
+		t.Errorf("store called for bad access_mode: %#v", ss.createdSvcs)
+	}
+}
+
+// TestPostServicesUnauthenticatedReturns401 keeps the auth-ordering invariant:
+// unauthenticated requests get 401 before RequireAdmin's 403.
+func TestPostServicesUnauthenticatedReturns401(t *testing.T) {
+	ss := &fakeServiceStore{}
+	d := newServiceDeps(ss, fakeLiveTunnels{}, "")
+	srv := httptest.NewServer(NewRouter(d))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/services", "application/json",
+		mustJSON(map[string]string{"service_id": "svc_x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status %d; want 401", resp.StatusCode)
 	}
 }
 

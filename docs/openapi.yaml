@@ -574,6 +574,42 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Service' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [services]
+      summary: Admin pre-provisions a service row (v0.5.2)
+      description: |
+        Inserts a services row exactly as supplied so dashboard / e2e flows
+        can target a known service_id before any client connects. Permission:
+        admin. Audit: `service.create` with payload `{by_admin: true}`.
+        Client-side `RegisterService` continues to upsert against the same
+        row when the client subsequently connects with the same `service_id`.
+      operationId: postService
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service_id]
+              properties:
+                service_id:  { type: string, pattern: '^[a-z0-9_-]{3,64}$' }
+                title:       { type: string, maxLength: 120 }
+                hostname:    { type: string }
+                access_mode: { type: string, enum: [public, open, api_key, burrow_login] }
+      responses:
+        '201':
+          description: Service row created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:         { type: string }
+                  created_at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: service_id already exists. }
 
   /api/v1/services/{serviceID}:
     get:

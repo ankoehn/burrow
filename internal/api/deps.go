@@ -27,6 +27,10 @@ type ServiceStore interface {
 	DeleteAPIKey(ctx context.Context, callerID, callerRole, serviceID, keyID string) error
 	GetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string) ([]string, error)
 	SetAccessPolicy(ctx context.Context, callerID, callerRole, serviceID string, roles []string) error
+	// v0.5.2: admin-only pre-provisioning. Inserts a service row exactly as
+	// supplied. Returns db.ErrDuplicateService on UNIQUE-constraint violations
+	// (mapped to HTTP 409). *db.DB satisfies this directly via CreateService.
+	CreateService(ctx context.Context, s db.Service) error
 }
 
 // LiveTunnelSnapshot is the live/runtime subset of a tunnel that the API

@@ -4,9 +4,67 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrDuplicateService is returned by CreateService when the (id) or
+// (user_id, name) UNIQUE constraint is violated. Mirrors the sentinel pattern
+// used by ErrDuplicateHostname in custom_domains.go.
+var ErrDuplicateService = fmt.Errorf("service already exists")
+
+// isDuplicateServiceErr reports whether err is a UNIQUE constraint violation
+// produced by an INSERT into services. Mirrors isDuplicateError in
+// custom_domains.go; kept package-private and topic-local so the services file
+// stays self-contained.
+func isDuplicateServiceErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "unique constraint")
+}
+
+// CreateService inserts a new services row exactly as supplied by the
+// admin-facing POST /api/v1/services handler. Unlike GetOrCreateService
+// (which silently no-ops on conflict) this surface returns ErrDuplicateService
+// on UNIQUE-constraint violations so the API can map them to HTTP 409.
+//
+// The caller is responsible for setting s.ID, s.UserID, s.Name, s.Type, and
+// s.AccessMode; CreatedAt defaults to time.Now().UTC() when zero. Empty
+// optional fields (Subdomain, APIKeyHeader) are stored as their column
+// defaults (NULL / "Authorization") via COALESCE-friendly NULL handling.
+func (x *DB) CreateService(ctx context.Context, s Service) error {
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now().UTC()
+	}
+	// subdomain column is nullable (UNIQUE); insert NULL when empty so the
+	// uniqueness constraint does not collide across multiple subdomain-less
+	// rows. Use sql.NullString to surface NULL distinctly from empty.
+	var sub sql.NullString
+	if s.Subdomain != "" {
+		sub = sql.NullString{String: s.Subdomain, Valid: true}
+	}
+	header := s.APIKeyHeader
+	if header == "" {
+		header = "Authorization"
+	}
+	_, err := x.sqlDB.ExecContext(ctx,
+		`INSERT INTO services(id, user_id, name, type, subdomain, access_mode, api_key_header, created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		s.ID, s.UserID, s.Name, s.Type, sub, s.AccessMode, header, s.CreatedAt,
+	)
+	if err != nil {
+		if isDuplicateServiceErr(err) {
+			return ErrDuplicateService
+		}
+		return fmt.Errorf("create service: %w", err)
+	}
+	return nil
+}
 
 // selectServiceRow is the shared SELECT column list for service rows.
 // mtls_ca_pem (migration 0009) is included so the proxy layer can populate

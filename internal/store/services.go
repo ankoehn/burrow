@@ -383,3 +383,13 @@ func serviceToView(s db.Service) ServiceView {
 		CreatedAt:    s.CreatedAt,
 	}
 }
+
+// CreateService is the admin-only pre-provisioning surface exposed via
+// POST /api/v1/services (v0.5.2 P3.6). It delegates straight to the DB layer
+// — permission checking happens in the API handler (RequireAdmin) so this
+// method intentionally has no per-caller authz; tests that want to bypass
+// the API entirely call it on *db.DB directly. Returns db.ErrDuplicateService
+// on UNIQUE-constraint violations, mapped to HTTP 409 by the handler.
+func (s *Store) CreateService(ctx context.Context, svc db.Service) error {
+	return s.q.CreateService(ctx, svc)
+}
