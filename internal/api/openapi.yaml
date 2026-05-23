@@ -65,7 +65,7 @@ tags:
   - name: geo
     description: Global geo lookup status.
   - name: settings
-    description: Admin settings (config + SMTP test).
+    description: Admin settings (config + SMTP test + retention).
   - name: clients
     description: Live client (control session) overview.
   - name: events
@@ -1827,6 +1827,38 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OK' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/settings/retention:
+    get:
+      tags: [settings]
+      summary: Get retention settings (admin)
+      description: >
+        Returns the seven retention configuration knobs plus an advisory note
+        explaining the audit-chain-safe deletion behavior.
+      responses:
+        '200':
+          description: Retention settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [settings]
+      summary: Replace retention settings (admin)
+      description: >
+        Validates and persists one or more retention settings. Omitted fields
+        are left unchanged. Returns 204 on success, 400 on out-of-range values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Empty' }
+      responses:
+        '204': { description: Updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ────────────────────────────────────────────────────────────────────────
   # Clients

@@ -348,6 +348,9 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/settings", d.GetSettings)
 				r.Put("/settings", d.SaveSettings)
 				r.Post("/settings/test-email", d.SendTestEmail)
+				// v0.5.0 Task 9: retention settings (admin only).
+				r.Get("/settings/retention", d.GetRetentionSettings)
+				r.Put("/settings/retention", d.PutRetentionSettings)
 				r.Get("/clients", d.ListClients)
 				r.Get("/clients/{sessionID}", d.GetClient)
 			})
