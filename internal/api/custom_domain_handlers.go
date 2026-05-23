@@ -38,6 +38,7 @@ import (
 	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/internal/authz"
 	"github.com/ankoehn/burrow/internal/db"
+	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 )
 
 // ─── Store interface ─────────────────────────────────────────────────────────
@@ -83,29 +84,20 @@ type domainResp struct {
 	StatusUpdatedAt time.Time `json:"status_updated_at"`
 }
 
-// computeStatus returns the live cert status at `now` for a freshly-validated
-// cert (PUT/POST path) — the persisted column may not yet reflect this
-// because the daily tick has not run. Mirrors
-// customdomain.ComputeStatus exactly so the two paths agree.
-func computeStatus(notAfter time.Time) string {
-	now := time.Now()
-	if !notAfter.After(now) {
-		return "cert_expired"
-	}
-	if notAfter.Sub(now) <= 14*24*time.Hour {
-		return "cert_expiring"
-	}
-	return "active"
-}
-
 // toDomainResp projects db.ServiceCustomDomain → domainResp (no key_pem).
-// The persisted Status / StatusUpdatedAt columns are surfaced as-is; an
-// empty Status (older rows pre-v0.5.2) is filled in from computeStatus so
-// the wire never carries an empty enum value.
+// The persisted Status / StatusUpdatedAt columns are surfaced as-is; if
+// Status is empty, customdomain.ComputeStatus is used as a fallback.
+//
+// In practice the fallback is unreachable for DB-loaded rows: migration 0019
+// backfills every existing row to 'active' and the column carries a
+// DEFAULT 'active' on all subsequent INSERTs. The fallback is a cheap safety
+// net for ServiceCustomDomain values constructed without a DB load (e.g.
+// test fixtures, hypothetical handler bugs) so the wire never carries an
+// empty enum value.
 func toDomainResp(d db.ServiceCustomDomain) domainResp {
 	status := d.Status
 	if status == "" {
-		status = computeStatus(d.NotAfter)
+		status = customdomain.ComputeStatus(d.NotAfter, time.Now())
 	}
 	return domainResp{
 		ID:              d.ID,

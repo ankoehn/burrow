@@ -79,6 +79,13 @@ func RunStatusTick(ctx context.Context, deps StatusTickDeps, now time.Time) (int
 	}
 	transitions := 0
 	for _, r := range rows {
+		// Defensive ctx check between rows: with up to 10k rows per tick, an
+		// in-flight tick at shutdown would otherwise keep iterating (and
+		// publishing webhooks) long after ctx was cancelled. Bailing here
+		// narrows the shutdown race window to one row's processing time.
+		if err := ctx.Err(); err != nil {
+			return transitions, err
+		}
 		// Pending rows have no cert to evaluate; skip until a cert is uploaded.
 		if r.Status == StatusPending {
 			continue

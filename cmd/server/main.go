@@ -306,8 +306,19 @@ func main() {
 			}
 			database := backend.DB()
 			defer backend.Close()
-			// reaperWg tracks the session-reaper goroutine; it is waited (via
-			// defer below) before backend.Close() runs (LIFO defer ordering).
+			// reaperWg tracks goroutines that touch the DB or publish webhooks
+			// (session reaper, traffic flusher, retention compactor, custom-domain
+			// status tick). Two defers exist:
+			//   - This early one guards the error paths between here and the v04
+			//     stack build (web.Handler / buildV04Stack failures), ensuring
+			//     the session reaper + traffic flusher drain before backend.Close.
+			//   - A second `defer reaperWg.Wait()` is registered AFTER
+			//     `defer v04.WebhookDispatcher.Close()` (further down) so that
+			//     any reaperWg-tracked goroutine mid-Publish at shutdown finishes
+			//     before the dispatcher's queue channel is closed (otherwise the
+			//     v0.5.2 custom-domain status tick would panic on send-to-closed-
+			//     channel). Calling Wait on an already-drained WaitGroup is a
+			//     no-op, so the duplicate is harmless on the happy path.
 			var reaperWg sync.WaitGroup
 			defer reaperWg.Wait()
 			st := store.New(database)
@@ -379,7 +390,17 @@ func main() {
 				return err
 			}
 			v04.WebhookDispatcher.Start()
+			// Defer ordering matters here: WebhookDispatcher.Close MUST run
+			// AFTER reaperWg.Wait so that any goroutine tracked by reaperWg
+			// (e.g. the v0.5.2 custom-domain status tick) that may call
+			// WebhookDispatcher.Publish has fully drained before the dispatcher's
+			// internal queue channel is closed — otherwise a tick mid-iteration
+			// at shutdown panics on send-to-closed-channel. We therefore register
+			// the dispatcher.Close defer FIRST (it runs LAST in LIFO order) and
+			// reaperWg.Wait SECOND (it runs FIRST in LIFO order, before
+			// dispatcher.Close).
 			defer v04.WebhookDispatcher.Close()
+			defer reaperWg.Wait()
 			// RefreshRolesCache populates the process-wide authz custom-roles
 			// table once at startup so the very first request sees the same
 			// permission map every store-level role mutation maintains.

@@ -622,29 +622,10 @@ func TestDomainRespNoKeyPEM(t *testing.T) {
 	}
 }
 
-// TestComputeStatus verifies the status computation. v0.5.2 Task 10
-// updates the wire enum from "expired"/"expiring_soon" to
-// "cert_expired"/"cert_expiring" — the four-state machine in
-// internal/proxy/customdomain.
-func TestComputeStatus(t *testing.T) {
-	cases := []struct {
-		name     string
-		notAfter time.Time
-		want     string
-	}{
-		{"cert_expired", time.Now().Add(-time.Hour), "cert_expired"},
-		{"cert_expiring", time.Now().Add(3 * 24 * time.Hour), "cert_expiring"},
-		{"active", time.Now().Add(30 * 24 * time.Hour), "active"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := computeStatus(tc.notAfter)
-			if got != tc.want {
-				t.Errorf("computeStatus(%v) = %q; want %q", tc.notAfter, got, tc.want)
-			}
-		})
-	}
-}
+// TestComputeStatus moved to internal/proxy/customdomain (v0.5.2 Task 10
+// follow-up): the local `computeStatus` helper was removed in favour of
+// `customdomain.ComputeStatus`, which is covered there with a stronger,
+// frozen-clock test matrix (60d / 14d edge / 1d / 0d exact / past).
 
 // TestMatchesSAN verifies wildcard and exact SAN matching.
 func TestMatchesSAN(t *testing.T) {
