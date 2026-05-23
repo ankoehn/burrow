@@ -8,7 +8,7 @@
 
 -- +goose Up
 CREATE TABLE connection_log_rollup_top_ips (
-  day         TEXT NOT NULL,
+  day         DATE NOT NULL,
   service_id  TEXT NOT NULL,
   kind        TEXT NOT NULL,
   ip          TEXT NOT NULL,
