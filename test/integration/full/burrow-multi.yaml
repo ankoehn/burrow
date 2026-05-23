@@ -1,0 +1,18 @@
+# test-only — never deploy this shape.
+# Exposes 2 services through ONE burrow client process (v0.3 surface).
+# Schema matches internal/client/fileconfig.go (rawFileConfig + rawService):
+#   - `remote:` (not remote_port)
+#   - `token_file:` for indirection through the shared volume
+#   - no `insecure:` field — that's a `burrow connect --insecure` flag,
+#     applied via client-multi.sh.
+server: relay.test.local:7000
+token_file: /run/burrow/token-multi
+services:
+  - name: svc-a
+    type: tcp
+    local: 127.0.0.1:8083
+    remote: 9003
+  - name: svc-b
+    type: tcp
+    local: 127.0.0.1:8084
+    remote: 9004
