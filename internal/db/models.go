@@ -326,3 +326,15 @@ func (x *DB) DB() *sql.DB {
 func (x *DB) Close() error {
 	return x.sqlDB.Close()
 }
+
+// Driver implements Backend. *DB always wraps SQLite.
+func (x *DB) Driver() string { return "sqlite" }
+
+// Now implements Backend. Returns the SQLite CURRENT_TIMESTAMP fragment.
+func (x *DB) Now() string { return "CURRENT_TIMESTAMP" }
+
+// Placeholder implements Backend. SQLite uses "?" for all positional args.
+func (x *DB) Placeholder(_ int) string { return "?" }
+
+// compile-time assertion: *DB satisfies Backend.
+var _ Backend = (*DB)(nil)
