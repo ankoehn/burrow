@@ -27,6 +27,7 @@ import (
 
 	"github.com/ankoehn/burrow/internal/aigw"
 	"github.com/ankoehn/burrow/internal/cache/exact"
+	"github.com/ankoehn/burrow/internal/cache/semantic"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/guardrails"
 )
@@ -89,13 +90,43 @@ func decodeServiceAIConfig(blob []byte) (aigw.ServiceAIConfig, error) {
 	}
 	var out aigw.ServiceAIConfig
 
-	// .cache → *exact.Settings
+	// .cache → *exact.Settings (+ optional .cache.semantic → *semantic.Settings)
 	if raw, ok := outer["cache"]; ok && len(raw) > 0 && string(raw) != "null" {
 		s, err := exact.SettingsFromJSON(raw)
 		if err != nil {
 			return aigw.ServiceAIConfig{}, fmt.Errorf("cache: %w", err)
 		}
 		out.Cache = &s
+
+		// .cache.semantic → *semantic.Settings. The semantic block lives INSIDE
+		// the cache block per spec A.3 (the JSON shape the v0.5.0 API at
+		// internal/api/semantic_handlers.go::PutServiceAIConfig validates and
+		// accepts). Decoding it here is what wires the chain's semantic tier
+		// to the per-service config — without this, cfg.Semantic stays nil
+		// even when the operator has enabled it, and chain.go's
+		// `cfg.Semantic != nil && cfg.Semantic.Enabled` guard at line 501
+		// never fires.
+		var inner struct {
+			Semantic json.RawMessage `json:"semantic"`
+		}
+		if err := json.Unmarshal(raw, &inner); err == nil &&
+			len(inner.Semantic) > 0 && string(inner.Semantic) != "null" {
+			var sem semanticSettingsWire
+			if err := json.Unmarshal(inner.Semantic, &sem); err != nil {
+				return aigw.ServiceAIConfig{}, fmt.Errorf("cache.semantic: %w", err)
+			}
+			settings := semantic.Settings{
+				Enabled:         sem.Enabled,
+				MinSimilarity:   sem.MinSimilarity,
+				EmbeddingMode:   sem.EmbeddingMode,
+				EmbeddingURL:    sem.EmbeddingURL,
+				EmbeddingModel:  sem.EmbeddingModel,
+				FallbackPolicy:  sem.FallbackPolicy,
+				PromoteOnMiss:   sem.PromoteOnMiss,
+				MaxIndexEntries: sem.MaxIndexEntries,
+			}
+			out.Semantic = &settings
+		}
 	}
 
 	// .redaction → *aigw.RedactionConfig
@@ -145,4 +176,19 @@ func decodeServiceAIConfig(blob []byte) (aigw.ServiceAIConfig, error) {
 	// .routing is intentionally NOT decoded here — see method doc comment.
 
 	return out, nil
+}
+
+// semanticSettingsWire is the JSON shape of the cache.semantic sub-block.
+// Mirrors the wire shape used by the API surface (internal/api/semantic_handlers.go
+// .semanticSettingsJSON) so a single blob round-trips losslessly: API PUT in,
+// chain consumes via Loader, semantic.Settings out.
+type semanticSettingsWire struct {
+	Enabled         bool    `json:"enabled"`
+	MinSimilarity   float64 `json:"min_similarity"`
+	EmbeddingMode   string  `json:"embedding_mode"`
+	EmbeddingURL    string  `json:"embedding_url"`
+	EmbeddingModel  string  `json:"embedding_model"`
+	FallbackPolicy  string  `json:"fallback_policy"`
+	PromoteOnMiss   bool    `json:"promote_on_miss"`
+	MaxIndexEntries int     `json:"max_index_entries"`
 }
