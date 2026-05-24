@@ -29,12 +29,13 @@ func TestTunnelListerAdapterMapsAllFields(t *testing.T) {
 	src := server.TunnelView{
 		ID:         "tn-1",
 		Name:       "web",
-		Type:       "tcp",
-		RemotePort: 9012,
+		Type:       "http",
+		RemotePort: 0,
 		LocalAddr:  "127.0.0.1:3000",
 		BytesIn:    4242,
 		BytesOut:   8484,
 		Connected:  true,
+		ServiceID:  "svc-99",
 	}
 	f := &fakeUserTunnelLister{views: []server.TunnelView{src}}
 
@@ -70,6 +71,9 @@ func TestTunnelListerAdapterMapsAllFields(t *testing.T) {
 	}
 	if got.Connected != src.Connected {
 		t.Errorf("Connected: got %v want %v", got.Connected, src.Connected)
+	}
+	if got.ServiceID != src.ServiceID {
+		t.Errorf("ServiceID: got %q want %q", got.ServiceID, src.ServiceID)
 	}
 }
 

@@ -12,6 +12,10 @@ interface Tunnel {
   local_addr: string; bytes_in: number; bytes_out: number; connected: boolean;
   // v0.3.0 additive: present for http tunnels only.
   hostname?: string; access_mode?: AccessMode;
+  // service_id is the durable-service id (http tunnels only). Required for
+  // per-service routes (/services/{id}/access-mode, /api-keys); using the
+  // per-session tunnel.id 404s.
+  service_id?: string;
 }
 
 const ACCESS_LABEL: Record<AccessMode, string> = {
@@ -163,7 +167,10 @@ export default function Tunnels() {
       >
         {configure && (
           <AccessModePanel
-            serviceId={configure.id}
+            // Use the durable service id for http tunnels (per-service routes
+            // 404 when given the per-session tunnel.id). Fall back to
+            // configure.id for any legacy tcp/back-compat path.
+            serviceId={configure.service_id ?? configure.id}
             serviceName={configure.name || configure.id}
             mode={configure.access_mode ?? "open"}
           />

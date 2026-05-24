@@ -90,6 +90,7 @@ func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
 		out = append(out, api.TunnelView{
 			ID: t.ID, Name: t.Name, Type: t.Type, RemotePort: t.RemotePort,
 			LocalAddr: t.LocalAddr, BytesIn: t.BytesIn, BytesOut: t.BytesOut, Connected: t.Connected,
+			ServiceID: t.ServiceID,
 		})
 	}
 	return out

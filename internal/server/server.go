@@ -72,6 +72,11 @@ type TunnelView struct {
 	BytesIn    uint64
 	BytesOut   uint64
 	Connected  bool
+	// ServiceID is the stable durable-service identity for http tunnels
+	// (empty for tcp tunnels). HTTP tunnels are auto-promoted to a persisted
+	// services row; the UI needs that ID — not the per-session tunnel.ID —
+	// for per-service routes (/services/{id}/access-mode, /api-keys, etc.).
+	ServiceID string
 }
 
 // ControlSessionSink is the interface the server uses to record a
@@ -406,7 +411,7 @@ func (s *Server) ListUserTunnels(userID string) []TunnelView {
 			out = append(out, TunnelView{
 				ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
 				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
-				Connected: true,
+				Connected: true, ServiceID: tn.ServiceID,
 			})
 		}
 	}

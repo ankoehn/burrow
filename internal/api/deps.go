@@ -175,6 +175,12 @@ type TunnelView struct {
 	BytesIn    uint64 `json:"bytes_in"`
 	BytesOut   uint64 `json:"bytes_out"`
 	Connected  bool   `json:"connected"`
+	// ServiceID is the durable-service id for http tunnels (omitted for tcp).
+	// The dashboard's Configure dialog routes per-service endpoints
+	// (/services/{service_id}/access-mode, /api-keys) through this ID — using
+	// the tunnel.id for http tunnels yields 404 because per-session tunnel
+	// UUIDs differ from the persisted service UUID.
+	ServiceID string `json:"service_id,omitempty"`
 }
 
 // TunnelLister returns the live tunnels owned by a user (cmd/server adapts the registry).
