@@ -758,15 +758,16 @@ func main() {
 			if err != nil {
 				return err
 			}
-			database, err := db.Open(cfg.DatabasePath)
+			// Use the same backend selector as `burrowd serve` so the token
+			// command honors BURROW_DATABASE_URL / experimental_postgres_backend
+			// (not just SQLite). openBackend logs the choice + runs migrations.
+			log := logging.New(cfg.LogLevel, cfg.LogFormat)
+			backend, err := openBackend(cfg, log)
 			if err != nil {
 				return err
 			}
-			defer database.Close()
-			if err := db.Migrate(database); err != nil {
-				return err
-			}
-			st := store.New(database)
+			defer backend.Close()
+			st := store.New(backend.DB())
 			u, err := st.GetUserByEmail(context.Background(), email)
 			if err != nil {
 				if errors.Is(err, db.ErrNotFound) {
