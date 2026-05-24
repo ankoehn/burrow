@@ -116,6 +116,13 @@ func TestOpenAPI_RouteCoverage(t *testing.T) {
 
 	var missing []string
 	for _, e := range routes {
+		// /api/v1/internal/* paths are test-only routes gated behind build
+		// tags (e.g. -tags=integration mounts POST /api/v1/internal/test-reset
+		// from router_integration.go). They are intentionally never in the
+		// shipped openapi.yaml — they must not exist in release binaries.
+		if strings.HasPrefix(e.Path, "/api/v1/internal/") {
+			continue
+		}
 		if !docPaths[e] {
 			missing = append(missing, fmt.Sprintf("%s %s", e.Method, e.Path))
 		}
@@ -209,9 +216,12 @@ func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
 	// JSON API, not the embedded dashboard. chi reports the catch-all as
 	// "/*"; filter it out here rather than inside enumerateRoutes so the
 	// minimal-Deps test (no SPA) is unaffected.
+	// Also drop /api/v1/internal/* — these are test-only routes gated behind
+	// build tags (e.g. POST /test-reset from router_integration.go). They
+	// must never appear in the shipped openapi.yaml.
 	filtered := routes[:0]
 	for _, e := range routes {
-		if e.Path == "/*" {
+		if e.Path == "/*" || strings.HasPrefix(e.Path, "/api/v1/internal/") {
 			continue
 		}
 		filtered = append(filtered, e)
