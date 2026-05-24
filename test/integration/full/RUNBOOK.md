@@ -102,3 +102,40 @@ After all 13 sections pass, append:
 - [ ] ✅ / ⚠ / ❌ — fill in during run-through.
 
 ---
+
+## 2. Tunnels
+
+**Goal:** All 3 client containers + their 4 tunnels (1 from client-ai, 1 from client-tcp, 2 from client-multi) appear on `/tunnels` with status=connected; bytes counters move under traffic.
+
+### Steps
+1. Navigate `/tunnels`. Confirm 4 rows:
+   - `ai` (http; random subdomain, e.g. `qgnh4v.test.local` — no fixed port)
+   - `tcp-echo` (tcp; remote :9002)
+   - `svc-a` (tcp; remote :9003)
+   - `svc-b` (tcp; remote :9004)
+2. All 4 rows show `connected` badge.
+3. Initial `In` and `Out` values are small (≤ a few KB from the connect handshake).
+4. Drive traffic from a shell:
+   ```bash
+   for i in 1 2 3 4 5; do curl -fsS http://localhost:9002/healthz; done
+   AI=$(docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered" | tail -1 | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS -X POST -H "content-type: application/json" \
+        -d '{"model":"x","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+        "https://$AI.test.local:8443/v1/chat/completions" > /dev/null
+   ```
+5. Within 5s the `tcp-echo` row's `In`/`Out` cells should increase (SSE event `tunnels` fires); the `ai` row should also tick up.
+
+### Expected ✅
+- 4 rows visible.
+- All connected.
+- Bytes counters move within 5s of driving traffic.
+
+### Gotchas ⚠
+- If `connected` badge doesn't appear, check `docker compose logs client-ai|client-tcp|client-multi` — the client may be in backoff retry loop (typically after a /test-reset wiped tokens).
+- HTTP tunnels (`ai`) do NOT have a fixed `--remote` port — they're host-routed on :8443. The "Remote" column may render `—` or the assigned subdomain.
+
+### Findings
+- [ ]
+
+---
