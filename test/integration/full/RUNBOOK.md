@@ -1,0 +1,79 @@
+# Burrow e2e full harness — manual runbook
+
+Walk-through checklist that proves every v0.1–v0.5 UI surface works against the live 4-container stack from Plan 1. Each section:
+1. Sets up state (URL, login, prerequisite).
+2. Describes the click-path.
+3. Asserts expected UI.
+4. Captures findings (✅ pass / ⚠ gotcha / ❌ defect).
+
+Plan 3's Playwright suite codifies each section as an automated spec.
+
+## Conventions
+
+- **Browser:** any Chromium-based (Chrome, Edge, Brave). Firefox/Safari out of scope.
+- **Admin dashboard:** `http://localhost:8080/`.
+- **HTTPS proxy / visitor-facing surfaces:** `https://<subdomain>.test.local:8443/` (host-routed via the wildcard cert mounted into the relay container; HTTP tunnels get a random subdomain at registration time — read it from `docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered"`).
+- **TCP tunnels:** `http://localhost:<port>/...` where `<port>` is the `--remote` value (9002 for tcp-echo, 9003/9004 for multi-svc-a/b).
+- **Login:** `admin@e2e.local` / `e2e-pass` (seeded by `relay-full.sh`).
+- **Reset between sections:** `curl -X POST http://localhost:8080/api/v1/internal/test-reset` (build-tagged endpoint from Plan 1 T18). Truncates audit, tokens, sessions, services + per-service rows, webhooks, connection-logs, rate limits, budgets, etc. — preserves seeded admin + schema migrations. ⚠ After /test-reset, cached tokens on `/run/burrow/token-{ai,tcp,multi}` become invalid until the relay re-mints them; the cleanest follow-up is `docker compose restart` to re-seed.
+
+## Pre-flight
+
+Bring up the stack and verify the proven smoke shape before starting:
+
+```bash
+docker compose -f test/integration/full/compose.full.yml up -d --wait
+
+# Discover the AI tunnel's auto-assigned subdomain (changes per boot):
+AI=$(docker logs burrow-e2e-full-relay-1 2>&1 \
+  | grep "http tunnel registered" | tail -1 \
+  | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
+echo "AI subdomain: $AI"
+
+# Proven 6-surface smoke (must all pass before starting):
+curl -fsS http://localhost:8080/healthz                       # [1/6] dashboard
+curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+     -fsS -X POST -H "content-type: application/json" \
+     -d '{"model":"x","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+     "https://$AI.test.local:8443/v1/chat/completions"        # [2/6] AI HTTP tunnel SSE
+curl -fsS http://localhost:9002/healthz                       # [3/6] TCP echo
+curl -fsS http://localhost:9003/healthz                       # [4/6] multi svc-a
+curl -fsS http://localhost:9004/healthz                       # [5/6] multi svc-b
+curl -fsS -X POST http://localhost:8080/api/v1/internal/test-reset  # [6/6] 204
+```
+
+⚠ The original plan's pre-flight references `curl http://localhost:9001/healthz`. That is incorrect: the AI tunnel is `--type http` and is host-routed on :8443, not port-bound on :9001. Use the `$AI.test.local:8443` variant above.
+
+Optional — add to `/etc/hosts` (or `C:\Windows\System32\drivers\etc\hosts` on Windows; requires admin) for browser-driven testing of host-routed surfaces:
+```
+127.0.0.1 relay.test.local client-ai.test.local client-tcp.test.local client-multi.test.local test.local
+```
+
+Optional — trust the test CA at the OS level to eliminate browser warnings:
+- Linux: `sudo cp test/integration/full/certs/ca.crt /usr/local/share/ca-certificates/burrow-test-ca.crt && sudo update-ca-certificates`
+- macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain test/integration/full/certs/ca.crt`
+- Windows: import `certs\ca.crt` into "Trusted Root Certification Authorities" via certmgr.msc
+
+## Table of contents
+
+1. [Bootstrap (login, password change, sidebar nav)](#1-bootstrap)
+2. [Tunnels (3 clients visible, bytes flow)](#2-tunnels)
+3. [Services (burrow.yaml multi-service)](#3-services)
+4. [Tokens (UI mint + use)](#4-tokens)
+5. [Users + Roles (CRUD)](#5-users--roles)
+6. [Access modes (open, api_key, burrow_login, mTLS)](#6-access-modes)
+7. [AI Gateway basic (chat-completions, metering, rate limit, cost)](#7-ai-gateway-basic)
+8. [AI Gateway depth (semantic cache, guardrail, redaction)](#8-ai-gateway-depth)
+9. [Custom domains (per-service CNAME + cert pair)](#9-custom-domains)
+10. [Connection logs (drive TCP traffic → entry + NDJSON export)](#10-connection-logs)
+11. [Audit + Webhooks + OpenAPI viewer + Retention](#11-audit--webhooks--openapi--retention)
+12. [Postgres swap (compose.full.postgres.yml profile)](#12-postgres-swap)
+13. [Reconnect (restart relay container)](#13-reconnect)
+
+## Sign-off
+
+After all 13 sections pass, append:
+
+> Run-through completed on YYYY-MM-DD by &lt;NAME&gt; against commit &lt;SHA&gt;. All sections ✅ except &lt;list&gt;. Findings filed at &lt;issues&gt;.
+
+---
