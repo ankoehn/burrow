@@ -22,7 +22,12 @@ const META: Record<AccessMode, { title: string; help: string }> = {
 export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { serviceId: string; serviceName: string; mode: AccessMode; clientId?: string }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<AccessMode>(mode);
-  const [apiKeyHeader, setApiKeyHeader] = useState("Authorization: Bearer");
+  // RFC 7230 header-name tokens disallow colon + whitespace; the prior
+  // default "Authorization: Bearer" persisted as an uninterpretable header
+  // and the backend (api/service_handlers.go: isValidHTTPHeaderName) now
+  // rejects it with 400. "Authorization" is the proxy's safe default; it
+  // also strips a "Bearer " prefix for that header only.
+  const [apiKeyHeader, setApiKeyHeader] = useState("Authorization");
   const [caPem, setCaPem] = useState("");
   const [err, setErr] = useState<string | null>(null);
 

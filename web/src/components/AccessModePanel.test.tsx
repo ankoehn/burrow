@@ -21,7 +21,7 @@ describe("AccessModePanel (v0.3.0)", () => {
     renderApp(<AccessModePanel serviceId="svc_web01" serviceName="web" mode="open" />);
     await userEvent.click(screen.getByRole("radio", { name: /api key/i }));
     const header = screen.getByLabelText(/api key header/i);
-    expect(header).toHaveValue("Authorization: Bearer");
+    expect(header).toHaveValue("Authorization");
     expect(header.className).toContain("mono");
     expect(
       await screen.findByText("Managing keys needs the services:configure permission."),
