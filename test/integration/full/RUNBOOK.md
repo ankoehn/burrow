@@ -77,3 +77,28 @@ After all 13 sections pass, append:
 > Run-through completed on YYYY-MM-DD by &lt;NAME&gt; against commit &lt;SHA&gt;. All sections ✅ except &lt;list&gt;. Findings filed at &lt;issues&gt;.
 
 ---
+
+## 1. Bootstrap
+
+**Goal:** Confirm login + sidebar nav + password change flow.
+
+### Steps
+1. Open `http://localhost:8080/` → expect redirect to `/login`.
+2. Sign in: `admin@e2e.local` / `e2e-pass`.
+3. Land on `/tunnels`. Sidebar shows: Tunnels, Services, Tokens, Clients, Users, Roles, AI endpoints, Cache, Guardrails, Cost, Audit log, Webhooks, Settings.
+4. Click avatar → Account → Change password → new password `e2e-pass-2` → save → toast "Password updated".
+5. Sign out → sign in with new password → success.
+6. Reset for subsequent sections: `curl -X POST http://localhost:8080/api/v1/internal/test-reset` (password reverts to seeded). ⚠ After reset, `docker compose restart` is the cleanest way to also re-seed the on-disk token files so tunnels reconnect cleanly.
+
+### Expected ✅
+- Dashboard renders without console errors (DevTools Console clean).
+- All sidebar links route correctly.
+
+### Common gotchas ⚠
+- Session cookie survives test-reset (admin user is re-seeded with the same ID). If logged out, re-login.
+- The exact sidebar item list is set in the SPA; the textual labels above are illustrative. Mismatches should be captured in Findings, not treated as a defect of the runbook.
+
+### Findings
+- [ ] ✅ / ⚠ / ❌ — fill in during run-through.
+
+---
