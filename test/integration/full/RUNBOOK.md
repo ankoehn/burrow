@@ -165,3 +165,37 @@ After all 13 sections pass, append:
 - [ ]
 
 ---
+
+## 4. Tokens
+
+**Goal:** UI mint creates a `bur_*` token + appears in list; token authenticates a CLI invocation.
+
+### Steps
+1. Navigate `/tokens`. Form field: `Token name`. Existing tokens visible (from `relay-full.sh`: `e2e-ai`, `e2e-tcp`, `e2e-multi`).
+2. Mint `e2e-manual-runbook` → reveal dialog → copy plaintext `bur_xxx`. ⚠ The plaintext is shown ONCE; subsequent views show only the prefix.
+3. From a shell, use the token to open a new tunnel:
+   ```bash
+   docker run --rm -d --name burrow-test \
+     --network burrow-e2e-full_e2e \
+     burrow-e2e-client-tcp:dev \
+     /bin/sh -c "/usr/local/bin/upstream -addr :8090 &
+                 burrow connect --server relay.test.local:7000 \
+                   --token bur_xxx --local 127.0.0.1:8090 \
+                   --remote 9099 --name runbook --type tcp --insecure"
+   ```
+   (Replace `bur_xxx` with the minted plaintext.)
+4. Within 5s, `runbook` appears on `/tunnels` with status=connected.
+5. Cleanup: `docker rm -f burrow-test`.
+
+### Expected ✅
+- Mint succeeds + dialog reveals `bur_*`.
+- New token appears in list.
+- Token authenticates a real `burrow connect` from a sidecar container on the e2e network.
+
+### Gotchas ⚠
+- :9099 is NOT published to the host — it's only reachable from inside the `burrow-e2e-full_e2e` network. Confirming connectivity requires `docker exec ... curl` against another container, or just observing the `connected` badge in the UI.
+
+### Findings
+- [ ]
+
+---
