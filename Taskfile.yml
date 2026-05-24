@@ -70,3 +70,8 @@ tasks:
     desc: Run the Playwright UI mini-suite (brings stack up, runs 5 specs, tears down)
     cmds:
       - bash test/integration/smoke-ui.sh
+
+  e2e:full:
+    desc: Run the full e2e harness (4 containers + mockoai + 20 Playwright specs)
+    cmds:
+      - bash test/integration/full/smoke-full.sh

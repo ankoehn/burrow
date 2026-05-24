@@ -118,3 +118,23 @@ jobs:
             test/integration/playwright-report/
             test/integration/test-results/
           retention-days: 7
+
+  e2e-compose-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: test/integration/full/package-lock.json
+      - run: bash test/integration/full/smoke-full.sh
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: e2e-compose-full-report
+          path: |
+            test/integration/full/playwright-report/
+            test/integration/full/test-results/
+          retention-days: 7
