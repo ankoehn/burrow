@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 
 export interface DialogProps {
@@ -12,6 +12,10 @@ export interface DialogProps {
 
 export function Dialog({ open, onOpenChange, title, description, children, footer }: DialogProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Unique per-instance id so nested dialogs don't share aria-labelledby —
+  // duplicate IDs were causing assistive tech and Playwright's
+  // getByRole("dialog", { name }) to resolve to the wrong dialog.
+  const titleId = useId();
   // Keep the latest onOpenChange without making it an effect dependency:
   // callers commonly pass a fresh closure every render, and re-running the
   // focus-trap effect on every render would re-fire the initial-focus timer
@@ -54,9 +58,9 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
       }}
     >
       <div className="dialog-backdrop" onClick={() => onOpenChange?.(false)} />
-      <div ref={ref} className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <div ref={ref} className="dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dialog-header">
-          <h3 id="dialog-title">{title}</h3>
+          <h3 id={titleId}>{title}</h3>
           {description && <p>{description}</p>}
         </div>
         <div className="dialog-body">{children}</div>

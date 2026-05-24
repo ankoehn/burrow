@@ -60,8 +60,9 @@ describe("CustomRoleEditor (§4.27)", () => {
     const dlg = await screen.findByRole("dialog");
     await waitFor(() => expect(within(dlg).getByLabelText(/^name$/i)).toHaveValue("analyst"));
     await userEvent.click(within(dlg).getByRole("button", { name: /delete role/i }));
-    // Two Dialogs share aria-labelledby="dialog-title" so role+name lookup is
-    // unreliable; anchor on the confirm body text instead.
+    // Anchor on the confirm body text — there's no ambiguity now that Dialog
+    // gives each instance a unique aria-labelledby (useId), but the closest()
+    // pattern remains a clear way to scope to "the confirm dialog".
     const confirmBody = await screen.findByText(/Delete role 'analyst'\? Users with this role/i);
     const confirm = confirmBody.closest("[role='dialog']") as HTMLElement;
     await userEvent.click(within(confirm).getByRole("button", { name: /^delete$/i }));
