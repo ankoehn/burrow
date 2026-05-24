@@ -139,3 +139,29 @@ After all 13 sections pass, append:
 - [ ]
 
 ---
+
+## 3. Services (burrow.yaml multi-service)
+
+**Goal:** Confirm v0.3 burrow.yaml multi-service surface — `client-multi` exposes 2 services through one client process.
+
+### Steps
+1. Navigate `/services`. Two rows under the `client-multi` client: `svc-a` (remote :9003) and `svc-b` (remote :9004).
+2. Click `svc-a` → service detail page renders (per-service tabs: Overview, Access, AI config if applicable, Connection logs).
+3. Drive traffic through both:
+   ```bash
+   curl -fsS http://localhost:9003/healthz
+   curl -fsS http://localhost:9004/healthz
+   ```
+4. Both services' bytes counters move independently.
+
+### Expected ✅
+- Both services visible under one client.
+- Per-service bytes counters move.
+
+### Gotchas ⚠
+- The basic upstream binary (`test/integration/upstream/main.go`) only exposes `/healthz` and `/echo`. Other paths return 404 from upstream; that is upstream behavior, not a tunnel defect.
+
+### Findings
+- [ ]
+
+---
