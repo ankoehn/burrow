@@ -222,10 +222,16 @@ func (d Deps) SetServiceAccessMode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "burrow_login requires a configured auth_domain")
 		return
 	}
-	// api_key_header is only honored for api_key mode (spec Part C).
+	// api_key_header is only honored for api_key mode (spec Part C). When set,
+	// validate against RFC 7230 token rules so we never persist an
+	// uninterpretable header name (e.g. "Authorization: Bearer" with a colon).
 	header := ""
 	if in.AccessMode == "api_key" {
 		header = in.APIKeyHeader
+		if header != "" && !isValidHTTPHeaderName(header) {
+			writeErr(w, http.StatusBadRequest, "api_key_header must be a valid HTTP header name (RFC 7230 token)")
+			return
+		}
 	}
 	// mtls_ca_pem is only honored for mtls mode.
 	var caPEM []byte
@@ -527,4 +533,31 @@ func (d Deps) SetAccessPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// isValidHTTPHeaderName reports whether s is a non-empty RFC 7230 token
+// (the grammar for HTTP header field names). The valid set is:
+//
+//	tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." / "^"
+//	      / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+//
+// In particular: NO colon, NO whitespace, NO control characters.
+func isValidHTTPHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'':
+		case c == '*' || c == '+' || c == '-' || c == '.' || c == '^' || c == '_':
+		case c == '`' || c == '|' || c == '~':
+		default:
+			return false
+		}
+	}
+	return true
 }
