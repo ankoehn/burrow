@@ -483,3 +483,54 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 12. Postgres swap (v0.5 alpha)
+
+**Goal:** Confirm the same UI works against the Postgres backend.
+
+### Steps
+1. Tear down SQLite stack: `docker compose -f test/integration/full/compose.full.yml down --volumes`.
+2. Bring up with Postgres override:
+   ```bash
+   docker compose \
+     -f test/integration/full/compose.full.yml \
+     -f test/integration/full/compose.full.postgres.yml \
+     up -d --build --wait
+   ```
+3. Verify: `docker compose -f .../compose.full.yml -f .../compose.full.postgres.yml ps` shows `postgres` healthy and `relay` healthy.
+4. Re-run a subset of the above sections: §1 Bootstrap, §2 Tunnels, §4 Tokens, §11a Audit (Verify chain). Each should pass identically.
+5. Verify the relay is actually using Postgres:
+   ```bash
+   docker exec -it burrow-e2e-full-postgres-1 psql -U burrow -d burrow \
+     -c "SELECT count(*) FROM users;"
+   ```
+   Expect ≥ 1 (seeded admin).
+6. Verify `/database` status surface (v0.5.0 Task 15) reports `driver: postgres`:
+   ```bash
+   curl -fsS http://localhost:8080/api/v1/database -H "Cookie: <session>" | jq .
+   ```
+   (Or check `/settings` → "Database" surface in the UI if shipped.)
+7. Tear down + return to SQLite for subsequent sections:
+   ```bash
+   docker compose -f test/integration/full/compose.full.yml \
+                  -f test/integration/full/compose.full.postgres.yml \
+                  down --volumes
+   docker compose -f test/integration/full/compose.full.yml up -d --wait
+   ```
+
+### Expected ✅
+- Stack comes up healthy with Postgres.
+- All re-tested sections pass identically.
+- `psql` confirms data is in Postgres, not SQLite.
+- `/api/v1/database` returns `{"driver":"postgres", "alpha":true, ...}`.
+
+### Gotchas ⚠
+- The relay image needs `-tags=integration,postgres` (handled by `GO_BUILD_TAGS` build arg in `compose.full.postgres.yml`).
+- First boot under Postgres re-runs all migrations against a fresh DB — may take ~5s longer than SQLite warm boot.
+- v0.5 Postgres is marked alpha (`Database.Alpha=true`). Some surfaces (e.g. semantic cache aggregator) may have SQLite-specific assumptions; capture any in Findings.
+- Don't try to run `docker compose` with only one of the two `-f` files when bringing the Postgres stack down — pass both, otherwise compose can't find the postgres service.
+
+### Findings
+- [ ]
+
+---
