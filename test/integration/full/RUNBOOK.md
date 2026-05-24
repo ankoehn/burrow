@@ -339,3 +339,47 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 8. AI Gateway depth (semantic cache, guardrail, redaction — v0.5 surfaces)
+
+**Goal:** v0.5 semantic cache hits on similar prompts; guardrail refuses banned content; redaction masks PII.
+
+### 8a. Semantic cache
+1. `/cache` → "Semantic" tab → enable, similarity threshold 0.85, fallback "Return cached + Burrow-Cache: similar".
+2. Send prompt A:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS -X POST https://$AI.test.local:8443/v1/chat/completions \
+        -H "Authorization: Bearer ai-key-1" \
+        -d '{"model":"mock","stream":false,"messages":[{"role":"user","content":"What is the capital of France?"}]}'
+   ```
+3. Send a *similar* prompt B: `"Tell me the capital of France."` → expect `Burrow-Cache: similar` response header.
+4. `/cache` → "Hits" panel shows 1 semantic hit.
+5. Findings ✅
+
+### 8b. Guardrail
+1. `/guardrails` → add rule: pattern `forbidden`, action "refuse".
+2. Send prompt: `"what about forbidden topics?"` → expect 400 with `{"error":"guardrail.refused"}`.
+3. `/audit` shows `guardrail.refused` entry.
+4. Findings ✅
+
+### 8c. Redaction
+1. `/guardrails` (Redaction tab) → add rule: pattern `email`, action "mask".
+2. Send prompt: `"my email is alice@example.com"`.
+3. Open `/inspector/<ai-service-id>` → latest request → body shows `my email is [REDACTED]`.
+4. Findings ✅
+
+### Gotchas ⚠
+- Semantic cache only fires when v0.5 semantic backend is compiled in (`-tags=semantic_cache`). The default integration build does NOT include it — the Semantic tab will show "Not available" or zeros. To exercise this section, rebuild with:
+  ```bash
+  docker compose -f test/integration/full/compose.full.yml build \
+    --build-arg GO_BUILD_TAGS=integration,semantic_cache relay
+  docker compose -f test/integration/full/compose.full.yml up -d --wait
+  ```
+- mockoai's deterministic 4-dim SHA256-seeded embeddings (`/v1/embeddings`) only give meaningful similarity for prompts that share leading bytes. The "France" example may not cross the 0.85 threshold against a SHA256 seed; lower the threshold to 0.50 or use prompts that share the same first character if you need a guaranteed hit.
+- mockoai always returns the same canned content (`Hello from mockoai.`), so prompt B's response body looks identical to A regardless of cache state. The cache signal is the `Burrow-Cache:` header, not the body.
+
+### Findings
+- [ ]
+
+---
