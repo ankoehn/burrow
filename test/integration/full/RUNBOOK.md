@@ -226,3 +226,74 @@ After all 13 sections pass, append:
 - [ ]
 
 ---
+
+## 6. Access modes
+
+**Goal:** All 4 access modes (open, api_key, burrow_login, mTLS) work end-to-end against the HTTP tunnel from `client-ai` (configured on the `ai` service).
+
+Discover the AI tunnel's subdomain first (same as pre-flight):
+```bash
+AI=$(docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered" | tail -1 | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
+echo "AI subdomain: $AI"
+```
+
+### 6a. Open
+1. `/services` → click the `ai` row → Access tab → mode "Open" → save.
+2. From a shell:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS https://$AI.test.local:8443/healthz
+   ```
+   Expect 200.
+3. Findings ✅
+
+### 6b. API key
+1. Same Access tab → mode "API key" → reveal generated key → copy (`bua_xxx` shape).
+2. From shell:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS https://$AI.test.local:8443/healthz \
+        -H "Authorization: Bearer <key>"
+   ```
+   → 200.
+3. Without header: same curl minus `-H` → 401 with JSON `{"error":"unauthorized"}` (or similar).
+4. Findings ✅
+
+### 6c. Burrow login (SSO)
+1. Access tab → mode "Burrow login" → save. Requires `BURROW_AUTH_DOMAIN` configured (relay container ships with `test.local`; check `docker exec burrow-e2e-full-relay-1 printenv BURROW_AUTH_DOMAIN`).
+2. From browser (incognito) — needs `127.0.0.1 <subdomain>.test.local` in your hosts file: open `https://<subdomain>.test.local:8443/` → expect redirect to the auth surface.
+3. Sign in with admin creds → redirect back → page loads.
+4. Findings ✅
+
+### 6d. mTLS (v0.4 surface)
+1. Access tab → mode "mTLS" → upload trust anchor PEM → save. ⚠ Burrow does NOT sign client certs; you supply both the trust anchor (CA cert) AND mint/issue client certs separately.
+2. To test, generate a client cert against the same test CA:
+   ```bash
+   cd test/integration/full/certs
+   MSYS_NO_PATHCONV=1 openssl req -new -newkey rsa:2048 -nodes \
+     -keyout client.key -out client.csr \
+     -subj "/C=US/O=Burrow Test/CN=e2e-mtls-client"
+   MSYS_NO_PATHCONV=1 openssl x509 -req -in client.csr -days 365 \
+     -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt
+   rm client.csr ca.srl
+   ```
+3. From shell:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS https://$AI.test.local:8443/healthz \
+        --cert certs/client.crt --key certs/client.key
+   ```
+   → 200.
+4. Without `--cert/--key`: → 401.
+5. Cleanup: `git status` the new `client.{crt,key}` and remove them — they should NOT be committed.
+6. Findings ✅ / ❌ (skip if mTLS UI not shipped yet — file follow-up).
+
+### Gotchas ⚠
+- TCP tunnels reject all access modes except "Open" (409 Conflict in UI). Verify by attempting to set api_key on `tcp-echo`.
+- `burrow_login` without `BURROW_AUTH_DOMAIN` configured → 409 from the API.
+- Browser-driven 6c flow requires hosts-file entries (admin on Windows). Use `curl --resolve` for terminal-only testing.
+
+### Findings
+- [ ]
+
+---
