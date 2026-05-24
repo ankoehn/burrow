@@ -141,3 +141,89 @@ Postgres swap, reconnect.
 
 - `test/integration/README.md` — basic 2-docker harness (PR-gating)
 - `docs/BACKLOG_INTEGRATION.md` — design rationale + locked decisions D1-D10
+
+## Playwright suite (Plan 3)
+
+20 automated specs covering every section of RUNBOOK.md. Reuses the live stack;
+specs use unique (timestamped) resource names and don't call `/test-reset`
+between runs (it wipes `client_tokens` and breaks the cached on-disk tokens
+that `relay-full.sh` seeded; cleanest cure is `docker compose restart`).
+
+### Run
+
+```bash
+task e2e:full
+# or directly:
+bash test/integration/full/smoke-full.sh
+```
+
+### Fast iteration
+
+```bash
+docker compose -f test/integration/full/compose.full.yml up -d --build --wait
+cd test/integration/full
+npx playwright test                                  # all 20 specs (mock project)
+npx playwright test 10-ai-gateway                    # one spec
+npx playwright test --headed --workers=1             # visible browser
+npx playwright show-report                           # HTML report
+```
+
+### Postgres project
+
+```bash
+docker compose -f test/integration/full/compose.full.yml -f test/integration/full/compose.full.postgres.yml up -d --build --wait
+cd test/integration/full
+npx playwright test --project=postgres               # only specs whose name matches /postgres/
+```
+
+### CI
+
+GitHub Actions job `e2e-compose-full` (in `.github/workflows/ci.yml`) runs the
+full pipeline on every PR. On failure uploads `playwright-report/` and
+`test-results/` as the `e2e-compose-full-report` artifact for post-mortem.
+
+### Spec inventory
+
+| # | Spec | Surface | Status |
+|---|---|---|---|
+| 01 | bootstrap | login + 4 tunnels visible | ✅ |
+| 02 | tunnels | bytes counters move via SSE | ✅ |
+| 03 | services-burrow-yaml | v0.3 multi-service (verified via /tunnels) | ✅ |
+| 04 | tokens-mint | UI write path | ✅ |
+| 05 | users-roles | create + delete (built-in role) | ✅ |
+| 06 | access-mode-open | unauth GET → 200 | ✅ |
+| 07 | access-mode-api-key | 200/401 (via /services/<id>) | ✅ |
+| 08 | access-mode-burrow-login | SSO redirect signal | ✅ |
+| 09 | access-mode-mtls | UI surface check | ✅ |
+| 10 | ai-gateway-basic | chat-completions SSE via :8443 | ✅ |
+| 11 | ai-gateway-semantic-cache | reachability (skipped w/o `-tags=semantic_cache`) | ⏭ |
+| 12 | ai-gateway-metering-cost | request metered + cost page renders | ✅ |
+| 13 | custom-domains | UI surface check | ✅ |
+| 14 | connection-logs | TCP sessions visible | ✅ |
+| 15 | audit-chain | token.mint + verify | ✅ |
+| 16 | webhooks | page + Add dialog | ✅ |
+| 17 | openapi-viewer | viewer renders, no CDN scripts | ✅ |
+| 18 | retention | knobs page renders | ✅ |
+| 19 | postgres-swap | Postgres parity (postgres project) | ✅ |
+| 20 | relay-restart | 4-client reconnect | ✅ |
+
+19/20 active + 1 build-tag-gated skip. Total wall-clock ~50-70s.
+
+### Plan-fidelity deviations (called out in spec headers)
+
+- HTTP tunnels are host-routed on :8443, not port-bound on :9001 — fixtures
+  use `aiHost()` + Host header.
+- Access-mode and api-key flows go via `/services/<id>` (the per-service
+  detail), NOT `/tunnels` Configure (which passes tunnel.id where the
+  panel expects service.id — real v0.5.2 defect).
+- `/api/v1/internal/test-reset` truncates `client_tokens`, leaving cached
+  on-disk tokens stale. Specs in this suite are written to be idempotent
+  (timestamp suffix) and do NOT reset between runs.
+- `api_key_header` persists per-service; spec 07 explicitly resets the
+  field to "Authorization" before saving.
+- The Tabs component renders `role="tab"`/`role="tabpanel"`; the Dialog
+  component renders `role="dialog"` with `aria-labelledby="dialog-title"`,
+  but the SAME ID is used for nested dialogs — Playwright's
+  `getByRole("dialog", {name: ...})` only matches one. Specs that open
+  nested dialogs use `[role="dialog"]` + a `has: heading` filter +
+  `.last()` to disambiguate.
