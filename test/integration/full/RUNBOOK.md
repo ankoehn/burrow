@@ -199,3 +199,30 @@ After all 13 sections pass, append:
 - [ ]
 
 ---
+
+## 5. Users + Roles
+
+**Goal:** v0.2 user CRUD + v0.4 custom roles work end-to-end.
+
+### Steps
+1. `/users` → "Invite user" → email `bob@e2e.local`, role `viewer`, save → toast "Invitation sent" (SMTP unconfigured by default — the row should still land with status `invited`; the email send itself may fail silently if SMTP isn't wired).
+2. Bob's row visible with role=viewer + status=invited.
+3. Suspend Bob → status flips to suspended → page reload preserves.
+4. Reactivate → status=active (or invited).
+5. Delete Bob → row removed.
+6. `/roles` → "New role" → name `auditor`, permissions: `audit:read`, `audit:verify`, `service:read`, save.
+7. Re-invite Bob with role=`auditor` → confirm role assigned.
+8. Cleanup: delete Bob; delete `auditor` role.
+
+### Expected ✅
+- All user CRUD operations succeed without console errors.
+- Custom role assignment persists across page reload.
+
+### Gotchas ⚠
+- The exact permission catalog is set in `internal/authz/`. If a permission name in the role-creation form doesn't match, the role will save but won't grant the implied access. Cross-check against `internal/authz/perms.go` if uncertain.
+- If SMTP isn't configured, the invite email isn't sent but the user row IS created. Use `bob@e2e.local` (a sink address) and don't expect a real email.
+
+### Findings
+- [ ]
+
+---
