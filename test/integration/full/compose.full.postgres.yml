@@ -23,7 +23,13 @@ services:
       BURROW_ADMIN_EMAIL: admin@e2e.local
       BURROW_ADMIN_PASSWORD: e2e-pass
       # Override the default SQLite path with the v0.5 alpha Postgres URL.
+      # Dockerfile.relay sets BURROW_DATABASE_PATH=/data/burrow.db by default;
+      # we MUST clear it here or the server config rejects both being set
+      # ("database_url and database_path must not both be set").
+      BURROW_DATABASE_PATH: ""
       BURROW_DATABASE_URL: postgres://burrow:burrow@postgres:5432/burrow?sslmode=disable
+      # v0.5 alpha guard: the Postgres backend is opt-in.
+      BURROW_EXPERIMENTAL_POSTGRES_BACKEND: "true"
     # Rebuild with -tags=integration,postgres for the v0.5 alpha backend.
     # Dockerfile.relay accepts GO_BUILD_TAGS (defaults to 'integration').
     build:
