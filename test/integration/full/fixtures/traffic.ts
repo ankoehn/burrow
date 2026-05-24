@@ -13,9 +13,19 @@ import {
 // Hits the TCP echo tunnel on its --remote port (9002). Each call is a fresh
 // HTTP request; combined with curl-style behavior these become distinct
 // sessions in the connection-logs ledger.
+//
+// Each payload is ~4KB to guarantee the bytes_in/out formatted display moves.
+// `connection: close` is REQUIRED: bridge.Pipe counts bytes only after
+// io.Copy returns (i.e. when the TCP connection closes). HTTP/1.1 keep-alive
+// holds the connection open and the relay never flushes the byte counter
+// during the test window otherwise.
 export async function pingTcpTunnel(request: APIRequestContext, n = 5): Promise<void> {
+  const padding = "x".repeat(4000);
   for (let i = 0; i < n; i++) {
-    const res = await request.post(`${TUNNEL_TCP_URL}/echo`, { data: { i } });
+    const res = await request.post(`${TUNNEL_TCP_URL}/echo`, {
+      data: { i, padding },
+      headers: { "content-type": "application/json", connection: "close" },
+    });
     if (res.status() !== 200) throw new Error(`tcp ping ${i} status ${res.status()}`);
   }
 }
