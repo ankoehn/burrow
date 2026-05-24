@@ -534,3 +534,36 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 13. Reconnect (relay container restart)
+
+**Goal:** All 3 clients reconnect after relay container restart; dashboard reflects recovery.
+
+### Steps
+1. With stack up, navigate `/tunnels`. Confirm all 4 tunnels connected.
+2. From shell: `docker compose -f test/integration/full/compose.full.yml restart relay`.
+3. Within 5-10s, dashboard may show "disconnected" badges (—) OR redirect to /login if session lost.
+4. If logged out, re-login.
+5. Within 30s, all 4 tunnels show `connected` again.
+6. Drive traffic to confirm:
+   ```bash
+   curl -fsS http://localhost:9002/healthz
+   AI=$(docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered" | tail -1 | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS https://$AI.test.local:8443/healthz
+   ```
+   → both 200.
+
+### Expected ✅
+- All 4 tunnels reconnect within 30s.
+- Driving traffic post-reconnect succeeds.
+
+### Gotchas ⚠
+- Client backoff is configurable; first reconnect attempt is usually within 1-2s. Subsequent retries exponentially.
+- Don't `docker restart` on a single container — use `docker compose restart relay` so the network alias persists.
+- The HTTP tunnel's subdomain MAY change after restart if the relay's in-memory registry was wiped (subdomain is stored per-session). Re-discover via `docker logs ... | grep "http tunnel registered" | tail -1`.
+
+### Findings
+- [ ]
+
+---
