@@ -414,3 +414,37 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 10. Connection logs (v0.5 surface)
+
+**Goal:** Every TCP tunnel session writes a row to per-tunnel connection-logs; UI displays + NDJSON export works.
+
+### Steps
+1. From shell, hit the TCP echo tunnel 5x with fresh sessions:
+   ```bash
+   for i in 1 2 3 4 5; do
+     curl --no-keepalive -fsS http://localhost:9002/healthz
+   done
+   ```
+2. `/services` → `tcp-echo` → "Connection logs" tab.
+3. Expect 5 rows (or fewer if sessions are keep-alive coalesced): each shows `start_ts`, `end_ts`, `duration_ms`, `bytes_in`, `bytes_out`, `source_ip`, `tunnel_id`.
+4. Click "Export NDJSON" → file downloads.
+5. Verify: `head -1 connection-logs.ndjson | jq .` parses as JSON with the expected fields.
+6. Rollups: `/services/tcp-echo/connection-logs/rollups` (or via UI: rollups tab) shows daily aggregates. After running step 1 a few minutes apart you should see rows aggregating by day.
+7. Top-source-IPs: if the "Top source IPs" feature is enabled (`connection_logs.rollup_include_top_ips=true`), the rollup row shows the source IPs sorted by traffic.
+8. Retention: `/settings` → "Retention" → set `connection_logs.retention_days = 7` → save.
+
+### Expected ✅
+- Rows visible within 2s of driving traffic.
+- NDJSON export downloads a valid file.
+- Retention knob accepts integer value.
+
+### Gotchas ⚠
+- Connection logs only fire for TCP tunnels (per-session). HTTP tunnels emit per-request entries via the inspector instead.
+- If sessions are keep-alive, you may see 1 row for many curls. Use `curl --no-keepalive` to force fresh sessions.
+- The `connection_logs.rollup_include_top_ips` setting is opt-in (default OFF) for privacy reasons. The UI toggle was added in v0.5.1 P2.1.
+
+### Findings
+- [ ]
+
+---
