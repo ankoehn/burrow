@@ -383,3 +383,34 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 9. Custom domains (v0.5 surface)
+
+**Goal:** Per-service operator-supplied cert pair lets a custom hostname route to a tunnel.
+
+### Steps
+1. `/services` → `ai` → "Custom domains" tab → "Add domain".
+2. Domain: `api.test.local`; upload cert pair: `test/integration/full/certs/wildcard.test.local.crt` + `wildcard.test.local.key` (covers `*.test.local`).
+3. Save → row appears with status `active` (or `pending` initially, transitioning to `active` after the daily status tick).
+4. From shell:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "api.test.local:8443:127.0.0.1" \
+        -fsS https://api.test.local:8443/healthz
+   ```
+   → 200 (proxied to the `ai` service's mockoai upstream).
+5. Cleanup: delete the custom domain entry.
+
+### Expected ✅
+- Domain saves with active status.
+- HTTPS request to the custom hostname routes to the configured service.
+- Status column reflects the state machine: `pending` → `active` (transitions captured via the daily tick + webhook in v0.5.2 Task 10).
+
+### Gotchas ⚠
+- The wildcard test cert's SAN includes `*.test.local` and `test.local` — `api.test.local` matches. If you upload a cert for an unrelated CN (e.g., `example.com`), the proxy WILL still serve it for the configured custom domain, but `curl --resolve` won't help against a real DNS resolver.
+- ACME auto-issuance is NOT in v0.5 (deferred to v0.3.1 backlog). Operator-supplied cert pair only.
+- Status transitions (`active`/`expiring`/`expired`/`pending`) are driven by a daily background tick (v0.5.2 Task 10). To observe `expiring`, you'd need a cert with `notAfter` within ~30 days; the test wildcard cert is 10-year so it stays `active`.
+
+### Findings
+- [ ]
+
+---
