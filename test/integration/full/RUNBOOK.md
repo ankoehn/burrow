@@ -297,3 +297,45 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 7. AI Gateway basic (chat-completions, metering, rate limit, cost)
+
+**Goal:** v0.4 AI gateway middleware chain works end-to-end via mockoai.
+
+### Steps
+1. `/ai/endpoints` → confirm `ai` service auto-registered (or click "Register endpoint" → select `ai` service → save).
+2. `/tokens` → mint `ai-key-1` → copy.
+3. Discover AI subdomain:
+   ```bash
+   AI=$(docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered" | tail -1 | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
+   ```
+4. From shell, hit chat-completions:
+   ```bash
+   curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
+        -fsS -N -X POST https://$AI.test.local:8443/v1/chat/completions \
+        -H "Authorization: Bearer ai-key-1" \
+        -H "Content-Type: application/json" \
+        -d '{"model":"mock","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+   ```
+5. Expect SSE stream with `data: {...}` chunks + `[DONE]` (5 chunks total: 4 content + 1 DONE).
+6. `/ai/endpoints` → click `ai` → endpoint detail page → Metering tab → 1 request, ~12 tokens in/out (mockoai's hard-coded usage values).
+7. `/cost` → cost row for `ai-key-1` shows `$0.0000X` (small but non-zero if mock-model pricing is configured; else $0).
+8. Repeat the curl 20 times rapidly → trigger rate limit → expect 429 on later calls.
+9. After rate limit fires, `/audit` should have a `ratelimit.enforced` entry.
+
+### Expected ✅
+- SSE streams without buffering (chunks arrive sequentially, not in one batch).
+- Metering increments per request.
+- Cost updates (or stays $0 if no pricing configured — acceptable).
+- Rate limit triggers 429.
+- Audit chain captures `ratelimit.enforced`.
+
+### Gotchas ⚠
+- mockoai's `/v1/chat/completions` doesn't honor the bearer token (it accepts every request). The bearer is checked by Burrow's proxy access-mode gate BEFORE the request reaches mockoai. So 401 without bearer means Burrow's gate fired; 200 with bearer means Burrow accepted + proxied.
+- Mock-oai cost depends on `model_aliases` + `cost_pricing` config. If pricing isn't set for `mock`/`claude-mock`, cost stays $0.0000. Either configure pricing OR accept $0 as the pass condition.
+- The `mock` model name isn't mapped to a real provider — Burrow won't try to forward to OpenAI/Anthropic. mockoai is the upstream.
+
+### Findings
+- [ ]
+
+---
