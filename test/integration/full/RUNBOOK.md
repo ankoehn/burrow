@@ -448,3 +448,38 @@ echo "AI subdomain: $AI"
 - [ ]
 
 ---
+
+## 11. Audit + Webhooks + OpenAPI viewer + Retention
+
+### 11a. Audit log
+1. `/audit` → table populated (entries from prior sections: `user.create`, `token.mint`, `ratelimit.enforced`, etc.).
+2. Search: filter by `token.mint` → only mint events visible.
+3. Click row → expand → shows JSON payload + `prev_hash` + `hash`.
+4. "Verify chain" → green notice "Chain valid from <first_id> to <last_id>".
+
+### 11b. Webhooks (v0.5 expanded vocabulary)
+1. `/webhooks` → "New webhook" → URL `http://mockoai:8081/healthz` (in-network catchall), events: `token.mint`, `ratelimit.enforced`, `connection.session_summary` → save.
+2. Mint a token in another tab. Within 5s, webhook delivery succeeds (200 from mockoai's `/healthz`).
+3. `/webhooks` → delivery log shows entry with status=200.
+4. v0.5 payload templates: edit the webhook → enable "Template" → paste `{"event":"{{.Action}}","actor":"{{.ActorEmail}}"}` → save.
+5. Mint another token → delivery body now matches the template.
+
+### 11c. OpenAPI viewer (v0.5 surface)
+1. `/settings` → "API" → "OpenAPI viewer" link → opens viewer page (path: `/api/v1/openapi/viewer`).
+2. Navigates: list of endpoints (servers, routes, schemas) renders from the embedded `openapi.yaml`.
+3. No external CDN scripts loaded (DevTools Network → filter `cdn.` → empty).
+
+### 11d. Retention
+1. `/settings` → "Retention" → set `audit.retention_days = 30`, `usage.retention_days = 7`, `inspector.retention_count = 100` → save.
+2. Page reload preserves values.
+3. (Enforcement is a backend compactor — manual smoke can't easily prove it without injecting old rows; defer to the Playwright spec or an integration test.)
+
+### Gotchas ⚠
+- The webhook target URL is `http://mockoai:8081/healthz` — that's the in-network DNS name, reachable from the relay container. Don't use `http://localhost:8081/...` (mockoai's :8081 is NOT published to the host).
+- Audit "Verify chain" computes hashes over a range; on a fresh /test-reset the chain is empty and verification returns trivially.
+- OpenAPI viewer is gated by admin OR `metrics:read` — viewer/openapi.yaml endpoints under the same gate.
+
+### Findings
+- [ ]
+
+---
