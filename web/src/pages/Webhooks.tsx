@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, EmptyState, Input, SkeletonRows } from "@/components/ds";
 import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
 import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
@@ -211,6 +211,13 @@ export default function Webhooks() {
 
       {!list.data ? (
         <SkeletonRows n={3} />
+      ) : list.data.length === 0 ? (
+        <EmptyState
+          title="No webhooks yet"
+          action={<Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add a webhook</Button>}
+        >
+          Burrow can POST to a URL when audit events, AI requests, or other signals fire.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Webhooks">
@@ -218,44 +225,42 @@ export default function Webhooks() {
               <tr><th>Name</th><th>URL</th><th>Status</th><th>Failures</th><th className="col-actions"></th></tr>
             </thead>
             <tbody>
-              {list.data.length === 0
-                ? <tr><td colSpan={5} className="muted">No webhooks yet.</td></tr>
-                : list.data.map((w) => {
-                    const s = statusOf(w);
-                    return (
-                      <tr key={w.id}>
-                        <td>{w.name}</td>
-                        <td>
-                          <span className="row gap-2" style={{ alignItems: "center" }}>
-                            <span className="mono small truncate">{w.url}</span>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              aria-label="Copy webhook URL"
-                              onClick={() => copy(w.url)}
-                            >
-                              <Copy size={13} />
-                            </button>
-                          </span>
-                        </td>
-                        <td><Badge kind={s.kind}>{s.text}</Badge></td>
-                        <td className="mono">{w.consecutive_failures}</td>
-                        <td className="col-actions">
-                          <DropdownMenu
-                            trigger={<button type="button" className="icon-btn" aria-label={`Actions for ${w.name}`}>⋯</button>}
-                            items={[
-                              { label: "Edit", onSelect: () => openEdit(w) },
-                              w.paused
-                                ? { label: "Resume", onSelect: () => resume.mutate(w.id) }
-                                : { label: "Pause", onSelect: () => pause.mutate(w.id) },
-                              { label: "Send test event", onSelect: () => { void apiFetch(`/webhooks/${w.id}/test`, { method: "POST", body: "{}" }); } },
-                              { label: "Delete", danger: true, onSelect: () => remove.mutate(w.id) },
-                            ]}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
+              {list.data.map((w) => {
+                const s = statusOf(w);
+                return (
+                  <tr key={w.id}>
+                    <td>{w.name}</td>
+                    <td>
+                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                        <span className="mono small truncate">{w.url}</span>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label="Copy webhook URL"
+                          onClick={() => copy(w.url)}
+                        >
+                          <Copy size={13} />
+                        </button>
+                      </span>
+                    </td>
+                    <td><Badge kind={s.kind}>{s.text}</Badge></td>
+                    <td className="mono">{w.consecutive_failures}</td>
+                    <td className="col-actions">
+                      <DropdownMenu
+                        trigger={<button type="button" className="icon-btn" aria-label={`Actions for ${w.name}`}>⋯</button>}
+                        items={[
+                          { label: "Edit", onSelect: () => openEdit(w) },
+                          w.paused
+                            ? { label: "Resume", onSelect: () => resume.mutate(w.id) }
+                            : { label: "Pause", onSelect: () => pause.mutate(w.id) },
+                          { label: "Send test event", onSelect: () => { void apiFetch(`/webhooks/${w.id}/test`, { method: "POST", body: "{}" }); } },
+                          { label: "Delete", danger: true, onSelect: () => remove.mutate(w.id) },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

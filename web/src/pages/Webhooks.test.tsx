@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
@@ -9,6 +9,8 @@ function mount() {
 }
 
 describe("Webhooks (§4.26)", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
   it("renders the verbatim HMAC preamble", async () => {
     mount();
     expect(
@@ -73,6 +75,24 @@ describe("Webhooks (§4.26)", () => {
       const matches = screen.getAllByText(ev);
       expect(matches.length).toBeGreaterThan(0);
     }
+  });
+
+  it("renders a real EmptyState (not a flat tr) when there are no webhooks (C3)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/webhooks/deliveries")) {
+        return new Response(JSON.stringify([]), { status: 200 }) as Response;
+      }
+      if (u.includes("/webhooks")) {
+        return new Response(JSON.stringify([]), { status: 200 }) as Response;
+      }
+      return new Response("[]", { status: 200 }) as Response;
+    });
+    const { container } = mount();
+    await waitFor(() => {
+      expect(container.querySelector(".state-card")).not.toBeNull();
+      expect(container.querySelector(".state-card .icon-bubble")).not.toBeNull();
+    });
   });
 
   it("Edit menu opens dialog with template editor + Save → PUT /webhooks/:id", async () => {
