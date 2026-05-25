@@ -12,6 +12,29 @@ import (
 	"github.com/ankoehn/burrow/internal/store"
 )
 
+// ConnectInfo is the response shape for GET /api/v1/clients/connect-info.
+// It tells the "Connect a client" wizard what `--server` argument to put
+// into the generated `burrow connect …` command. Distinct from the HTTP
+// dashboard host:port — the control plane listens on a different port
+// (e.g. :7000 in the bundled compose stack; :8080 serves the dashboard).
+type ConnectInfo struct {
+	Server string `json:"server"`
+}
+
+// GetConnectInfo returns the relay control-plane endpoint clients should
+// dial. Session-authed (any signed-in user can render the wizard).
+//
+// When Deps.ControlListen is empty (legacy boot, tests) the handler
+// falls back to the request Host header so the wizard still copy-pastes
+// something usable on a single-host dev deploy.
+func (d Deps) GetConnectInfo(w http.ResponseWriter, r *http.Request) {
+	server := d.ControlListen
+	if server == "" {
+		server = r.Host
+	}
+	writeJSON(w, http.StatusOK, ConnectInfo{Server: server})
+}
+
 // ListClients returns live clients grouped with aggregate traffic (admin only).
 // GET /api/v1/clients
 func (d Deps) ListClients(w http.ResponseWriter, r *http.Request) {

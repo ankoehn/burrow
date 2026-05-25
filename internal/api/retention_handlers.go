@@ -30,11 +30,14 @@ type retentionSettingsResp struct {
 	AuditRetentionNote string `json:"audit_retention_note"`
 }
 
-const auditRetentionNote = "audit_retention_days controls deletion of the six high-frequency " +
-	"leaf action types only (redaction.applied, guardrail.refused, connection.session_summary, " +
-	"retention.compact, ai.cache.promoted, ai.upstream_error). Structural audit rows " +
-	"(user.create, session.create, etc.) are never deleted to preserve chain integrity. " +
-	"Set audit_retention_days to 0 to keep all eligible rows forever."
+// User-facing helper text shown beneath the Audit log field (P1-11).
+// Schema field names and internal event names are intentionally absent;
+// only the operator-visible meaning is described.
+const auditRetentionNote = "Sets how long Burrow keeps high-frequency audit " +
+	"entries — redactions, guardrail refusals, AI cache promotions, upstream " +
+	"errors, and session summaries. Structural entries (user, session, and " +
+	"service lifecycle) are kept forever to preserve the hash chain. Set to " +
+	"0 to keep every entry forever."
 
 // retentionSettingsPutReq is the PUT /api/v1/settings/retention request shape.
 // All fields are pointers so callers can omit a field to leave it unchanged.

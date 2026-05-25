@@ -180,6 +180,11 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/auth/webauthn/credentials", d.GetWebAuthnCredentials)
 			r.Delete("/auth/webauthn/credentials/{id}", d.DeleteWebAuthnCredential)
 			r.Get("/me", d.Me)
+			// /clients/connect-info is session-authed (NOT admin-gated like
+			// the rest of /clients/*) so the "Connect a client" wizard works
+			// for any user with the tokens:write permission to mint a
+			// connect token.
+			r.Get("/clients/connect-info", d.GetConnectInfo)
 			r.Get("/tokens", d.ListTokens)
 			r.Post("/tokens", d.CreateToken)
 			r.Delete("/tokens/{id}", d.RevokeToken)

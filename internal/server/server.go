@@ -77,6 +77,16 @@ type TunnelView struct {
 	// services row; the UI needs that ID — not the per-session tunnel.ID —
 	// for per-service routes (/services/{id}/access-mode, /api-keys, etc.).
 	ServiceID string
+	// Hostname is the routable FQDN for http tunnels (subdomain.AuthDomain),
+	// empty for tcp tunnels and for http tunnels when Options.AuthDomain is
+	// unset. Surfaced to the dashboard so the Tunnels list can show users a
+	// click-to-copy endpoint instead of a bare subdomain.
+	Hostname string
+	// AccessMode is the per-service access mode in effect on the live
+	// http-tunnel registration ("open"/"api_key"/"burrow_login"/"mtls"),
+	// empty for tcp tunnels or when no ServiceResolver was wired. The
+	// dashboard renders an "Open" badge as the default when this is empty.
+	AccessMode string
 }
 
 // ControlSessionSink is the interface the server uses to record a
@@ -380,6 +390,16 @@ func (s *Server) LookupSessionByTunnelID(tunnelID string) (sessionID, userID str
 	return cs.SessionID, cs.UserID, true
 }
 
+// hostnameFor returns the routable FQDN for an http tunnel
+// (subdomain.AuthDomain) or "" for tcp tunnels / when AuthDomain is unset.
+// Centralised so SnapshotSessions and ListUserTunnels stay in sync (P0-5).
+func (s *Server) hostnameFor(tn *Tunnel) string {
+	if !tn.IsHTTP || tn.Subdomain == "" || s.opts.AuthDomain == "" {
+		return ""
+	}
+	return tn.Subdomain + "." + s.opts.AuthDomain
+}
+
 // SnapshotSessions returns all live client sessions with their tunnels.
 func (s *Server) SnapshotSessions() []SessionSnapshot {
 	var out []SessionSnapshot
@@ -393,6 +413,8 @@ func (s *Server) SnapshotSessions() []SessionSnapshot {
 				ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
 				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
 				Connected: true,
+				ServiceID: tn.ServiceID,
+				Hostname:  s.hostnameFor(tn),
 			})
 		}
 		out = append(out, ss)
@@ -412,6 +434,7 @@ func (s *Server) ListUserTunnels(userID string) []TunnelView {
 				ID: tn.ID, Name: tn.Name, Type: tn.Type, RemotePort: tn.RemotePort,
 				LocalAddr: tn.LocalAddr, BytesIn: tn.BytesIn.Load(), BytesOut: tn.BytesOut.Load(),
 				Connected: true, ServiceID: tn.ServiceID,
+				Hostname: s.hostnameFor(tn),
 			})
 		}
 	}

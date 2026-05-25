@@ -1956,6 +1956,26 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/clients/connect-info:
+    get:
+      tags: [clients]
+      summary: Get the control-plane endpoint clients should dial
+      description: >
+        Returns the host:port a `burrow connect` invocation must point at
+        with --server. Session-authed; any signed-in user may read it so
+        the "Connect a client" wizard can print a working command.
+      responses:
+        '200':
+          description: Connect info envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server]
+                properties:
+                  server: { type: string, example: "relay.example.com:7000" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ────────────────────────────────────────────────────────────────────────
   # Geo
   # ────────────────────────────────────────────────────────────────────────

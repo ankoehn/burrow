@@ -181,6 +181,17 @@ type TunnelView struct {
 	// the tunnel.id for http tunnels yields 404 because per-session tunnel
 	// UUIDs differ from the persisted service UUID.
 	ServiceID string `json:"service_id,omitempty"`
+	// Hostname is the routable FQDN for http tunnels (subdomain.AuthDomain).
+	// Omitted for tcp tunnels and for http tunnels when the relay was
+	// started without an AuthDomain. The Tunnels page renders it with a
+	// copy affordance so users can paste a working endpoint immediately
+	// (P0-5 / P1-6).
+	Hostname string `json:"hostname,omitempty"`
+	// AccessMode is the per-service access mode currently in effect
+	// ("open"/"api_key"/"burrow_login"/"mtls"). Omitted for tcp tunnels and
+	// when no durable services row is wired. The Tunnels page falls back to
+	// the "Open" badge as a sensible default when this is empty (P0-5).
+	AccessMode string `json:"access_mode,omitempty"`
 }
 
 // TunnelLister returns the live tunnels owned by a user (cmd/server adapts the registry).
@@ -246,6 +257,13 @@ type Deps struct {
 	// Empty means no auth domain is configured; burrow_login mode is rejected
 	// with 409 when this field is empty.
 	AuthDomain string
+	// ControlListen is the relay's control-plane listen address — the value
+	// `burrow connect --server …` must point at. Surfaced by the
+	// /api/v1/clients/connect-info endpoint so the "Connect a client" wizard
+	// can print a copy-pasteable command instead of guessing that the API
+	// dashboard host:port is also the control endpoint (P1-2). Falls back to
+	// the request Host header when empty.
+	ControlListen string
 
 	// v0.4.0 surfaces — additive; nil-safe handlers degrade gracefully.
 	// CacheEngine is the exact-match prompt cache (clear/stats surface for

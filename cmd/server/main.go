@@ -82,15 +82,31 @@ type userTunnelLister interface {
 // tunnelListerAdapter exposes the live server registry to the HTTP API,
 // converting server.TunnelView to api.TunnelView (keeps internal/api
 // decoupled from internal/server, same pattern as tunnelStoreAdapter).
-type tunnelListerAdapter struct{ s userTunnelLister }
+//
+// access enriches the access_mode field on http tunnels by looking up the
+// persisted tunnel row (best-effort: a missing row leaves the field empty,
+// so the dashboard falls back to its "Open" default — never blocks the
+// hot read path on a store error).
+type tunnelListerAdapter struct {
+	s      userTunnelLister
+	access tunnelGetter // optional; nil in unit tests
+}
 
 func (a tunnelListerAdapter) ListUserTunnels(userID string) []api.TunnelView {
 	var out []api.TunnelView
 	for _, t := range a.s.ListUserTunnels(userID) {
+		mode := t.AccessMode
+		if mode == "" && a.access != nil && t.Type == "http" {
+			if row, err := a.access.GetTunnel(context.Background(), t.ID); err == nil {
+				mode = row.AccessMode
+			}
+		}
 		out = append(out, api.TunnelView{
 			ID: t.ID, Name: t.Name, Type: t.Type, RemotePort: t.RemotePort,
 			LocalAddr: t.LocalAddr, BytesIn: t.BytesIn, BytesOut: t.BytesOut, Connected: t.Connected,
-			ServiceID: t.ServiceID,
+			ServiceID:  t.ServiceID,
+			Hostname:   t.Hostname,
+			AccessMode: mode,
 		})
 	}
 	return out
@@ -460,7 +476,7 @@ func main() {
 			apiSrv := &http.Server{
 				Addr: cfg.HTTPListen,
 				Handler: api.NewRouter(api.Deps{
-					Users: st, Tunnels: tunnelListerAdapter{srv}, Events: bus,
+					Users: st, Tunnels: tunnelListerAdapter{s: srv, access: st}, Events: bus,
 					Log: log, SecureCookies: effectiveSecureCookies, HTTPSEnabled: httpsEnabled,
 					SPA: spaHandler, TrustedProxies: cfg.TrustedProxies,
 					Roles: st, Sessions: st, Settings: st,
@@ -470,6 +486,11 @@ func main() {
 					Services:    st,
 					LiveTunnels: liveTunnelLookupAdapter{srv: srv},
 					AuthDomain:  cfg.AuthDomain,
+					// Control plane is on a different port from the API/dashboard
+					// (e.g. compose maps :7000 control, :8080 dashboard). Surface
+					// it via /clients/connect-info so the "Connect a client" wizard
+					// prints a working `burrow connect --server …` command. (P1-2)
+					ControlListen: cfg.Listen,
 					// v0.4.0 Task 20: backup / restore wiring.
 					BackupDir:      backupDir,
 					BackupRunner:   backupRunnerAdapter{cfg: cfg},

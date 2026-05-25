@@ -1,10 +1,23 @@
 package main
 
 import (
+	"context"
 	"testing"
 
+	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/server"
 )
+
+// fakeAccessModeGetter satisfies tunnelGetter for the adapter's access-mode
+// enrichment path. The adapter only inspects AccessMode, so the other
+// db.Tunnel fields are intentionally left zero. (Distinct from the
+// fakeTunnelGetter in clients_adapter_test.go which exercises a different
+// shape of the same interface.)
+type fakeAccessModeGetter struct{ mode string }
+
+func (f fakeAccessModeGetter) GetTunnel(_ context.Context, _ string) (db.Tunnel, error) {
+	return db.Tunnel{AccessMode: f.mode}, nil
+}
 
 // fakeUserTunnelLister is a minimal userTunnelLister that returns a fixed
 // snapshot, so the adapter's server.TunnelView -> api.TunnelView mapping can
@@ -36,10 +49,12 @@ func TestTunnelListerAdapterMapsAllFields(t *testing.T) {
 		BytesOut:   8484,
 		Connected:  true,
 		ServiceID:  "svc-99",
+		Hostname:   "k7p2qx.tunnels.example.com",
+		AccessMode: "api_key",
 	}
 	f := &fakeUserTunnelLister{views: []server.TunnelView{src}}
 
-	out := tunnelListerAdapter{f}.ListUserTunnels("u1")
+	out := tunnelListerAdapter{s: f}.ListUserTunnels("u1")
 
 	if f.gotUser != "u1" {
 		t.Fatalf("adapter passed wrong userID to lister: %q", f.gotUser)
@@ -75,13 +90,38 @@ func TestTunnelListerAdapterMapsAllFields(t *testing.T) {
 	if got.ServiceID != src.ServiceID {
 		t.Errorf("ServiceID: got %q want %q", got.ServiceID, src.ServiceID)
 	}
+	if got.Hostname != src.Hostname {
+		t.Errorf("Hostname: got %q want %q", got.Hostname, src.Hostname)
+	}
+	if got.AccessMode != src.AccessMode {
+		t.Errorf("AccessMode: got %q want %q", got.AccessMode, src.AccessMode)
+	}
 }
 
 // TestTunnelListerAdapterEmpty verifies the nil/empty passthrough (no panic,
 // empty result) so the "no live tunnels" path stays covered too.
 func TestTunnelListerAdapterEmpty(t *testing.T) {
-	out := tunnelListerAdapter{&fakeUserTunnelLister{}}.ListUserTunnels("u1")
+	out := tunnelListerAdapter{s: &fakeUserTunnelLister{}}.ListUserTunnels("u1")
 	if len(out) != 0 {
 		t.Fatalf("expected 0 views for empty lister, got %d", len(out))
+	}
+}
+
+// TestTunnelListerAdapterEnrichesAccessModeFromStore verifies that when the
+// live registry leaves AccessMode empty (cmd/server is the only place wired
+// to a store), the adapter falls back to the persisted tunnel row so the
+// dashboard renders the durable mode instead of always-Open.
+func TestTunnelListerAdapterEnrichesAccessModeFromStore(t *testing.T) {
+	src := server.TunnelView{
+		ID: "tn-2", Name: "ai", Type: "http", LocalAddr: "127.0.0.1:11434",
+		Connected: true, ServiceID: "svc-ai",
+		Hostname: "5mjmrc.test.local",
+		// AccessMode intentionally empty — server.go doesn't see the durable
+		// row, the adapter must fetch it.
+	}
+	f := &fakeUserTunnelLister{views: []server.TunnelView{src}}
+	got := tunnelListerAdapter{s: f, access: fakeAccessModeGetter{mode: "api_key"}}.ListUserTunnels("u1")
+	if len(got) != 1 || got[0].AccessMode != "api_key" {
+		t.Fatalf("expected adapter to enrich AccessMode=api_key; got %+v", got)
 	}
 }
