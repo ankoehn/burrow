@@ -31,7 +31,7 @@ function SecurityKeys() {
             device-bound key for added security.
           </p>
         </div>
-        <WebAuthnRegisterButton />
+        {data && data.length > 0 && <WebAuthnRegisterButton />}
       </div>
       {isLoading ? <p className="muted">Loading…</p> : (data ?? []).length === 0 ? (
         <EmptyState
