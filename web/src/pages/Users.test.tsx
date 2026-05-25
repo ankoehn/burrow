@@ -21,4 +21,15 @@ describe("Users list", () => {
     await waitFor(() => expect(screen.queryByText("bob@acme.io")).not.toBeInTheDocument());
     expect(screen.getByText("carol@acme.io")).toBeInTheDocument();
   });
+
+  it("filter row has explicit gap so the Role select can't overlap the count (C1)", async () => {
+    const { container } = renderApp(<Users />);
+    await waitFor(() => screen.getByRole("heading", { name: "Users" }));
+    const row = container.querySelector(".users-filter-row");
+    expect(row).not.toBeNull();
+    // The gap is defined in CSS (not inline), so we verify the class is present
+    // and the element contains both the Role select and the count label.
+    expect(row!.querySelector("select, [role='combobox'], button")).not.toBeNull();
+    expect(row!.textContent).toMatch(/total/);
+  });
 });

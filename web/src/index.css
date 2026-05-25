@@ -1377,3 +1377,11 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   background: color-mix(in oklch, var(--destructive) 10%, transparent);
   margin-bottom: 8px;
 }
+
+/* Users filter row — ensures Role select never overlaps the count label (C1) */
+.users-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}

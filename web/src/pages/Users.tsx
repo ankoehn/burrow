@@ -68,7 +68,7 @@ export default function Users() {
         <Button variant="primary" size="sm" onClick={() => setCreating(true)}>Create user</Button>
       </div>
 
-      <div className="row gap-2" style={{ margin: "12px 0", alignItems: "center" }}>
+      <div className="users-filter-row row gap-2" style={{ margin: "12px 0", alignItems: "center" }}>
         <Input
           type="search"
           role="searchbox"
