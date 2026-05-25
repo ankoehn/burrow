@@ -82,6 +82,12 @@ describe("Layout theme toggle", () => {
     expect(screen.getByRole("button", { name: /log out/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /switch to/i })).toBeInTheDocument();
   });
+
+  it("theme toggle exposes a title matching aria-label for hover-tooltip parity (D1)", () => {
+    renderLayout("user");
+    const btn = screen.getByRole("button", { name: /switch to dark theme/i });
+    expect(btn.getAttribute("title")).toBe(btn.getAttribute("aria-label"));
+  });
 });
 
 describe("Layout nav role-gating", () => {

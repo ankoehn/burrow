@@ -434,6 +434,10 @@ body {
 .badge.status-suspended { color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 35%, var(--border)); }
 .badge.status-suspended .dot { background: var(--destructive); }
 
+/* Dark-mode override: raise badge border lightness so pills are visible
+   against card/row backgrounds (--card ~0.212; --border ~10% opacity).  */
+.dark .badge { border-color: oklch(0.42 0 0); }
+
 /* ──────────────────────────────────────────────────────────────
    Table
    ────────────────────────────────────────────────────────────── */
