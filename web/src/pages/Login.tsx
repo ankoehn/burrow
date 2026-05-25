@@ -86,9 +86,9 @@ export default function Login() {
             </div>
           </div>
 
-          <Button type="submit" variant="primary" className="signin-submit">Sign in</Button>
-          <div style={{ marginTop: 8 }}>
-            <WebAuthnLoginButton />
+          <div className="signin-actions">
+            <Button type="submit" variant="primary" className="signin-submit" style={{ width: "100%" }}>Sign in</Button>
+            <WebAuthnLoginButton style={{ width: "100%" }} />
           </div>
 
           {err && (
