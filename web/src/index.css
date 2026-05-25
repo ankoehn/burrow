@@ -731,10 +731,9 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 16px 16px;
+  padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border);
   color: var(--foreground);
-  height: 56px;
   box-sizing: border-box;
 }
 .sidebar-brand .wordmark {
@@ -745,7 +744,7 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
 
 .sidebar-nav {
   flex: 1;
-  padding: 12px 0;
+  padding: 8px 0;
   overflow-y: auto;
   min-height: 0;
 }
