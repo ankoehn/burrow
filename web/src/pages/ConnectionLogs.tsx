@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { Button, Badge, SkeletonRows } from "@/components/ds";
@@ -100,6 +100,13 @@ export default function ConnectionLogs() {
     queryFn: () => apiFetch<Service[]>("/services"),
     retry: false,
   });
+
+  // Map service_id → Service for fast lookup in the Service column (B4).
+  const serviceMap = useMemo(() => {
+    const m = new Map<string, Service>();
+    for (const s of servicesQuery.data ?? []) m.set(s.id, s);
+    return m;
+  }, [servicesQuery.data]);
 
   // Load more (cursor pagination).
   async function loadMore() {
@@ -252,7 +259,7 @@ export default function ConnectionLogs() {
                     <td>
                       <Badge kind={kindClass(r.kind)}>{KIND_LABELS[r.kind]}</Badge>
                     </td>
-                    <td className="mono small">{r.service_id}</td>
+                    <td className="small">{serviceMap.get(r.service_id)?.name ?? <span className="mono">{r.service_id}</span>}</td>
                     <td className="mono small">{r.sessions}</td>
                     <td className="mono small">{fmtBytes(r.bytes_in)}</td>
                     <td className="mono small">{fmtBytes(r.bytes_out)}</td>
@@ -306,7 +313,7 @@ export default function ConnectionLogs() {
                       <td data-kind={r.kind}>
                         <Badge kind={kindClass(r.kind)}>{KIND_LABELS[r.kind]}</Badge>
                       </td>
-                      <td className="mono small">{r.service_id}</td>
+                      <td className="small">{serviceMap.get(r.service_id)?.name ?? <span className="mono">{r.service_id}</span>}</td>
                       <td className="mono small">{r.source_ip}</td>
                       <td className="mono small">{r.duration_ms}ms</td>
                       <td className="mono small">{fmtBytes(r.bytes_in)}</td>

@@ -171,4 +171,20 @@ describe("Connection logs page (§v0.5.0 Part E)", () => {
       });
     }
   });
+
+  it("renders service name (not UUID) when a service is known (B4)", async () => {
+    // The MSW mock serves db.services for /api/v1/services and db.connectionLogs
+    // for /api/v1/connection-logs. The seeded connectionLogs use service IDs like
+    // "svc_web01" whose name in db.services is "web". After the fix, the SERVICE
+    // column must show "web" not "svc_web01".
+    mount();
+    // Wait for the table to render (logs view, not rollups)
+    await screen.findByRole("table", { name: /connection logs/i });
+    await waitFor(() => {
+      // "web" is the name for svc_web01 — multiple seeded rows use this service.
+      expect(screen.getAllByText("web").length).toBeGreaterThan(0);
+      // The raw UUID "svc_web01" must NOT appear anywhere in the document.
+      expect(screen.queryByText("svc_web01")).toBeNull();
+    });
+  });
 });
