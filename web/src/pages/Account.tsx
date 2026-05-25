@@ -8,6 +8,7 @@ import type { Session, WebAuthnCredential } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { WebAuthnRegisterButton } from "@/components/WebAuthnRegisterButton";
+import { parseUserAgent } from "@/lib/userAgent";
 
 function SecurityKeys() {
   const qc = useQueryClient();
@@ -84,9 +85,14 @@ function ActiveSessions() {
           <table className="data" aria-label="Active sessions">
             <thead><tr><th>Device</th><th>Created</th><th>Expires</th><th>IP</th><th className="col-actions"></th></tr></thead>
             <tbody>
-              {(data ?? []).map((s) => (
+              {(data ?? []).map((s) => {
+                const ua = parseUserAgent(s.user_agent ?? "");
+                return (
                 <tr key={s.id}>
-                  <td>{s.user_agent}{s.current && <span className="tag"> THIS DEVICE</span>}</td>
+                  <td>
+                    <span title={s.user_agent}>{ua.browser} · {ua.os}</span>
+                    {s.current && <span className="tag"> THIS DEVICE</span>}
+                  </td>
                   <td className="col-created">{formatTimestamp(s.created_at)}</td>
                   <td className="col-created">{formatTimestamp(s.expires_at)}</td>
                   <td className="col-created">{s.ip}</td>
@@ -95,7 +101,8 @@ function ActiveSessions() {
                       <Button variant="ghost" size="sm" onClick={() => revoke.mutate(s.id)}>Revoke</Button>}
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

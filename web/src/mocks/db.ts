@@ -105,8 +105,8 @@ function seed(): MockDb {
       analyst: ["tunnels:read:any", "audit:read", "cost:read"],
     },
     sessions: [
-      { id: "sess_cur", ip: "203.0.113.7", user_agent: "Mozilla/5.0 (current)", created_at: "2026-05-18T09:00:00Z", expires_at: "2026-05-25T09:00:00Z", current: true },
-      { id: "sess_old", ip: "198.51.100.4", user_agent: "Mozilla/5.0 (laptop)", created_at: "2026-05-10T09:00:00Z", expires_at: "2026-05-17T09:00:00Z", current: false },
+      { id: "sess_cur", ip: "203.0.113.7", user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36", created_at: "2026-05-18T09:00:00Z", expires_at: "2026-05-25T09:00:00Z", current: true },
+      { id: "sess_old", ip: "198.51.100.4", user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0", created_at: "2026-05-10T09:00:00Z", expires_at: "2026-05-17T09:00:00Z", current: false },
     ],
     settings: {},
     smtpPasswordSet: false,
