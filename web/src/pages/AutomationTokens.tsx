@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, Input, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, EmptyState, Input, Select, SkeletonRows } from "@/components/ds";
 import type { AutomationToken, CreatedAutomationToken } from "@/lib/contract";
 
 const EXPIRY_OPTIONS = [
@@ -63,28 +63,32 @@ export default function AutomationTokens() {
         <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Mint token</Button>
       </div>
 
-      {!tokens.data ? <SkeletonRows n={2} /> : (
+      {!tokens.data ? (
+        <SkeletonRows n={2} />
+      ) : tokens.data.length === 0 ? (
+        <EmptyState title="No automation tokens yet">
+          Long-lived bearer tokens for CI / CLI / bots — scoped to your own permissions.
+        </EmptyState>
+      ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Automation tokens">
             <thead>
               <tr><th>Name</th><th>Prefix</th><th>Role at mint</th><th>Permissions</th><th>Expires</th><th>Last used</th><th className="col-actions"></th></tr>
             </thead>
             <tbody>
-              {tokens.data.length === 0
-                ? <tr><td colSpan={7} className="muted">No tokens yet.</td></tr>
-                : tokens.data.map((t) => (
-                    <tr key={t.id}>
-                      <td>{t.name}</td>
-                      <td className="mono small">{t.prefix}</td>
-                      <td>{t.role_at_mint}</td>
-                      <td className="mono small">{t.permissions.length} grant(s)</td>
-                      <td className="mono small">{t.expires_at ?? "never"}</td>
-                      <td className="mono small">{t.last_used ?? "—"}</td>
-                      <td className="col-actions">
-                        <Button variant="ghost" size="sm" onClick={() => revoke.mutate(t.id)}>Revoke</Button>
-                      </td>
-                    </tr>
-                  ))}
+              {tokens.data.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.name}</td>
+                  <td className="mono small">{t.prefix}</td>
+                  <td>{t.role_at_mint}</td>
+                  <td className="mono small">{t.permissions.length} grant(s)</td>
+                  <td className="mono small">{t.expires_at ?? "never"}</td>
+                  <td className="mono small">{t.last_used ?? "—"}</td>
+                  <td className="col-actions">
+                    <Button variant="ghost" size="sm" onClick={() => revoke.mutate(t.id)}>Revoke</Button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
