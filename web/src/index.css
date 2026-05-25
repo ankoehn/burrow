@@ -1378,6 +1378,14 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   margin-bottom: 8px;
 }
 
+/* Inline anchor affordance — explicit underline + brand color (C4) */
+a.link-inline {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+a.link-inline:hover { text-decoration-thickness: 2px; }
+
 /* Users filter row — ensures Role select never overlaps the count label (C1) */
 .users-filter-row {
   display: flex;

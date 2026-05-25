@@ -203,7 +203,7 @@ export default function Webhooks() {
           <p className="muted">
             Burrow signs every webhook with an HMAC-SHA256 signature in the
             {" "}<code className="mono">Burrow-Signature</code> header. Verify on receipt.
-            {" "}<a href="/docs/webhooks">Docs</a>
+            {" "}<a href="/docs/webhooks" className="link-inline">Docs</a>
           </p>
         </div>
         <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add webhook</Button>

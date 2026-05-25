@@ -95,6 +95,13 @@ describe("Webhooks (§4.26)", () => {
     });
   });
 
+  it("Docs link has link-inline class so it reads as clickable (C4)", async () => {
+    mount();
+    await waitFor(() => screen.getByRole("heading", { name: "Webhooks" }));
+    const docs = screen.getByRole("link", { name: /docs/i });
+    expect(docs.className).toContain("link-inline");
+  });
+
   it("Edit menu opens dialog with template editor + Save → PUT /webhooks/:id", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     mount();
