@@ -126,11 +126,30 @@ export default function BackupRestore() {
         <div className="row gap-2" style={{ alignItems: "center" }}>
           <input
             ref={fileRef}
+            id="restore-file"
             type="file"
-            aria-label="Backup file"
             accept=".tar.gz,.tgz,application/gzip"
             onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: "hidden",
+              clip: "rect(0 0 0 0)",
+              whiteSpace: "nowrap",
+              borderWidth: 0,
+            }}
           />
+          <label htmlFor="restore-file" className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+            Choose backup archive…
+          </label>
+          <span className="mono small muted" aria-live="polite">
+            {restoreFile
+              ? `${restoreFile.name} · ${formatBytes(restoreFile.size)}`
+              : "no file selected"}
+          </span>
           <Button
             variant="destructive"
             size="sm"
@@ -140,9 +159,6 @@ export default function BackupRestore() {
             Restore
           </Button>
         </div>
-        {restoreFile && (
-          <pre className="mono small">{restoreFile.name} · {formatBytes(restoreFile.size)}</pre>
-        )}
       </section>
 
       <Dialog

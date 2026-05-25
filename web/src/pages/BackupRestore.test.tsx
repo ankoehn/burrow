@@ -38,4 +38,16 @@ describe("Backup & restore", () => {
     const row = (await within(table).findAllByRole("row"))[1]!;
     expect(within(row).getByRole("button", { name: /verify/i })).toBeInTheDocument();
   });
+
+  it("file-picker shows an English label regardless of browser locale", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ backups: [] }), { status: 200 }) as Response,
+    );
+    const { container } = mount();
+    expect(container.querySelector('label[for="restore-file"]')).not.toBeNull();
+    expect(container.querySelector('label[for="restore-file"]')!.textContent).toMatch(
+      /choose backup archive/i,
+    );
+    expect(container.querySelector('input[type="file"]')?.getAttribute("id")).toBe("restore-file");
+  });
 });
