@@ -1,10 +1,13 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Copy } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, SkeletonRows, ErrorNotice } from "@/components/ds";
+import { Button, Badge, Dialog, Input, Select, SkeletonRows, ErrorNotice } from "@/components/ds";
+import { Toaster } from "@/components/ui/sonner";
 import type { Service, AccessMode } from "@/lib/contract";
-import { AccessModePanel } from "@/components/AccessModePanel";
+import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
 
 const ACCESS_LABEL: Record<AccessMode, string> = {
   open: "Open",
@@ -18,12 +21,80 @@ function copy(text: string) {
 }
 
 export default function Services() {
+  const qc = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["services"],
     queryFn: () => apiFetch<Service[]>("/services"),
     retry: false,
   });
   const [configure, setConfigure] = useState<Service | null>(null);
+  const panelRef = useRef<AccessModePanelHandle>(null);
+
+  // P2-2 — filter + sort for the Services table. Default sort: type asc,
+  // name asc, matching Tunnels for muscle-memory parity.
+  const [q, setQ] = useState("");
+  type SortKey = "name" | "type" | "status";
+  const [sortKey, setSortKey] = useState<SortKey>("type");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  }
+  const sortIcon = (k: SortKey) => sortKey === k
+    ? sortDir === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />
+    : null;
+  const filtered = useMemo(() => {
+    const list = data ?? [];
+    const f = q
+      ? list.filter((s) =>
+          `${s.name} ${s.type} ${s.hostname ?? ""}`.toLowerCase().includes(q.toLowerCase()))
+      : list;
+    const sgn = sortDir === "asc" ? 1 : -1;
+    return [...f].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "name") cmp = a.name.localeCompare(b.name);
+      else if (sortKey === "type") {
+        cmp = a.type.localeCompare(b.type);
+        if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      } else {
+        cmp = Number(b.connected) - Number(a.connected);
+        if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      }
+      return cmp * sgn;
+    });
+  }, [data, q, sortKey, sortDir]);
+
+  // P2-1: minimal "New service" dialog. POST /services is admin-only on the
+  // backend (v0.5.2 P3.6); 403 here surfaces a friendly message.
+  const [newOpen, setNewOpen] = useState(false);
+  const [nsName, setNsName] = useState("");
+  const [nsType, setNsType] = useState<"http" | "tcp">("http");
+  const [nsLocal, setNsLocal] = useState("127.0.0.1:3000");
+  const [nsErr, setNsErr] = useState<string | null>(null);
+  const createService = useMutation({
+    mutationFn: () =>
+      apiFetch<Service>("/services", {
+        method: "POST",
+        body: JSON.stringify({ name: nsName, type: nsType, local_addr: nsLocal }),
+      }),
+    onSuccess: () => {
+      toast.success(`Service ${nsName} created.`);
+      qc.invalidateQueries({ queryKey: ["services"] });
+      setNewOpen(false);
+      setNsName("");
+      setNsLocal("127.0.0.1:3000");
+      setNsErr(null);
+    },
+    onError: (e: unknown) => {
+      if (e instanceof ApiError && e.status === 403) {
+        setNsErr("You don't have permission to create services.");
+      } else if (e instanceof ApiError) {
+        setNsErr(e.message);
+      } else {
+        setNsErr("Couldn't create service.");
+      }
+    },
+  });
 
   return (
     <div className="services-page" style={{ position: "relative" }}>
@@ -32,6 +103,9 @@ export default function Services() {
           <h1>Services</h1>
           <p className="sub">Durable services exposed through this relay, with their access configuration.</p>
         </div>
+        <Button variant="primary" size="sm" onClick={() => { setNewOpen(true); setNsErr(null); }}>
+          + New service
+        </Button>
       </div>
 
       {error ? (
@@ -49,22 +123,49 @@ export default function Services() {
           <p>No services yet. Run <code>burrow connect</code> with <code>--type http</code>.</p>
         </div>
       ) : (
-        <div className="table-wrap">
-          <table className="data" aria-label="Services">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Hostname</th>
-                <th>Access</th>
-                <th>Status</th>
-                <th className="col-actions"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((s) => (
+        <>
+          <div className="row gap-2" style={{ margin: "8px 0" }}>
+            <Input
+              type="search"
+              aria-label="Filter services"
+              placeholder="filter by name, type, hostname…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="table-wrap">
+            <table className="data" aria-label="Services">
+              <thead>
+                <tr>
+                  <th>
+                    <button type="button" className="sort-header" onClick={() => toggleSort("name")}
+                      aria-label={`Sort by name (${sortKey === "name" ? sortDir : "asc"})`}>
+                      Name {sortIcon("name")}
+                    </button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-header" onClick={() => toggleSort("type")}
+                      aria-label={`Sort by type (${sortKey === "type" ? sortDir : "asc"})`}>
+                      Type {sortIcon("type")}
+                    </button>
+                  </th>
+                  <th>Hostname</th>
+                  <th>Access</th>
+                  <th>
+                    <button type="button" className="sort-header" onClick={() => toggleSort("status")}
+                      aria-label={`Sort by status (${sortKey === "status" ? sortDir : "asc"})`}>
+                      Status {sortIcon("status")}
+                    </button>
+                  </th>
+                  <th className="col-actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((s) => (
                 <tr key={s.id}>
-                  <td className="col-name">{s.name}</td>
+                  <td className="col-name link-row">
+                    <Link to={`/services/${s.id}`}>{s.name}</Link>
+                  </td>
                   <td><Badge kind={`type-${s.type}`} nodot>{s.type}</Badge></td>
                   <td>
                     {s.type === "http" && s.hostname ? (
@@ -94,9 +195,10 @@ export default function Services() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <Dialog
@@ -106,7 +208,17 @@ export default function Services() {
         description={configure?.type === "tcp"
           ? "Raw TCP service — only Open passthrough applies."
           : "Choose how Burrow gates requests before proxying to this service."}
-        footer={<Button variant="secondary" onClick={() => setConfigure(null)}>Close</Button>}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfigure(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => panelRef.current?.save()}
+            >
+              Save changes
+            </Button>
+          </>
+        }
       >
         {configure && (
           <AccessModePanel
@@ -114,9 +226,53 @@ export default function Services() {
             serviceName={configure.name}
             mode={configure.access_mode}
             clientId={`svc:${configure.id}`}
+            panelRef={panelRef}
           />
         )}
       </Dialog>
+
+      {/* P2-1 — new-service dialog */}
+      <Dialog
+        open={newOpen}
+        onOpenChange={(o) => { setNewOpen(o); if (!o) setNsErr(null); }}
+        title="Create service"
+        description="Pre-provision a service so a connecting client adopts the same id."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setNewOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={!nsName || createService.isPending}
+              onClick={() => createService.mutate()}
+            >
+              {createService.isPending ? "Creating…" : "Create"}
+            </Button>
+          </>
+        }
+      >
+        <div className="field">
+          <label htmlFor="ns-name">Name</label>
+          <Input id="ns-name" placeholder="e.g. web-prod" value={nsName} onChange={(e) => setNsName(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="ns-type">Type</label>
+          <Select
+            id="ns-type"
+            value={nsType}
+            onChange={(v) => setNsType(v as "http" | "tcp")}
+            options={[
+              { value: "http", label: "HTTP" },
+              { value: "tcp", label: "TCP" },
+            ]}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="ns-local">Local address</label>
+          <Input id="ns-local" className="mono" value={nsLocal} onChange={(e) => setNsLocal(e.target.value)} placeholder="127.0.0.1:3000" />
+        </div>
+        {nsErr && <p role="alert" className="notice-inline error">{nsErr}</p>}
+      </Dialog>
+      <Toaster />
     </div>
   );
 }

@@ -6,9 +6,11 @@ import { formatTimestamp } from "@/lib/format";
 import { Button, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { useAuth } from "@/auth/useAuth";
 import type { ServiceApiKey, CreatedApiKey } from "@/lib/contract";
 
 export function ApiKeysPanel({ serviceId }: { serviceId: string }) {
+  const { user } = useAuth();
   const qc = useQueryClient();
   const keysKey = ["service-api-keys", serviceId];
   const { data } = useQuery({
@@ -92,7 +94,13 @@ export function ApiKeysPanel({ serviceId }: { serviceId: string }) {
         </table>
       </div>
 
-      <p className="muted">Managing keys needs the services:configure permission.</p>
+      {/* P1-5 — only show the permission hint to non-admin users. Admins
+          already have services:configure; the hint just adds noise.
+          Wait for useAuth to resolve (user !== undefined) so the message
+          doesn't flash for admins on first render. */}
+      {user !== undefined && user.role !== "admin" && (
+        <p className="muted">Managing keys needs the services:configure permission.</p>
+      )}
 
       <Dialog
         open={creating}

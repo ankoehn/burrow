@@ -23,7 +23,11 @@ describe("Webhooks (§4.26)", () => {
   it("renders a row per webhook with a mono URL + Copy affordance", async () => {
     mount();
     const table = await screen.findByRole("table", { name: /webhooks/i });
-    expect(within(table).getByText(/example\.com\/hook/)).toBeInTheDocument();
+    // P0-10: the table is now always-on; wait for the seeded row to land
+    // before asserting on its contents (initial render shows a skeleton row).
+    await waitFor(() => {
+      expect(within(table).getByText(/example\.com\/hook/)).toBeInTheDocument();
+    });
     expect(within(table).getByRole("button", { name: /copy webhook url/i })).toBeInTheDocument();
   });
 
@@ -77,7 +81,12 @@ describe("Webhooks (§4.26)", () => {
     }
   });
 
-  it("renders a real EmptyState (not a flat tr) when there are no webhooks (C3)", async () => {
+  // P0-10: the empty state now lives inside the always-on Webhooks table
+  // so Playwright (and the table-aware assertions in the page) can locate
+  // the table even on a fresh stack. The C3 EmptyState card is intentionally
+  // gone — we keep the in-table row that calls out "No webhooks yet" and
+  // rely on the page-head Add webhook CTA (P2-4 dedup).
+  it("renders an in-table empty row when there are no webhooks (P0-10)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
       const u = String(url);
       if (u.includes("/webhooks/deliveries")) {
@@ -88,10 +97,10 @@ describe("Webhooks (§4.26)", () => {
       }
       return new Response("[]", { status: 200 }) as Response;
     });
-    const { container } = mount();
+    mount();
+    const table = await screen.findByRole("table", { name: /webhooks/i });
     await waitFor(() => {
-      expect(container.querySelector(".state-card")).not.toBeNull();
-      expect(container.querySelector(".state-card .icon-bubble")).not.toBeNull();
+      expect(within(table).getByText(/No webhooks yet/i)).toBeInTheDocument();
     });
   });
 

@@ -17,8 +17,8 @@ interface RulesResponse {
   custom: RedactionRule[];
 }
 
-function Accordion({ id, title, children, defaultOpen = false }: {
-  id: string; title: string; children: ReactNode; defaultOpen?: boolean;
+function Accordion({ id, title, subtitle, children, defaultOpen = false }: {
+  id: string; title: string; subtitle?: string; children: ReactNode; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -32,6 +32,9 @@ function Accordion({ id, title, children, defaultOpen = false }: {
       >
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>{title}</span>
+        {/* P2-8 — subtitle gives an at-a-glance hint of "configured vs not"
+            without forcing the user to expand each section. */}
+        {subtitle && <span className="muted small" style={{ marginLeft: 8 }}>· {subtitle}</span>}
       </button>
       {open && (
         <div id={`${id}-body`} role="region" className="accordion-body">
@@ -177,7 +180,16 @@ export default function Guardrails() {
         </div>
       </div>
 
-      <Accordion id="regex" title="Regex redaction">
+      <Accordion
+        id="regex"
+        title="Regex redaction"
+        subtitle={(() => {
+          const total = rules.data.built_in.length + rules.data.custom.length;
+          if (!redactDraft.enabled) return "Disabled";
+          if (total === 0) return "0 rules configured";
+          return `${total} rule${total === 1 ? "" : "s"}`;
+        })()}
+      >
         <div className="row gap-2" style={{ alignItems: "center" }}>
           <Switch
             aria-label="Enable redaction"
@@ -197,7 +209,11 @@ export default function Guardrails() {
         </div>
       </Accordion>
 
-      <Accordion id="presidio" title="Presidio (Microsoft sidecar)">
+      <Accordion
+        id="presidio"
+        title="Presidio (Microsoft sidecar)"
+        subtitle={presidioUrl ? "Configured" : "Not configured"}
+      >
         <p className="muted">
           Runs Microsoft Presidio (Apache-2.0) as a sidecar process Burrow shells out to. Off by
           default — you install Presidio yourself.
@@ -219,7 +235,11 @@ export default function Guardrails() {
         </div>
       </Accordion>
 
-      <Accordion id="injection" title="Prompt-injection guardrails">
+      <Accordion
+        id="injection"
+        title="Prompt-injection guardrails"
+        subtitle={guardDraft.enabled ? `${(patterns.data ?? []).length} pattern${(patterns.data ?? []).length === 1 ? "" : "s"}` : "Disabled"}
+      >
         <div className="row gap-2" style={{ alignItems: "center" }}>
           <Switch
             aria-label="Enable injection guardrails"

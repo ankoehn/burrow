@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useImperativeHandle, useState, type Ref } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Input } from "@/components/ds";
@@ -10,16 +10,38 @@ import { IPGeoPanel } from "@/components/IPGeoPanel";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
-// Mode explainers — kept verbatim from the v0.2.0 component (UI_DESIGN §4.15);
-// v0.3.0 drops the disabled gating and v0.4.0 adds the mtls row.
+// User-facing mode explainers. P1-3: dropped the "v0.2.0" leak — the help
+// text no longer references internal version numbers. Visitors are described
+// in terms of what Burrow does to their requests, not the codebase history.
 const META: Record<AccessMode, { title: string; help: string }> = {
-  open: { title: "Open — raw passthrough", help: "Burrow adds nothing. The only mode available in v0.2.0; safe default for TCP tunnels." },
+  open: { title: "Open — raw passthrough", help: "Burrow adds no auth — visitor traffic flows straight through. The safe default for TCP tunnels." },
   api_key: { title: "API key — header check", help: "Burrow verifies an API key header before proxying." },
   burrow_login: { title: "Burrow login — role-based", help: "Visitors sign in with their Burrow account at a hosted gate." },
   mtls: { title: "mTLS — client certificate", help: "Burrow terminates TLS and requires a client certificate chained to a CA you upload." },
 };
 
-export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { serviceId: string; serviceName: string; mode: AccessMode; clientId?: string }) {
+// AccessModePanelHandle is the imperative handle exposed via panelRef so the
+// surrounding Dialog footer (Tunnels / Services Configure flows) can drive
+// Save without re-implementing the mutation. Pages that embed the panel
+// inline (ClientDetail) ignore this — the inline Save button stays visible
+// when no panelRef is supplied (P1-7).
+export interface AccessModePanelHandle {
+  save: () => void;
+  isSaving: boolean;
+}
+
+export interface AccessModePanelProps {
+  serviceId: string;
+  serviceName: string;
+  mode: AccessMode;
+  clientId?: string;
+  // Imperative handle for the Configure dialogs. When provided, the inline
+  // "Save changes" button is hidden — the dialog footer is expected to
+  // trigger save.
+  panelRef?: Ref<AccessModePanelHandle>;
+}
+
+export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelRef }: AccessModePanelProps) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<AccessMode>(mode);
   // RFC 7230 header-name tokens disallow colon + whitespace; the prior
@@ -47,6 +69,7 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { se
       setErr(null);
       qc.invalidateQueries({ queryKey: ["services"] });
       qc.invalidateQueries({ queryKey: ["service", serviceId] });
+      qc.invalidateQueries({ queryKey: ["tunnels"] });
       if (clientId) qc.invalidateQueries({ queryKey: ["client", clientId] });
       toast.success(`Access settings saved. ${serviceName} · mode: ${selected}`);
     },
@@ -60,6 +83,19 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { se
       }
     },
   });
+
+  // Expose save/isSaving on the imperative handle so Dialog footers can drive
+  // them without lifting the entire mutation. Refreshed whenever isPending
+  // changes so the footer button's disabled state stays in sync (P1-7).
+  useImperativeHandle(
+    panelRef,
+    () => ({ save: () => save.mutate(), isSaving: save.isPending }),
+    [save],
+  );
+
+  // Re-publish on save state transitions so the dialog footer can read the
+  // latest isSaving flag through its own ref-mirror.
+  useEffect(() => { /* dependency carrier for save.isPending updates */ }, [save.isPending]);
 
   return (
     <div className="access-panel">
@@ -113,11 +149,17 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId }: { se
 
       {err && <p role="alert" className="notice-inline">{err}</p>}
 
-      <div className="actions">
-        <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
+      {/* P1-7: hide the inline button when the panel is hosted inside a
+          Dialog. The dialog footer carries Cancel + Save changes instead.
+          Pages that embed the panel inline (ClientDetail, ServiceDetail
+          access tab) still rely on the inline button. */}
+      {!panelRef && (
+        <div className="actions">
+          <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      )}
 
       <IPGeoPanel serviceId={serviceId} />
       <Toaster />

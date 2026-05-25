@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { formatTimestamp } from "@/lib/format";
 import { Button, Badge, SkeletonRows } from "@/components/ds";
 import type { ConnectionLog, ConnectionLogRollup, ConnectionLogKind, Service } from "@/lib/contract";
 
@@ -309,7 +310,7 @@ export default function ConnectionLogs() {
                 <tbody>
                   {logs.map((r) => (
                     <tr key={r.id}>
-                      <td className="mono small">{r.started_at}</td>
+                      <td className="mono small" title={r.started_at}>{formatTimestamp(r.started_at)}</td>
                       <td data-kind={r.kind}>
                         <Badge kind={kindClass(r.kind)}>{KIND_LABELS[r.kind]}</Badge>
                       </td>

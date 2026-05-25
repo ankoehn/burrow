@@ -9,13 +9,15 @@ function mount() {
 }
 
 describe("Audit log (§4.25)", () => {
-  it("renders the verbatim hash-chain preamble (with `burrowd audit verify` in mono)", async () => {
+  // P2-5: the preamble no longer points at the CLI; it directs operators
+  // at the in-UI Verify chain button (no `burrowd audit verify` reference).
+  it("renders the user-facing hash-chain preamble pointing at the Verify chain button (P2-5)", async () => {
     mount();
     const preamble = await screen.findByText(/hash-chained/i);
     expect(preamble).toHaveTextContent(
-      "Hash-chained — each entry includes the SHA-256 of the previous one. Verify chain integrity from the CLI:",
+      "Hash-chained — each entry includes the SHA-256 of the previous one. Click Verify chain to confirm integrity.",
     );
-    expect(preamble.querySelector("code")).toHaveTextContent("burrowd audit verify");
+    expect(preamble.querySelector("code")).toBeNull();
   });
 
   it("renders the dense events table with the spec columns", async () => {

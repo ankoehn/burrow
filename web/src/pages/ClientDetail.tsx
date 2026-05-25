@@ -45,8 +45,10 @@ export default function ClientDetail() {
               {data.services.map((s) => (
                 <tr key={s.id}>
                   <td>{s.name}</td>
-                  <td><Badge kind="type-tcp" nodot>{s.type}</Badge></td>
-                  <td className="col-created">:{s.remote_port}</td>
+                  <td><Badge kind={`type-${s.type}`} nodot>{s.type}</Badge></td>
+                  <td className="col-created">
+                    {s.type === "http" ? <span className="muted">—</span> : `:${s.remote_port}`}
+                  </td>
                   <td className="col-created mono">{s.local_addr}</td>
                   <td className="col-created">↓{formatBytes(s.total_bytes_in)} ↑{formatBytes(s.total_bytes_out)}</td>
                   <td><AccessModePanel serviceId={s.id} serviceName={s.name} mode={s.access_mode} clientId={data.session_id} /></td>

@@ -88,6 +88,30 @@ export default function AiEndpoints() {
   const tokensOut = summary.data?.tokens_out ?? 0;
   const totalUsd = summary.data?.total_usd ?? 0;
 
+  // P1-9 — when the AI gateway feature isn't compiled into this relay the
+  // endpoint returns 404; rendering the KPI strip with zeros next to the
+  // error banner suggests an empty-but-working install. Detect that case
+  // and show a single "feature unavailable" card instead.
+  const featureAbsent = endpoints.error instanceof ApiError && endpoints.error.status === 404;
+
+  if (featureAbsent) {
+    return (
+      <div className="ai-endpoints-page">
+        <div className="page-head">
+          <div>
+            <h1>AI endpoints</h1>
+          </div>
+        </div>
+        <div className="state-card">
+          <p>
+            The AI gateway isn&apos;t available on this relay. Ask your operator to
+            enable it, or run a build that includes the AI gateway.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="ai-endpoints-page">
       <div className="page-head">

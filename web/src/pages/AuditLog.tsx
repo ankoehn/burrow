@@ -59,9 +59,8 @@ export default function AuditLog() {
         <div>
           <h1>Audit log</h1>
           <p>
-            Hash-chained — each entry includes the SHA-256 of the previous one. Verify chain
-            integrity from the CLI:{" "}
-            <code className="mono">burrowd audit verify</code>.
+            Hash-chained — each entry includes the SHA-256 of the previous one. Click
+            {" "}<strong>Verify chain</strong> to confirm integrity.
           </p>
         </div>
         <div className="row gap-2">

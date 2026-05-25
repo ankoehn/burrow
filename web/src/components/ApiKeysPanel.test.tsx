@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
+import { db } from "@/mocks/db";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 
 const SVC = "svc_ai001"; // seeded http service in api_key mode with 2 keys
@@ -17,11 +18,22 @@ describe("ApiKeysPanel", () => {
     expect(within(table).getByText("prod")).toBeInTheDocument();
   });
 
-  it("shows the services:configure permission hint", async () => {
+  // P1-5: the services:configure hint is shown ONLY to non-admin viewers.
+  it("shows the services:configure permission hint to non-admin users", async () => {
+    db.me = { id: "u_user", email: "bob@acme.io", role: "user" };
     renderApp(<ApiKeysPanel serviceId={SVC} />);
     expect(
       await screen.findByText("Managing keys needs the services:configure permission."),
     ).toBeInTheDocument();
+  });
+
+  it("hides the permission hint for admin users (P1-5)", async () => {
+    // db.me defaults to admin — assert the hint is absent.
+    renderApp(<ApiKeysPanel serviceId={SVC} />);
+    await screen.findByRole("table", { name: /api keys/i });
+    expect(
+      screen.queryByText("Managing keys needs the services:configure permission."),
+    ).toBeNull();
   });
 
   it("creates a key and reveals the plaintext exactly once", async () => {

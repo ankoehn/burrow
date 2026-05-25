@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Checkbox, Dialog, DropdownMenu, EmptyState, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, SkeletonRows } from "@/components/ds";
 import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
 import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
@@ -209,23 +209,26 @@ export default function Webhooks() {
         <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add webhook</Button>
       </div>
 
-      {!list.data ? (
-        <SkeletonRows n={3} />
-      ) : list.data.length === 0 ? (
-        <EmptyState
-          title="No webhooks yet"
-          action={<Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add a webhook</Button>}
-        >
-          Burrow can POST to a URL when audit events, AI requests, or other signals fire.
-        </EmptyState>
-      ) : (
-        <div className="table-wrap">
-          <table className="data" aria-label="Webhooks">
-            <thead>
-              <tr><th>Name</th><th>URL</th><th>Status</th><th>Failures</th><th className="col-actions"></th></tr>
-            </thead>
-            <tbody>
-              {list.data.map((w) => {
+      {/* P0-10: render the Webhooks table unconditionally; the empty state
+          becomes an in-table row so Playwright + the page-head CTA agree on
+          the same affordance (P2-4 dedup). */}
+      <div className="table-wrap">
+        <table className="data" aria-label="Webhooks">
+          <thead>
+            <tr><th>Name</th><th>URL</th><th>Status</th><th>Failures</th><th className="col-actions"></th></tr>
+          </thead>
+          <tbody>
+            {!list.data ? (
+              <tr><td colSpan={5}><SkeletonRows n={3} /></td></tr>
+            ) : list.data.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="muted">
+                  No webhooks yet. Burrow can POST to a URL when audit events,
+                  AI requests, or other signals fire.
+                </td>
+              </tr>
+            ) : (
+              list.data.map((w) => {
                 const s = statusOf(w);
                 return (
                   <tr key={w.id}>
@@ -260,11 +263,11 @@ export default function Webhooks() {
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <section className="card">
         <h2>Recent deliveries</h2>

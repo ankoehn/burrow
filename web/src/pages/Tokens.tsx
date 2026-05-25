@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { formatTimestamp } from "@/lib/format";
+import { formatTimestamp, formatRelativeTime } from "@/lib/format";
 import { Button, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -59,8 +59,13 @@ export default function Tokens() {
               <tr key={t.id}>
                 <td className="col-name">{t.name}</td>
                 <td className="col-created">{formatTimestamp(t.created_at)}</td>
-                <td className={t.last_used ? "col-lastused" : "col-lastused null"}>
-                  {t.last_used ? formatTimestamp(t.last_used) : "never"}
+                <td
+                  className={t.last_used ? "col-lastused" : "col-lastused null"}
+                  // P1-13 — relative time as the primary value, absolute
+                  // timestamp on hover so power users keep the precision.
+                  title={t.last_used ? formatTimestamp(t.last_used) : undefined}
+                >
+                  {t.last_used ? formatRelativeTime(t.last_used) : "never"}
                 </td>
                 <td className="col-actions">
                   <Button

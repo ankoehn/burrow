@@ -37,14 +37,15 @@ describe("IPGeoPanel", () => {
     });
   });
 
-  it("surfaces the verbatim banner when /geo/status reports enabled:false", async () => {
+  // P1-4 — copy softened: no developer language ("compiled", "build flag").
+  it("surfaces the user-facing banner when /geo/status reports enabled:false (P1-4)", async () => {
     server.use(
       http.get("/api/v1/geo/status", () =>
         HttpResponse.json({ enabled: false, db_path: "", db_age_seconds: 0 })),
     );
     renderApp(<IPGeoPanel serviceId="svc_ai001" />);
     expect(
-      await screen.findByText("Geo restrictions are not compiled in this build."),
+      await screen.findByText("Geo restrictions aren't available on this relay."),
     ).toBeInTheDocument();
   });
 });

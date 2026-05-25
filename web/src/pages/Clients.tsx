@@ -47,13 +47,18 @@ export default function Clients() {
       ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Clients">
-            <thead><tr><th>Client</th><th>Platform</th><th>Remote IP</th><th>Services</th><th>Traffic</th><th className="col-actions"></th></tr></thead>
+            <thead><tr><th>Client</th><th>Platform</th><th>Remote IP</th><th>Status</th><th>Services</th><th>Traffic</th><th className="col-actions"></th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.session_id}>
                   <td>{c.token_name}<div className="muted mono">{c.session_id}</div></td>
                   <td>{c.os} · burrow {c.client_version}</td>
                   <td className="col-created">{c.remote_addr}</td>
+                  {/* P1-8 — every row of /clients comes from the live session
+                      registry, so presence in the list IS the "connected"
+                      signal. When the backend later exposes last_seen the
+                      column can show relative time for disconnected clients. */}
+                  <td><Badge kind="status-connected">connected</Badge></td>
                   <td><Badge kind="" nodot>{c.service_count}</Badge></td>
                   <td className="col-created">↓{formatBytes(c.total_bytes_in)} ↑{formatBytes(c.total_bytes_out)}</td>
                   <td className="col-actions"><Link to={`/clients/${c.session_id}`}><Button variant="secondary" size="sm">View</Button></Link></td>

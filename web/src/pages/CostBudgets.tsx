@@ -64,6 +64,11 @@ export default function CostBudgets() {
     queryFn: () => apiFetch<Budget[]>("/budgets"),
     retry: false,
   });
+  // P1-10 — feature gating: if /budgets 404s, the AI gateway isn't on this
+  // relay. Disable "Add budget" + tooltip, keep the spend tiles since
+  // /cost/summary may still respond (operators sometimes ship cost without
+  // budgets).
+  const featureAbsent = budgets.error instanceof ApiError && budgets.error.status === 404;
 
   const [addOpen, setAddOpen] = useState(false);
   const [scope, setScope] = useState<Budget["scope"]>("api_key");
@@ -103,7 +108,7 @@ export default function CostBudgets() {
     create.mutate();
   }
 
-  if (!budgets.data) {
+  if (!budgets.data && !featureAbsent) {
     return (
       <div className="cost-page">
         <div className="page-head"><div><h1>Cost &amp; budgets</h1></div></div>
@@ -142,7 +147,13 @@ export default function CostBudgets() {
       <section className="card">
         <h2>Budgets</h2>
         <div className="row gap-2" style={{ marginBottom: 8 }}>
-          <Button variant="primary" size="sm" onClick={() => { setAddOpen(true); setErr(null); }}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={featureAbsent}
+            title={featureAbsent ? "Budget creation requires the AI gateway." : undefined}
+            onClick={() => { setAddOpen(true); setErr(null); }}
+          >
             Add budget
           </Button>
         </div>
@@ -150,17 +161,19 @@ export default function CostBudgets() {
           <table className="data" aria-label="Budgets">
             <thead><tr><th>Scope</th><th>Subject</th><th>Daily $</th><th>On exceed</th><th>Spend</th></tr></thead>
             <tbody>
-              {budgets.data.length === 0
-                ? <tr><td colSpan={5} className="muted">No budgets yet.</td></tr>
-                : budgets.data.map((b) => (
-                    <tr key={b.id}>
-                      <td>{b.scope}</td>
-                      <td className="mono">{b.subject_id}</td>
-                      <td className="mono">{fmtUsd(b.daily_usd)}</td>
-                      <td>{b.action_on_exceed}</td>
-                      <td className="mono">{fmtUsd(b.current_usd)}</td>
-                    </tr>
-                  ))}
+              {featureAbsent
+                ? <tr><td colSpan={5} className="muted">Budgets aren&apos;t available on this relay.</td></tr>
+                : (budgets.data ?? []).length === 0
+                  ? <tr><td colSpan={5} className="muted">No budgets yet.</td></tr>
+                  : (budgets.data ?? []).map((b) => (
+                      <tr key={b.id}>
+                        <td>{b.scope}</td>
+                        <td className="mono">{b.subject_id}</td>
+                        <td className="mono">{fmtUsd(b.daily_usd)}</td>
+                        <td>{b.action_on_exceed}</td>
+                        <td className="mono">{fmtUsd(b.current_usd)}</td>
+                      </tr>
+                    ))}
             </tbody>
           </table>
         </div>
