@@ -533,6 +533,9 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   border: 1px solid var(--border);
   border-radius: var(--radius);
   width: 380px; max-width: 100%;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-overlay);
   animation: dialogIn var(--t-enter) forwards;
 }
@@ -540,10 +543,16 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.dialog-header { padding: 16px 18px 8px; }
+.dialog-header { padding: 16px 18px 8px; flex: 0 0 auto; }
 .dialog-header h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .dialog-header p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted-foreground); }
-.dialog-body { padding: 8px 18px 16px; font-size: 13px; }
+.dialog-body {
+  padding: 8px 18px 16px;
+  font-size: 13px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .dialog-footer {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 18px;

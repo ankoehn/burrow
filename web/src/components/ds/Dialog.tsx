@@ -48,13 +48,13 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
   return (
     <div
       style={{
-        position: "absolute",
+        position: "fixed",
         inset: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 30,
-        borderRadius: "inherit",
+        padding: 16,
       }}
     >
       <div className="dialog-backdrop" onClick={() => onOpenChange?.(false)} />
