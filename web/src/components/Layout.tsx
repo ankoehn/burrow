@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck,
   ServerCog, Globe, Sparkles, DollarSign, Database, ShieldAlert, Search, ScrollText,
-  Webhook as WebhookIcon, Archive, Bot,
-  Activity, FileCode,
+  Webhook as WebhookIcon, Bot,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button, cx } from "@/components/ds";
@@ -43,16 +42,23 @@ export function Layout() {
     qc.clear();
     nav("/login", { replace: true });
   }
-  // AI GATEWAY group is conditional: only shown when ≥1 service is api_key-gated
-  // (spec §4.19). Cached against ["services"] so the rest of the dashboard reads
-  // the same data.
+  // AI GATEWAY group used to be gated on "≥1 service has access_mode === api_key"
+  // (P0-2). That keeps the group hidden on a fresh stack — even for admins —
+  // because the dashboard is needed to MINT an API-key gated service in the
+  // first place. The group is now visible to every admin (the only role that
+  // can configure those resources anyway). Non-admins still see the group
+  // when at least one http service is connected, so a user with only the
+  // ai:configure:own permission still finds the entry point.
   const services = useQuery({
     queryKey: ["services"],
     queryFn: () => apiFetch<Service[]>("/services"),
     retry: false,
   });
-  const hasAiEndpoints = Array.isArray(services.data)
-    && services.data.some((s) => s.access_mode === "api_key");
+  const isAdmin = user?.role === "admin";
+  const servicesList = Array.isArray(services.data) ? services.data : [];
+  const firstHttpServiceId = servicesList.find((s) => s.type === "http")?.id;
+  const hasAiEndpoints = isAdmin
+    || servicesList.some((s) => s.type === "http" && s.connected);
   const navItem = ({ isActive }: { isActive: boolean }) => cx("nav-item", isActive && "is-active");
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
   return (
@@ -104,10 +110,12 @@ export function Layout() {
                 <span className="nav-icon"><ShieldAlert size={16} /></span>
                 <span className="nav-label">Guardrails</span>
               </NavLink>
-              <NavLink to="/inspector/svc_ai001" className={navItem}>
-                <span className="nav-icon"><Search size={16} /></span>
-                <span className="nav-label">Request inspector</span>
-              </NavLink>
+              {firstHttpServiceId && (
+                <NavLink to={`/inspector/${firstHttpServiceId}`} className={navItem}>
+                  <span className="nav-icon"><Search size={16} /></span>
+                  <span className="nav-label">Request inspector</span>
+                </NavLink>
+              )}
             </div>
           )}
 
@@ -141,23 +149,9 @@ export function Layout() {
                 <span className="nav-icon"><WebhookIcon size={16} /></span>
                 <span className="nav-label">Webhooks</span>
               </NavLink>
-              <NavLink to="/settings/backups" className={navItem}>
-                <span className="nav-icon"><Archive size={16} /></span>
-                <span className="nav-label">Backup</span>
-              </NavLink>
-              <NavLink to="/connection-logs" className={navItem}>
-                <span className="nav-icon"><Activity size={16} /></span>
-                <span className="nav-label">Connection logs</span>
-              </NavLink>
-              <a
-                href="/api/v1/openapi/viewer"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="nav-item"
-              >
-                <span className="nav-icon"><FileCode size={16} /></span>
-                <span className="nav-label">OpenAPI</span>
-              </a>
+              {/* P2-10: Backup, Connection logs, OpenAPI moved off the top-level
+                  sidebar. They remain reachable from /settings cards so Settings
+                  is the single canonical configuration hub. */}
             </div>
           )}
 

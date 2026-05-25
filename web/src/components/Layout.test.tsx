@@ -144,21 +144,19 @@ describe("Layout nav role-gating", () => {
     expect(screen.getByRole("link", { name: /^tunnels$/i }).className).toContain("nav-item");
   });
 
-  it("renders Connection logs nav entry for admin", async () => {
+  it("Connection logs is reachable from /settings, not the top-level sidebar (P2-10)", async () => {
     renderLayout("admin");
-    expect(
-      await screen.findByRole("link", { name: /connection logs/i }),
-    ).toBeInTheDocument();
+    // Wait for admin links to appear (Users only shows for admin).
+    await screen.findByRole("link", { name: /^users$/i });
+    // Sidebar no longer carries Connection logs — it lives on the /settings page.
+    expect(screen.queryByRole("link", { name: /connection logs/i })).toBeNull();
   });
 
-  it("renders OpenAPI nav entry as an external link with target=_blank", async () => {
+  it("OpenAPI moved off the sidebar and is reached via /openapi (P1-14 + P2-10)", async () => {
     renderLayout("admin");
-    // Wait for admin links to appear
-    await screen.findByRole("link", { name: /connection logs/i });
-    const link = screen.getByRole("link", { name: /openapi/i });
-    expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "/api/v1/openapi/viewer");
-    expect(link).toHaveAttribute("target", "_blank");
+    await screen.findByRole("link", { name: /^users$/i });
+    // No top-level OpenAPI link in the sidebar.
+    expect(screen.queryByRole("link", { name: /openapi/i })).toBeNull();
   });
 
   it("does NOT render Provisioning nav link (backend pending — issue tracked in BACKLOG_1.0.0.md)", async () => {

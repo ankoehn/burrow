@@ -138,15 +138,14 @@ html {
 }
 .dark { color-scheme: dark; }
 
+/* P0-9 — body + sidebar follow the active theme. Pre-fix the body had a
+   hard-coded light-mode oklch which left the sidebar visibly mismatched
+   against the page in light mode and forced a separate dark-mode rule. */
 body {
-  background: oklch(0.985 0.004 75);
+  background: var(--background);
   color: var(--foreground);
   font-size: 14px;
   line-height: 1.45;
-}
-
-.dark body {
-  background: var(--background);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -442,6 +441,89 @@ body {
 .dark .badge.status-idle      { border-color: color-mix(in oklch, var(--warning) 40%, oklch(0.42 0 0)); }
 .dark .badge.status-suspended { border-color: color-mix(in oklch, var(--destructive) 35%, oklch(0.42 0 0)); }
 
+/* P0-6 — Access-mode badges are STATUS labels, not buttons. Flat tinted
+   background, no elevated border, tighter padding so they read as labels
+   the user cannot click. Sibling status variants stay differentiable via
+   the tint colour. */
+.badge.access-open,
+.badge.access-api_key,
+.badge.access-burrow_login,
+.badge.access-mtls {
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-weight: 500;
+  background: color-mix(in oklch, var(--muted-foreground) 12%, transparent);
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.badge.access-open {
+  background: color-mix(in oklch, var(--muted-foreground) 10%, transparent);
+}
+.badge.access-api_key {
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+.badge.access-burrow_login {
+  background: color-mix(in oklch, var(--success) 14%, transparent);
+  color: color-mix(in oklch, var(--success) 80%, var(--foreground));
+}
+.badge.access-mtls {
+  background: color-mix(in oklch, var(--warning) 18%, transparent);
+  color: color-mix(in oklch, var(--warning) 70%, var(--foreground));
+}
+.dark .badge.access-open,
+.dark .badge.access-api_key,
+.dark .badge.access-burrow_login,
+.dark .badge.access-mtls {
+  border-color: transparent;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Access-mode radio cards (AccessModePanel)
+   The card layout existed without any visual selected/hover state —
+   P0-1 adds an unmistakable Signal-Teal border + lift on the chosen
+   card and a focus ring so keyboard navigation is visible.
+   ────────────────────────────────────────────────────────────── */
+.access-panel .mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.access-panel .mode-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  cursor: pointer;
+  transition:
+    border-color var(--t-micro),
+    background var(--t-micro),
+    box-shadow var(--t-micro);
+}
+.access-panel .mode-card strong { display: block; margin-bottom: 2px; font-size: 13px; }
+.access-panel .mode-card .muted { margin: 0; font-size: 12px; }
+.access-panel .mode-card:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.access-panel .mode-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.access-panel .mode-card[aria-checked="true"] {
+  border-color: var(--primary);
+  border-width: 2px;
+  /* Compensate for the +1px border so the layout doesn't reflow. */
+  padding: 9px 11px;
+  background: color-mix(in oklch, var(--primary) 8%, var(--card));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 25%, transparent);
+}
+.dark .access-panel .mode-card[aria-checked="true"] {
+  background: color-mix(in oklch, var(--primary) 14%, var(--card));
+}
+
 /* ──────────────────────────────────────────────────────────────
    Table
    ────────────────────────────────────────────────────────────── */
@@ -487,6 +569,37 @@ table.data td.col-id, table.data td.col-endpoint, table.data td.col-time {
   font-variant-numeric: tabular-nums;
 }
 table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; }
+
+/* P0-4 — Name cells that navigate to a detail page get a visual link hint
+   while keeping the cell layout intact. */
+table.data td.link-row a {
+  color: var(--foreground);
+  text-decoration: none;
+  font-weight: 500;
+}
+table.data td.link-row a:hover { color: var(--primary); text-decoration: underline; }
+
+/* P2-2 — column headers as buttons inherit the uppercase muted look from
+   thead th while picking up a focus ring + arrow-icon alignment. */
+button.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.sort-header:hover { color: var(--foreground); }
+button.sort-header:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 
 /* ──────────────────────────────────────────────────────────────
    Overlays: dialog, menu, popover (single soft shadow allowed)

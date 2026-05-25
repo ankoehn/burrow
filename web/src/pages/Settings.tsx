@@ -76,10 +76,14 @@ export default function Settings() {
             <div className="settings-nav-card-title">Backup &amp; restore</div>
             <div className="settings-nav-card-desc muted">Snapshots of the relay&apos;s SQLite database.</div>
           </Link>
-          <a href="/api/v1/openapi/viewer" target="_blank" rel="noreferrer" className="settings-nav-card">
+          <Link to="/openapi" className="settings-nav-card">
             <div className="settings-nav-card-title">OpenAPI viewer</div>
             <div className="settings-nav-card-desc muted">Browse the JSON/HTTP API docs.</div>
-          </a>
+          </Link>
+          <Link to="/connection-logs" className="settings-nav-card">
+            <div className="settings-nav-card-title">Connection logs</div>
+            <div className="settings-nav-card-desc muted">Per-tunnel HTTP/TCP/control connection history.</div>
+          </Link>
           <Link to="/services" className="settings-nav-card">
             <div className="settings-nav-card-title">Custom domains</div>
             <div className="settings-nav-card-desc muted">Per-service CNAME + cert pairs (managed per service).</div>

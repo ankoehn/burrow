@@ -27,6 +27,7 @@ import ConnectionLogs from "@/pages/ConnectionLogs";
 import ServiceDetail from "@/pages/ServiceDetail";
 import Retention from "@/pages/Retention";
 import DatabaseBackend from "@/pages/DatabaseBackend";
+import OpenApiViewer from "@/pages/OpenApiViewer";
 
 export default function App() {
   return (
@@ -60,6 +61,8 @@ export default function App() {
         <Route path="/services/:id/domains" element={<ServiceDetail />} />
         <Route path="/settings/retention" element={<Retention />} />
         <Route path="/settings/database" element={<DatabaseBackend />} />
+        {/* P1-14: in-app OpenAPI viewer, framed inside the dashboard chrome. */}
+        <Route path="/openapi" element={<OpenApiViewer />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
