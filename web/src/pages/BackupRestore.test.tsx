@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/mocks/test-utils";
@@ -9,6 +9,23 @@ function mount() {
 }
 
 describe("Backup & restore", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("renders a real EmptyState (not a flat tr) when there are no backups (C3)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/backups")) {
+        return new Response(JSON.stringify([]), { status: 200 }) as Response;
+      }
+      return new Response("[]", { status: 200 }) as Response;
+    });
+    const { container } = mount();
+    await waitFor(() => {
+      expect(container.querySelector(".state-card")).not.toBeNull();
+      expect(container.querySelector(".state-card .icon-bubble")).not.toBeNull();
+    });
+  });
+
   it("renders the verbatim disclaimer", async () => {
     mount();
     expect(

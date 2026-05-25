@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, EmptyState, SkeletonRows } from "@/components/ds";
 import { formatBytes } from "@/lib/format";
 import type { BackupRow } from "@/lib/contract";
 
@@ -83,37 +83,41 @@ export default function BackupRestore() {
 
       <section className="card">
         <h2>Backup history</h2>
-        {!backups.data ? <SkeletonRows n={2} /> : (
+        {!backups.data ? (
+          <SkeletonRows n={2} />
+        ) : backups.data.length === 0 ? (
+          <EmptyState title="No backups yet">
+            Create a snapshot to capture the relay's database, TLS state, and config.
+          </EmptyState>
+        ) : (
           <div className="table-wrap">
             <table className="data" aria-label="Backup history">
               <thead>
                 <tr><th>Taken</th><th>Size</th><th>Version</th><th>SHA-256</th><th className="col-actions"></th></tr>
               </thead>
               <tbody>
-                {backups.data.length === 0
-                  ? <tr><td colSpan={5} className="muted">No backups yet.</td></tr>
-                  : backups.data.map((b) => (
-                      <tr key={b.id}>
-                        <td className="mono small">{b.taken_at}</td>
-                        <td className="mono small">{formatBytes(b.size_bytes)}</td>
-                        <td>{b.version}</td>
-                        <td>
-                          <span className="row gap-2" style={{ alignItems: "center" }}>
-                            <code className="mono small">{truncate(b.db_sha256)}</code>
-                            <button type="button" className="icon-btn" aria-label={`Copy sha for ${b.id}`} onClick={() => { copy(b.db_sha256); toast.success("Copied."); }}>
-                              <Copy size={13} />
-                            </button>
-                          </span>
-                        </td>
-                        <td className="col-actions">
-                          <Button variant="ghost" size="sm" onClick={() => { void apiFetch(`/backups/${b.id}/download`); }}>Download</Button>
-                          {" "}
-                          <Button variant="ghost" size="sm" onClick={() => verify.mutate(b.id)}>Verify</Button>
-                          {" "}
-                          <Button variant="destructive" size="sm" onClick={() => remove.mutate(b.id)}>Delete</Button>
-                        </td>
-                      </tr>
-                    ))}
+                {backups.data.map((b) => (
+                  <tr key={b.id}>
+                    <td className="mono small">{b.taken_at}</td>
+                    <td className="mono small">{formatBytes(b.size_bytes)}</td>
+                    <td>{b.version}</td>
+                    <td>
+                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                        <code className="mono small">{truncate(b.db_sha256)}</code>
+                        <button type="button" className="icon-btn" aria-label={`Copy sha for ${b.id}`} onClick={() => { copy(b.db_sha256); toast.success("Copied."); }}>
+                          <Copy size={13} />
+                        </button>
+                      </span>
+                    </td>
+                    <td className="col-actions">
+                      <Button variant="ghost" size="sm" onClick={() => { void apiFetch(`/backups/${b.id}/download`); }}>Download</Button>
+                      {" "}
+                      <Button variant="ghost" size="sm" onClick={() => verify.mutate(b.id)}>Verify</Button>
+                      {" "}
+                      <Button variant="destructive" size="sm" onClick={() => remove.mutate(b.id)}>Delete</Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
