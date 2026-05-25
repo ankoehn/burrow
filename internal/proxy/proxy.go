@@ -753,6 +753,15 @@ func (p *Proxy) GetConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, err
 // v0.5.0 F-13: connection-log accounting helpers.
 // ---------------------------------------------------------------------------
 
+// TODO(P2-6): the per-request rc.bytes()/ww.bytes() values below are written
+// to the connection log but NOT folded back into the live registry's
+// tunnel.BytesIn/BytesOut atomic counters that the dashboard's Traffic
+// column reads from. The TCP data plane updates them via
+// internal/server/data.go (bridge.Pipe(... &tun.BytesIn, &tun.BytesOut)),
+// so TCP tunnels show traffic while HTTP tunnels stay at zero. Adding a
+// narrow `LiveTunnelCounter` interface and routing the per-request totals
+// through it would close the gap; tracked in docs/BACKLOG.md.
+//
 // recordOnClose builds a ConnLogEntry from the captured per-request counters
 // and dispatches it through the registered ConnLogSink. Safe to call when
 // p.connLogSink is nil — recordOnClose returns immediately. Called from a
