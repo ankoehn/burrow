@@ -46,4 +46,38 @@ describe("Audit log (§4.25)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /verify chain/i }));
     expect(await screen.findByText(/^Chain valid from/i)).toBeInTheDocument();
   });
+
+  it("renders formatted timestamps (not raw RFC3339) for audit rows (B5)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/audit/events")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "1",
+              ts: "2026-05-25T07:42:51.83442115Z",
+              actor_id: "",
+              actor_email: "",
+              action: "session.create",
+              subject_id: "",
+              subject_label: "",
+              result: "ok",
+              source_ip: "127.0.0.1",
+              user_agent: "",
+              request_id: "",
+              payload: {},
+              prev_hash: "",
+              hash: "",
+            },
+          ]),
+          { status: 200 },
+        ) as Response;
+      }
+      return new Response("{}", { status: 200 }) as Response;
+    });
+    mount();
+    await waitFor(() => {
+      expect(screen.queryByText(/2026-05-25T07:42:51\.83442115Z/)).toBeNull();
+      expect(screen.getByText(/25 May 2026/)).toBeInTheDocument();
+    });
+  });
 });

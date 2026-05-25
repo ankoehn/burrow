@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Input, SkeletonRows } from "@/components/ds";
 import type { AuditEvent } from "@/lib/contract";
+import { formatTimestampWithTooltip } from "@/lib/format";
 
 function Row({ e }: { e: AuditEvent }) {
   const [open, setOpen] = useState(false);
@@ -12,7 +13,10 @@ function Row({ e }: { e: AuditEvent }) {
     <>
       <tr style={{ cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
         <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
-        <td className="mono small">{e.ts}</td>
+        {(() => {
+          const t = formatTimestampWithTooltip(e.ts);
+          return <td className="small"><time dateTime={t.iso} title={t.iso}>{t.display}</time></td>;
+        })()}
         <td className="mono small">{e.actor_email}</td>
         <td className="mono">{e.action}</td>
         <td className="mono">{e.subject_label}</td>
