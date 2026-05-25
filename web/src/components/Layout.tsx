@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Moon, Sun, Waypoints, KeyRound, Users, UserCircle, LogOut, Boxes, ShieldCheck,
   ServerCog, Globe, Sparkles, DollarSign, Database, ShieldAlert, Search, ScrollText,
-  Webhook as WebhookIcon, Archive, Bot, KeyRound as KeyRoundIcon2,
+  Webhook as WebhookIcon, Archive, Bot,
   Activity, FileCode,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -122,10 +122,7 @@ export function Layout() {
                 <span className="nav-icon"><ShieldCheck size={16} /></span>
                 <span className="nav-label">Roles</span>
               </NavLink>
-              <NavLink to="/provisioning" className={navItem}>
-                <span className="nav-icon"><KeyRoundIcon2 size={16} /></span>
-                <span className="nav-label">Provisioning</span>
-              </NavLink>
+
             </div>
           )}
 

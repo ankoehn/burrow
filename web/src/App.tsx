@@ -20,7 +20,7 @@ import RequestInspector from "@/pages/RequestInspector";
 import CostBudgets from "@/pages/CostBudgets";
 import AuditLog from "@/pages/AuditLog";
 import Webhooks from "@/pages/Webhooks";
-import ProvisioningKeys from "@/pages/ProvisioningKeys";
+
 import AutomationTokens from "@/pages/AutomationTokens";
 import BackupRestore from "@/pages/BackupRestore";
 import ConnectionLogs from "@/pages/ConnectionLogs";
@@ -44,7 +44,7 @@ export default function App() {
         <Route path="/cost" element={<CostBudgets />} />
         <Route path="/audit" element={<AuditLog />} />
         <Route path="/webhooks" element={<Webhooks />} />
-        <Route path="/provisioning" element={<ProvisioningKeys />} />
+
         <Route path="/account/automation" element={<AutomationTokens />} />
         <Route path="/settings/backups" element={<BackupRestore />} />
         <Route path="/tokens" element={<Tokens />} />

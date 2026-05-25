@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { render } from "@testing-library/react";
@@ -49,7 +49,6 @@ describe("App routes", () => {
     ["/cost",                          /^Cost & budgets$/i],
     ["/audit",                         /^Audit log$/i],
     ["/webhooks",                      /^Webhooks$/i],
-    ["/provisioning",                  /^Provisioning keys$/i],
     ["/account/automation",            /^Automation tokens$/i],
     ["/settings/backups",              /^Backup & restore$/i],
   ])("resolves %s to its page heading", async (path, heading) => {
@@ -64,5 +63,12 @@ describe("App routes", () => {
     expect(screen.getByRole("link", { name: /^Cost & budgets$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Prompt cache$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Guardrails$/i })).toBeInTheDocument();
+  });
+
+  it("/provisioning is unreachable (backend pending)", async () => {
+    renderAt("/provisioning");
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: /provisioning keys/i })).toBeNull();
+    });
   });
 });

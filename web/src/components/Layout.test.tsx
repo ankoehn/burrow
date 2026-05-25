@@ -154,4 +154,14 @@ describe("Layout nav role-gating", () => {
     expect(link).toHaveAttribute("href", "/api/v1/openapi/viewer");
     expect(link).toHaveAttribute("target", "_blank");
   });
+
+  it("does NOT render Provisioning nav link (backend pending — issue tracked in BACKLOG_1.0.0.md)", async () => {
+    renderLayout("admin");
+    // Wait for admin role to be active (Users link only appears for admin)
+    await screen.findByRole("link", { name: /^users$/i });
+    // Now the Access control group is rendered — assert Provisioning link is absent
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Provisioning" })).toBeNull();
+    });
+  });
 });
