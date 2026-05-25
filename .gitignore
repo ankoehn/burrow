@@ -2,6 +2,10 @@
 /bin/
 /dist/
 /tmp/
+/.tmp/
+
+# Stray root-level deps (e.g. when a sub-package install resolves up here)
+/node_modules/
 
 # Local env / secrets / local DB
 .env
