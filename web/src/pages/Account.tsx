@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, Input } from "@/components/ds";
+import { Button, EmptyState, Input } from "@/components/ds";
 import type { Session, WebAuthnCredential } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -32,23 +32,28 @@ function SecurityKeys() {
         </div>
         <WebAuthnRegisterButton />
       </div>
-      {isLoading ? <p className="muted">Loading…</p> : (
+      {isLoading ? <p className="muted">Loading…</p> : (data ?? []).length === 0 ? (
+        <EmptyState
+          title="No passkeys yet"
+          action={<WebAuthnRegisterButton />}
+        >
+          Passkeys are an unphishable second factor — pair with your password.
+        </EmptyState>
+      ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Passkeys">
             <thead><tr><th>Label</th><th>Created</th><th>Last used</th><th className="col-actions"></th></tr></thead>
             <tbody>
-              {(data ?? []).length === 0
-                ? <tr><td colSpan={4} className="muted">No passkeys yet.</td></tr>
-                : (data ?? []).map((c) => (
-                    <tr key={c.id}>
-                      <td>{c.label}</td>
-                      <td className="col-created">{formatTimestamp(c.created_at)}</td>
-                      <td className="col-created">{formatTimestamp(c.last_used)}</td>
-                      <td className="col-actions">
-                        <Button variant="ghost" size="sm" onClick={() => revoke.mutate(c.id)}>Revoke</Button>
-                      </td>
-                    </tr>
-                  ))}
+              {(data ?? []).map((c) => (
+                <tr key={c.id}>
+                  <td>{c.label}</td>
+                  <td className="col-created">{formatTimestamp(c.created_at)}</td>
+                  <td className="col-created">{formatTimestamp(c.last_used)}</td>
+                  <td className="col-actions">
+                    <Button variant="ghost" size="sm" onClick={() => revoke.mutate(c.id)}>Revoke</Button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
