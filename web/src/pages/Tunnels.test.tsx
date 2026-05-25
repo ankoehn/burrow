@@ -39,9 +39,9 @@ describe("Tunnels", () => {
     });
     setup();
     expect(await screen.findByText("web")).toBeInTheDocument();
-    // bytes_in: 11 B, bytes_out: 22 B — rendered with formatBytes
-    expect(screen.getByText("11 B")).toBeInTheDocument();
-    expect(screen.getByText("22 B")).toBeInTheDocument();
+    // bytes_in: 11 B, bytes_out: 22 B — rendered with formatBytes in merged TRAFFIC cell
+    expect(screen.getByTitle("In: 11 bytes")).toBeInTheDocument();
+    expect(screen.getByTitle("Out: 22 bytes")).toBeInTheDocument();
     const before = calls;
     act(() => { (FakeES as any).last.emit("tunnels"); });
     await waitFor(() => expect(calls).toBeGreaterThan(before));
@@ -145,5 +145,20 @@ describe("Tunnels", () => {
     // Give it a tick to ensure no spurious invalidation
     await new Promise((r) => setTimeout(r, 10));
     expect(invalidate).not.toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["me"] }));
+  });
+
+  it("TRAFFIC column merges IN+OUT into one cell matching Clients page shape (S6)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([
+        { id: "t1", name: "echo", type: "tcp", remote_port: 9002, local_addr: "127.0.0.1:8082",
+          bytes_in: 1024, bytes_out: 2048, connected: true },
+      ]), { status: 200 }) as Response,
+    );
+    setup();
+    await waitFor(() => screen.getByText("echo"));
+    // OLD shape was separate IN / OUT columns. New shape merges into TRAFFIC.
+    expect(screen.queryByRole("columnheader", { name: /^in$/i })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: /^out$/i })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: /traffic/i })).toBeInTheDocument();
   });
 });

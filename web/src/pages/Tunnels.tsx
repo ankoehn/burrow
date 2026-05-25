@@ -101,8 +101,7 @@ export default function Tunnels() {
                 <th>Local</th>
                 <th>Hostname</th>
                 <th>Access</th>
-                <th className="col-bytes">In</th>
-                <th className="col-bytes">Out</th>
+                <th>Traffic</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -148,8 +147,11 @@ export default function Tunnels() {
                       )}
                     </span>
                   </td>
-                  <td className="col-bytes">{formatBytes(t.bytes_in)}</td>
-                  <td className="col-bytes">{formatBytes(t.bytes_out)}</td>
+                  <td className="col-traffic small">
+                    <span title={`In: ${t.bytes_in} bytes`}>↓ {formatBytes(t.bytes_in)}</span>
+                    {"  "}
+                    <span title={`Out: ${t.bytes_out} bytes`}>↑ {formatBytes(t.bytes_out)}</span>
+                  </td>
                   <td>
                     {t.connected
                       ? <Badge kind="status-connected">connected</Badge>
