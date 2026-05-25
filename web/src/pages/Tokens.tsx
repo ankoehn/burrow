@@ -14,6 +14,7 @@ export default function Tokens() {
   const { data } = useQuery({ queryKey: ["tokens"], queryFn: () => apiFetch<Token[]>("/tokens"), staleTime: 30_000 });
   const [name, setName] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
   const create = useMutation({
     mutationFn: () => apiFetch<{ name: string; token: string }>("/tokens", { method: "POST", body: JSON.stringify({ name }) }),
     onSuccess: (r) => { setPlaintext(r.token); setName(""); qc.invalidateQueries({ queryKey: ["tokens"] }); },
@@ -63,10 +64,10 @@ export default function Tokens() {
                 </td>
                 <td className="col-actions">
                   <Button
-                    variant="secondary"
+                    variant="destructive"
                     size="sm"
                     aria-label={`Revoke token ${t.name}`}
-                    onClick={() => revoke.mutate(t.id)}
+                    onClick={() => setRevokeTarget({ id: t.id, name: t.name })}
                   >
                     Revoke
                   </Button>
@@ -96,6 +97,33 @@ export default function Tokens() {
             <span className="v">{plaintext}</span>
           </div>
         </div>
+      </Dialog>
+      <Dialog
+        open={revokeTarget !== null}
+        onOpenChange={(o) => { if (!o) setRevokeTarget(null); }}
+        title="Revoke token?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRevokeTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={revoke.isPending}
+              onClick={() => {
+                if (revokeTarget) {
+                  revoke.mutate(revokeTarget.id);
+                  setRevokeTarget(null);
+                }
+              }}
+            >
+              Revoke
+            </Button>
+          </>
+        }
+      >
+        <p>
+          Revoke <code className="mono">{revokeTarget?.name}</code>?
+          Clients using this token will be disconnected on the next reconnect.
+        </p>
       </Dialog>
       <Toaster />
     </div>

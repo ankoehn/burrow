@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import Tokens from "./Tokens";
@@ -69,5 +69,47 @@ describe("Tokens", () => {
     setup();
     await screen.findByText("mymachine");
     expect(screen.getByRole("button", { name: "Revoke token mymachine" })).toBeInTheDocument();
+  });
+
+  it("Revoke variant is destructive (red) (C2)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+      if (String(url).includes("/tokens")) {
+        return new Response(JSON.stringify([
+          { id: "tok1", name: "ci", created_at: "2026-05-25T07:00:00Z", last_used: null },
+        ]), { status: 200 }) as any;
+      }
+      return new Response("[]", { status: 200 }) as any;
+    });
+    setup();
+    await screen.findByText("ci");
+    const btn = screen.getByRole("button", { name: /revoke token ci/i });
+    expect(btn.className).toMatch(/destructive/);
+  });
+
+  it("Revoke opens a confirm dialog; Cancel does NOT call DELETE (C2)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any, opts?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/tokens/tok1") && opts?.method === "DELETE") {
+        throw new Error("DELETE should NOT be called when user cancels");
+      }
+      if (u.includes("/tokens")) {
+        return new Response(JSON.stringify([
+          { id: "tok1", name: "ci", created_at: "2026-05-25T07:00:00Z", last_used: null },
+        ]), { status: 200 }) as any;
+      }
+      return new Response("[]", { status: 200 }) as any;
+    });
+    setup();
+    await screen.findByText("ci");
+    await userEvent.click(screen.getByRole("button", { name: /revoke token ci/i }));
+    // Dialog opens
+    expect(await screen.findByRole("dialog", { name: /revoke token/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    await waitFor(() => {
+      expect(fetchSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("/tokens/tok1"),
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
   });
 });
