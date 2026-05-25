@@ -106,6 +106,27 @@ describe("Tunnels", () => {
     expect(await screen.findByRole("radiogroup", { name: /access mode/i })).toBeInTheDocument();
   });
 
+  it("HTTP tunnels show '—' in REMOTE, not ':0' (C6)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/tunnels")) {
+        return new Response(JSON.stringify([
+          { id: "t1", name: "ai", type: "http", remote_port: 0, local_addr: "mockoai:8081",
+            bytes_in: 0, bytes_out: 0, connected: true, hostname: "abc.test.local" },
+          { id: "t2", name: "echo", type: "tcp", remote_port: 9002, local_addr: "127.0.0.1:8082",
+            bytes_in: 0, bytes_out: 0, connected: true },
+        ]), { status: 200 }) as Response;
+      }
+      return new Response("[]", { status: 200 }) as Response;
+    });
+    setup();
+    await waitFor(() => {
+      expect(screen.queryByText(":0")).toBeNull();
+      expect(screen.getByText("abc.test.local")).toBeInTheDocument();
+      expect(screen.getByText(":9002")).toBeInTheDocument();
+    });
+  });
+
   it("does NOT invalidate ['me'] on transient SSE error while CONNECTING", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("[]", { status: 200 }) as any

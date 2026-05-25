@@ -113,7 +113,11 @@ export default function Tunnels() {
                     {t.name || "—"}
                   </td>
                   <td><Badge nodot>{t.type}</Badge></td>
-                  <td className="col-remote">:{t.remote_port}</td>
+                  <td className="col-remote">
+                    {t.type === "http"
+                      ? <span className="muted">—</span>
+                      : `:${t.remote_port}`}
+                  </td>
                   <td className="col-local">{t.local_addr}</td>
                   <td>
                     {t.type === "http" && t.hostname ? (
