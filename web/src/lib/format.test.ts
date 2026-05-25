@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatBytes, formatTimestamp } from "./format";
+import { formatBytes, formatTimestamp, formatTimestampWithTooltip } from "./format";
 
 describe("formatBytes", () => {
   it("returns '0 B' for 0", () => {
@@ -52,5 +52,28 @@ describe("formatTimestamp", () => {
   it("returns a non-empty string for another valid RFC3339 timestamp", () => {
     const result = formatTimestamp("2023-06-01T00:00:00.000Z");
     expect(result).not.toBe("—");
+  });
+});
+
+describe("formatTimestamp locale", () => {
+  it("renders en-GB unambiguous format regardless of system locale", () => {
+    const s = "2026-05-25T07:42:51.834Z";
+    const out = formatTimestamp(s);
+    // Guarantee no month-first US ambiguity (no "5/25").
+    expect(out).not.toMatch(/^\d{1,2}\/\d{1,2}\/\d{4}/);
+    expect(out).not.toBe("—");
+    expect(out).toContain("2026");
+  });
+});
+
+describe("formatTimestampWithTooltip", () => {
+  it("returns display + iso pair", () => {
+    const s = "2026-05-25T07:42:51.834Z";
+    const out = formatTimestampWithTooltip(s);
+    expect(out.iso).toBe("2026-05-25T07:42:51.834Z");
+    expect(out.display).toBe(formatTimestamp(s));
+  });
+  it("null input returns em-dash + empty iso", () => {
+    expect(formatTimestampWithTooltip(null)).toEqual({ display: "—", iso: "" });
   });
 });
