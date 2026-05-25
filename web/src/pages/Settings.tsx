@@ -57,7 +57,7 @@ export default function Settings() {
   });
 
   return (
-    <div className="account-page">
+    <div className="account-page form-narrow">
       <div className="page-head"><div><h1>Settings</h1><p className="sub">Admin-only configuration for this Burrow relay.</p></div></div>
 
       {/* ---- v0.5.0 nav cards ---- */}

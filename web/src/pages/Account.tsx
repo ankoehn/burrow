@@ -168,7 +168,7 @@ export default function Account() {
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
 
   return (
-    <div className="account-page">
+    <div className="account-page form-narrow">
       <div className="page-head" style={{ marginBottom: 8 }}>
         <div>
           <h1>Account</h1>

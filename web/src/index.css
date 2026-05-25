@@ -1401,6 +1401,9 @@ table.data td.col-actions { width: 40px; text-align: right; padding-right: 8px; 
   outline-offset: 2px;
 }
 
+/* Form pages max-width — prevents inputs from stretching on wide viewports (S5) */
+.form-narrow { max-width: 840px; }
+
 /* Inline anchor affordance — explicit underline + brand color (C4) */
 a.link-inline {
   color: var(--primary);

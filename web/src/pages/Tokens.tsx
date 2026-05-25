@@ -26,7 +26,7 @@ export default function Tokens() {
     onError: () => toast.error("Failed to revoke token"),
   });
   return (
-    <div className="tokens-page" style={{ position: "relative" }}>
+    <div className="tokens-page form-narrow" style={{ position: "relative" }}>
       <div className="page-head">
         <div>
           <h1>Client tokens</h1>
