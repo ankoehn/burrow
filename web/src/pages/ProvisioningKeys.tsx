@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Dialog, Input, Select, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Dialog, EmptyState, ErrorNotice, Input, Select, SkeletonRows } from "@/components/ds";
 import type { ProvisioningKey, ProvisioningPending } from "@/lib/contract";
 
 interface CreatedProvisioningKey {
@@ -93,28 +93,34 @@ export default function ProvisioningKeys() {
 
       <section className="card">
         <h2>Active provisioning keys</h2>
-        {!keys.data ? <SkeletonRows n={2} /> : (
+        {keys.isLoading ? (
+          <SkeletonRows n={2} />
+        ) : keys.isError ? (
+          <ErrorNotice>Couldn't load provisioning keys.</ErrorNotice>
+        ) : keys.data && keys.data.length === 0 ? (
+          <EmptyState title="No provisioning keys yet">
+            Mint long-lived keys that newly-launched clients use to enrol with this relay.
+          </EmptyState>
+        ) : (
           <div className="table-wrap">
             <table className="data" aria-label="Active provisioning keys">
               <thead>
                 <tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Role</th><th>Created</th><th>Last used</th><th className="col-actions"></th></tr>
               </thead>
               <tbody>
-                {keys.data.length === 0
-                  ? <tr><td colSpan={7} className="muted">No provisioning keys yet.</td></tr>
-                  : keys.data.map((k) => (
-                      <tr key={k.id}>
-                        <td>{k.name}</td>
-                        <td className="mono small">{k.prefix}</td>
-                        <td><Badge nodot kind={`scope-${k.scope}`}>{k.scope}</Badge></td>
-                        <td>{k.default_role}</td>
-                        <td className="mono small">{k.created_at}</td>
-                        <td className="mono small">{k.last_used ?? "—"}</td>
-                        <td className="col-actions">
-                          <Button variant="ghost" size="sm" onClick={() => remove.mutate(k.id)}>Revoke</Button>
-                        </td>
-                      </tr>
-                    ))}
+                {(keys.data ?? []).map((k) => (
+                  <tr key={k.id}>
+                    <td>{k.name}</td>
+                    <td className="mono small">{k.prefix}</td>
+                    <td><Badge nodot kind={`scope-${k.scope}`}>{k.scope}</Badge></td>
+                    <td>{k.default_role}</td>
+                    <td className="mono small">{k.created_at}</td>
+                    <td className="mono small">{k.last_used ?? "—"}</td>
+                    <td className="col-actions">
+                      <Button variant="ghost" size="sm" onClick={() => remove.mutate(k.id)}>Revoke</Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -123,29 +129,35 @@ export default function ProvisioningKeys() {
 
       <section className="card">
         <h2>Pending approvals</h2>
-        {!pending.data ? <SkeletonRows n={2} /> : (
+        {pending.isLoading ? (
+          <SkeletonRows n={2} />
+        ) : pending.isError ? (
+          <ErrorNotice>Couldn't load pending approvals.</ErrorNotice>
+        ) : pending.data && pending.data.length === 0 ? (
+          <EmptyState title="No pending approvals">
+            Clients that present a provisioning key will appear here for your review.
+          </EmptyState>
+        ) : (
           <div className="table-wrap">
             <table className="data" aria-label="Pending approvals">
               <thead>
                 <tr><th>Hostname</th><th>OS / Arch</th><th>Remote IP</th><th>Provisioning key</th><th>First seen</th><th className="col-actions"></th></tr>
               </thead>
               <tbody>
-                {pending.data.length === 0
-                  ? <tr><td colSpan={6} className="muted">No pending approvals.</td></tr>
-                  : pending.data.map((p) => (
-                      <tr key={p.id}>
-                        <td className="mono">{p.hostname}</td>
-                        <td className="mono small">{p.os}/{p.arch}</td>
-                        <td className="mono small">{p.remote_ip}</td>
-                        <td className="mono small">{p.provisioning_key_id}</td>
-                        <td className="mono small">{p.first_seen}</td>
-                        <td className="col-actions">
-                          <Button variant="primary" size="sm" onClick={() => approve.mutate(p.id)}>Approve</Button>
-                          {" "}
-                          <Button variant="ghost" size="sm" onClick={() => reject.mutate(p.id)}>Reject</Button>
-                        </td>
-                      </tr>
-                    ))}
+                {(pending.data ?? []).map((p) => (
+                  <tr key={p.id}>
+                    <td className="mono">{p.hostname}</td>
+                    <td className="mono small">{p.os}/{p.arch}</td>
+                    <td className="mono small">{p.remote_ip}</td>
+                    <td className="mono small">{p.provisioning_key_id}</td>
+                    <td className="mono small">{p.first_seen}</td>
+                    <td className="col-actions">
+                      <Button variant="primary" size="sm" onClick={() => approve.mutate(p.id)}>Approve</Button>
+                      {" "}
+                      <Button variant="ghost" size="sm" onClick={() => reject.mutate(p.id)}>Reject</Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
