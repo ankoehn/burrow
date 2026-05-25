@@ -49,11 +49,15 @@ export default function Tunnels() {
     staleTime: 5 * 60_000,
   });
   const relayHost = (() => {
+    const winHost = typeof window !== "undefined" ? window.location.hostname : "";
     const s = connectInfo.data?.server ?? "";
-    if (!s) return typeof window !== "undefined" ? window.location.hostname : "";
-    // Strip an existing port — we'll append the tunnel's remote port instead.
+    if (!s) return winHost;
+    // ":7000" (port-only, relay bound to all interfaces) carries no host —
+    // fall back to the dashboard's own hostname so copying yields a real
+    // host:port instead of ":7000:9003".
     const i = s.lastIndexOf(":");
-    return i > 0 ? s.slice(0, i) : s;
+    if (i <= 0) return winHost;
+    return s.slice(0, i);
   })();
   // P2-2 — search filter + togglable sort column. Default sort matches P0-7
   // (type asc, name asc) so reload is stable; clicking a header toggles its

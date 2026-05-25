@@ -27,10 +27,25 @@ type ConnectInfo struct {
 // When Deps.ControlListen is empty (legacy boot, tests) the handler
 // falls back to the request Host header so the wizard still copy-pastes
 // something usable on a single-host dev deploy.
+//
+// When ControlListen is port-only (e.g. ":7000" — relay bound to every
+// interface), the host part is empty. Splice in the dashboard request's
+// hostname so the wizard renders a copyable host:port instead of a
+// malformed ":7000" string.
 func (d Deps) GetConnectInfo(w http.ResponseWriter, r *http.Request) {
 	server := d.ControlListen
 	if server == "" {
 		server = r.Host
+	} else if strings.HasPrefix(server, ":") {
+		// Strip an existing :port off r.Host (Chrome sends "host:8080") and
+		// glue it to ControlListen's port.
+		host := r.Host
+		if i := strings.LastIndex(host, ":"); i > 0 {
+			host = host[:i]
+		}
+		if host != "" {
+			server = host + server
+		}
 	}
 	writeJSON(w, http.StatusOK, ConnectInfo{Server: server})
 }
