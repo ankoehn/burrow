@@ -22,4 +22,16 @@ describe("parseUserAgent", () => {
   it("empty input returns Unknown/Unknown", () => {
     expect(parseUserAgent("")).toEqual({ browser: "Unknown", os: "Unknown" });
   });
+  it("Safari on iOS (iPhone)", () => {
+    const out = parseUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1");
+    expect(out).toEqual({ browser: "Safari 17", os: "iOS" });
+  });
+  it("Chrome on iOS (CriOS)", () => {
+    const out = parseUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/124.0.0 Mobile/15E148 Safari/604.1");
+    expect(out).toEqual({ browser: "Chrome 124", os: "iOS" });
+  });
+  it("Safari on iPad", () => {
+    const out = parseUserAgent("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1");
+    expect(out).toEqual({ browser: "Safari 17", os: "iOS" });
+  });
 });
