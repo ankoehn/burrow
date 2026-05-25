@@ -437,6 +437,10 @@ body {
 /* Dark-mode override: raise badge border lightness so pills are visible
    against card/row backgrounds (--card ~0.212; --border ~10% opacity).  */
 .dark .badge { border-color: oklch(0.42 0 0); }
+/* Preserve tinted borders for coloured status variants in dark mode */
+.dark .badge.status-connected { border-color: color-mix(in oklch, var(--success) 35%, oklch(0.42 0 0)); }
+.dark .badge.status-idle      { border-color: color-mix(in oklch, var(--warning) 40%, oklch(0.42 0 0)); }
+.dark .badge.status-suspended { border-color: color-mix(in oklch, var(--destructive) 35%, oklch(0.42 0 0)); }
 
 /* ──────────────────────────────────────────────────────────────
    Table
