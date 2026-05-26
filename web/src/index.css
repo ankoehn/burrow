@@ -1698,3 +1698,10 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
 .accordion-body {
   padding: 0 0 var(--space-lg) calc(14px + var(--space-sm));
 }
+
+/* Roles table — cap the Description column so a one-sentence
+   description doesn't sprawl across 1100px on wide monitors. */
+.roles-page table.data td:nth-child(2),
+.roles-page table.data th:nth-child(2) {
+  max-width: 640px;
+}

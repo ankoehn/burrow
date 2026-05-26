@@ -59,7 +59,7 @@ export default function Roles() {
   }
 
   return (
-    <div className="users-page">
+    <div className="users-page roles-page">
       <PageHeader
         title="Roles"
         subtitle="What each role is allowed to do."
