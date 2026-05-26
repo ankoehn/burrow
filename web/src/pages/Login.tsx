@@ -3,9 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { Button } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
 
-/* Brand mark — geometric tunnel-and-arrow glyph (currentColor). */
 function BurrowMark({ size = 26 }: { size?: number }) {
   return (
     <svg
@@ -53,11 +52,10 @@ export default function Login() {
         <h1 className="signin-title">Sign in to Burrow</h1>
         <p className="signin-sub">Use the credentials issued by your relay admin.</p>
 
-        <form className="signin-form" onSubmit={submit} noValidate>
-          <div className="signin-card">
-            <div className="signin-field">
-              <label htmlFor="login-email">Email</label>
-              <input
+        <form onSubmit={submit} noValidate>
+          <FormFieldGroup>
+            <FormField label="Email" htmlFor="login-email" w="full">
+              <Input
                 id="login-email"
                 type="email"
                 name="email"
@@ -68,10 +66,9 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={err ? true : undefined}
               />
-            </div>
-            <div className="signin-field">
-              <label htmlFor="login-password">Password</label>
-              <input
+            </FormField>
+            <FormField label="Password" htmlFor="login-password" w="full">
+              <Input
                 id="login-password"
                 type="password"
                 name="password"
@@ -82,15 +79,15 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={err ? true : undefined}
               />
-            </div>
-          </div>
+            </FormField>
+          </FormFieldGroup>
 
-          <div className="signin-actions">
-            <Button type="submit" variant="primary" className="signin-submit" style={{ width: "100%" }}>Sign in</Button>
+          <div style={{ marginTop: "var(--space-lg)" }}>
+            <Button type="submit" variant="primary" style={{ width: "100%" }}>Sign in</Button>
           </div>
 
           {err && (
-            <div className="signin-error" role="alert" aria-live="polite">
+            <div className="signin-error" role="alert" aria-live="polite" style={{ marginTop: "var(--space-md)" }}>
               <AlertTriangle size={14} className="icon" />
               <span>{err}</span>
             </div>

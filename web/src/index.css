@@ -324,7 +324,7 @@ body {
   outline: none;
   transition: border-color var(--t-micro), background var(--t-micro);
 }
-.input::placeholder { color: var(--muted-foreground); }
+.input::placeholder { color: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
 .input:hover, .select-trigger:hover { border-color: var(--border-strong); }
 .input:focus, .select-trigger:focus,
 .input.is-focus, .select-trigger.is-focus {
@@ -1188,57 +1188,6 @@ button.sort-header:focus-visible {
   text-align: center;
   font-size: 12.5px;
   color: var(--muted-foreground);
-}
-
-.signin-card {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-  overflow: hidden;
-  /* explicitly no shadow — this is not an overlay */
-}
-
-.signin-field {
-  position: relative;
-  padding: 11px 14px 12px;
-  transition: background var(--t-micro);
-}
-.signin-field + .signin-field {
-  border-top: 1px solid var(--border);
-}
-.signin-field:focus-within {
-  background: color-mix(in oklch, var(--primary) 5%, transparent);
-}
-.dark .signin-field:focus-within {
-  background: color-mix(in oklch, var(--primary) 8%, transparent);
-}
-
-.signin-field label {
-  display: block;
-  margin-bottom: 4px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-}
-
-.signin-field input {
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  outline: none;
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1.4;
-}
-.signin-field input::placeholder { color: var(--muted-foreground); }
-.signin-field input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 4px;
-  border-radius: 2px;
 }
 
 .signin-actions {
