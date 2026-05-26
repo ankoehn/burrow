@@ -1,9 +1,9 @@
-import { useEffect, useId } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, DropdownMenu, ErrorNotice, SkeletonRows } from "@/components/ds";
+import { Badge, Button, DropdownMenu, ErrorNotice, MetricStrip, MetricTile, SkeletonRows } from "@/components/ds";
 import type { AiEndpoint, CostSummary } from "@/lib/contract";
 
 function fmtInt(n: number): string {
@@ -19,34 +19,6 @@ function hitRatio(hits: number, requests: number): string {
   return `${Math.round((hits / requests) * 100)}%`;
 }
 
-interface MetricTileProps {
-  label: string;
-  value: string;
-  sub?: string;
-  tooltip?: string;
-}
-
-function MetricTile({ label, value, sub, tooltip }: MetricTileProps) {
-  const tipId = useId();
-  const describedBy = tooltip ? tipId : undefined;
-  return (
-    <div
-      role="group"
-      aria-label={`${label} metric`}
-      aria-describedby={describedBy}
-      className="metric-tile"
-    >
-      <div className="metric-label">{label}</div>
-      <div className="metric-value mono">{value}</div>
-      {sub && <div className="metric-sub muted mono">{sub}</div>}
-      {tooltip && (
-        <span id={tipId} role="tooltip" className="metric-tooltip">
-          {tooltip}
-        </span>
-      )}
-    </div>
-  );
-}
 
 const STATUS_BADGE: Record<AiEndpoint["status"], string> = {
   Connected: "status-connected",
@@ -124,7 +96,7 @@ export default function AiEndpoints() {
         </div>
       </div>
 
-      <div className="metric-strip" role="list" aria-label="AI endpoint metrics">
+      <MetricStrip ariaLabel="AI endpoint metrics">
         <MetricTile label="Requests (24h)" value={fmtInt(totalRequests)} />
         <MetricTile
           label="Tokens in/out (24h)"
@@ -140,7 +112,7 @@ export default function AiEndpoints() {
           value={hitRatio(totalCacheHits, totalRequests)}
           sub={`${fmtInt(totalCacheHits)} / ${fmtInt(totalRequests)}`}
         />
-      </div>
+      </MetricStrip>
 
       {endpoints.error ? (
         <ErrorNotice

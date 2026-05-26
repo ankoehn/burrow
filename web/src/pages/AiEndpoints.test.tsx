@@ -14,20 +14,19 @@ function mount() {
 describe("AI endpoints page (§4.19)", () => {
   it("renders the four-tile metric strip with the spec tooltip", async () => {
     mount();
-    const tiles = await screen.findAllByRole("group", { name: /metric/i });
+    const strip = await screen.findByRole("list", { name: "AI endpoint metrics" });
+    const { getAllByRole } = within(strip);
+    const tiles = getAllByRole("listitem");
     expect(tiles).toHaveLength(4);
-    // The four tiles, in spec order.
-    expect(tiles[0]).toHaveAttribute("aria-label", "Requests (24h) metric");
-    expect(tiles[1]).toHaveAttribute("aria-label", "Tokens in/out (24h) metric");
-    expect(tiles[2]).toHaveAttribute("aria-label", "Cost estimate (24h) metric");
-    expect(tiles[3]).toHaveAttribute("aria-label", "Cache hit ratio (24h) metric");
+    // The four tiles, in spec order — DS MetricTile surfaces label in .label span.
+    expect(tiles[0].querySelector(".label")?.textContent).toBe("Requests (24h)");
+    expect(tiles[1].querySelector(".label")?.textContent).toBe("Tokens in/out (24h)");
+    expect(tiles[2].querySelector(".label")?.textContent).toBe("Cost estimate (24h)");
+    expect(tiles[3].querySelector(".label")?.textContent).toBe("Cache hit ratio (24h)");
     const cost = tiles[2];
-    // aria-describedby points at a tooltip with the verbatim spec wording.
-    const describedBy = cost.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    const tip = document.getElementById(describedBy!);
-    expect(tip).not.toBeNull();
-    expect(tip!.textContent).toBe(
+    // DS MetricTile exposes tooltip via the title attribute.
+    expect(cost).toHaveAttribute(
+      "title",
       "Estimates from the bundled pricing table — operator-overridable.",
     );
   });
