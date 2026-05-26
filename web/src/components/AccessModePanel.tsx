@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useState, type Ref } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, FormFieldGroup, Input } from "@/components/ds";
+import { AccessModeCard, Button, FormField, FormFieldGroup, Input } from "@/components/ds";
 import { ACCESS_MODES, type AccessMode } from "@/lib/contract";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { AccessPolicyEditor } from "@/components/AccessPolicyEditor";
@@ -104,34 +104,27 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelR
           {ACCESS_MODES.map((m) => {
             const meta = META[m];
             return (
-              <div
+              <AccessModeCard
                 key={m}
-                role="radio"
-                aria-label={meta.title}
-                aria-checked={selected === m}
-                tabIndex={0}
-                className="mode-card"
-                onClick={() => setSelected(m)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
-              >
-                <strong>{meta.title}</strong>
-                <p className="muted">{meta.help}</p>
-              </div>
+                title={meta.title}
+                description={meta.help}
+                selected={selected === m}
+                onSelect={() => setSelected(m)}
+              />
             );
           })}
         </div>
 
         {selected === "api_key" && (
           <div className="mode-detail">
-            <div className="field">
-              <label htmlFor={`api-key-header-${serviceId}`}>API key header</label>
+            <FormField label="API key header" htmlFor={`api-key-header-${serviceId}`} w="md">
               <Input
                 id={`api-key-header-${serviceId}`}
                 className="mono"
                 value={apiKeyHeader}
                 onChange={(e) => setApiKeyHeader(e.target.value)}
               />
-            </div>
+            </FormField>
             <ApiKeysPanel serviceId={serviceId} />
           </div>
         )}
@@ -150,19 +143,19 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelR
 
         {err && <p role="alert" className="notice-inline">{err}</p>}
 
+        <IPGeoPanel serviceId={serviceId} />
+
         {/* P1-7: hide the inline button when the panel is hosted inside a
             Dialog. The dialog footer carries Cancel + Save changes instead.
             Pages that embed the panel inline (ClientDetail, ServiceDetail
             access tab) still rely on the inline button. */}
         {!panelRef && (
-          <div className="actions">
+          <div className="actions" style={{ marginTop: "var(--space-lg)" }}>
             <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
               {save.isPending ? "Saving…" : "Save changes"}
             </Button>
           </div>
         )}
-
-        <IPGeoPanel serviceId={serviceId} />
       </FormFieldGroup>
       <Toaster />
     </div>
