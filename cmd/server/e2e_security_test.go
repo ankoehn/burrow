@@ -117,6 +117,82 @@ func TestSec_CookieFlags(t *testing.T) {
 	}
 }
 
+func TestSec_CSRFRejection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip e2e in -short")
+	}
+	s := bootSecurityStack(t)
+	c := s.client()
+
+	// 1. Log in to obtain both cookies.
+	body := strings.NewReader(`{"email":"` + e2eAdminEmail + `","password":"` + e2eAdminPassword + `"}`)
+	loginResp, err := c.Post(s.apiURL+"/api/v1/auth/login", "application/json", body)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	_ = loginResp.Body.Close()
+
+	var csrfVal string
+	for _, ck := range loginResp.Cookies() {
+		if ck.Name == "burrow_csrf" {
+			csrfVal = ck.Value
+		}
+	}
+	if csrfVal == "" {
+		t.Fatal("burrow_csrf not set on login response")
+	}
+
+	// 2. POST /auth/logout WITHOUT the X-CSRF-Token header → 403.
+	req, _ := http.NewRequest("POST", s.apiURL+"/api/v1/auth/logout", nil)
+	r, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("logout (no csrf): %v", err)
+	}
+	rb, _ := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST logout no-csrf: want 403, got %d body=%s", r.StatusCode, rb)
+	}
+	if !strings.Contains(strings.ToLower(string(rb)), "csrf") {
+		t.Errorf("403 body should mention csrf, got %q", rb)
+	}
+
+	// 3. POST same with mismatched header → 403.
+	req2, _ := http.NewRequest("POST", s.apiURL+"/api/v1/auth/logout", nil)
+	req2.Header.Set("X-CSRF-Token", "wrong-value")
+	r2, err := c.Do(req2)
+	if err != nil {
+		t.Fatalf("logout (wrong csrf): %v", err)
+	}
+	_ = r2.Body.Close()
+	if r2.StatusCode != http.StatusForbidden {
+		t.Errorf("POST logout wrong-csrf: want 403, got %d", r2.StatusCode)
+	}
+
+	// 4. GET /me WITHOUT csrf → 200 (safe method bypass).
+	getReq, _ := http.NewRequest("GET", s.apiURL+"/api/v1/me", nil)
+	rg, err := c.Do(getReq)
+	if err != nil {
+		t.Fatalf("GET /me: %v", err)
+	}
+	_ = rg.Body.Close()
+	if rg.StatusCode != http.StatusOK {
+		t.Errorf("GET /me: want 200, got %d", rg.StatusCode)
+	}
+
+	// 5. POST same with matching csrf → 204.
+	req3, _ := http.NewRequest("POST", s.apiURL+"/api/v1/auth/logout", nil)
+	req3.Header.Set("X-CSRF-Token", csrfVal)
+	r3, err := c.Do(req3)
+	if err != nil {
+		t.Fatalf("logout (matched csrf): %v", err)
+	}
+	_ = r3.Body.Close()
+	if r3.StatusCode != http.StatusNoContent {
+		t.Errorf("POST logout matched-csrf: want 204, got %d", r3.StatusCode)
+	}
+}
+
 // silence unused-import lints when later sub-tests are added in subsequent
 // commits — io/json/context/time are imported up-front so this file stays
 // edit-friendly for the next four TestSec_* tasks.
