@@ -34,7 +34,8 @@ describe("AI endpoint detail (§4.20)", () => {
     const spark = await screen.findByLabelText("requests per minute, last 24h");
     expect(spark.tagName.toLowerCase()).toBe("svg");
     expect(spark.getAttribute("viewBox")).toBe("0 0 240 60");
-    const tiles = screen.getAllByRole("group", { name: /metric/i });
+    const strip = screen.getByRole("list", { name: "Endpoint metrics" });
+    const tiles = within(strip).getAllByRole("listitem");
     expect(tiles.length).toBeGreaterThanOrEqual(4);
   });
 

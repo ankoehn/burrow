@@ -5,7 +5,7 @@ import { MoreHorizontal } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, DropdownMenu, ErrorNotice, Input, Select, SkeletonRows, Switch } from "@/components/ds";
+import { Button, Dialog, DropdownMenu, ErrorNotice, Input, MetricStrip, MetricTile, Select, SkeletonRows, Switch } from "@/components/ds";
 import type {
   AiEndpoint, ModelAliasV5, Provider, Service, ServiceAIConfig,
 } from "@/lib/contract";
@@ -50,15 +50,6 @@ function Sparkline({ data }: { data: number[] }) {
   );
 }
 
-function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div role="group" aria-label={`${label} metric`} className="metric-tile">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value mono">{value}</div>
-      {sub && <div className="metric-sub muted mono">{sub}</div>}
-    </div>
-  );
-}
 
 const STRATEGY_OPTIONS = [
   { value: "single", label: "Single backend" },
@@ -334,12 +325,12 @@ export default function AiEndpointDetail() {
         </span>
       </div>
 
-      <div className="metric-strip" role="list" aria-label="Endpoint metrics">
+      <MetricStrip ariaLabel="Endpoint metrics">
         <MetricTile label="Requests (24h)" value={fmtInt(metrics.data.requests_24h)} />
         <MetricTile label="Tokens (24h)" value={`${fmtInt(metrics.data.tokens_in_24h)} → ${fmtInt(metrics.data.tokens_out_24h)}`} />
         <MetricTile label="Cost (24h)" value={`$${metrics.data.cost_usd_24h.toFixed(2)}`} />
         <MetricTile label="Cache hit ratio" value={`${Math.round(metrics.data.cache_hit_ratio_24h * 100)}%`} />
-      </div>
+      </MetricStrip>
 
       <div className="sparkline-wrap">
         <Sparkline data={metrics.data.requests_per_minute} />
