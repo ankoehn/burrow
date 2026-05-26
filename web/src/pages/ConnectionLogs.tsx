@@ -143,8 +143,8 @@ export default function ConnectionLogs() {
         actions={<Button variant="secondary" size="sm" onClick={handleExport}>Export</Button>}
       />
 
-      {/* Filter toolbar */}
-      <div className="row gap-2" style={{ margin: "12px 0", flexWrap: "wrap", alignItems: "center" }}>
+      {/* Filter toolbar — row 1: Kind / Service / Range selects + search */}
+      <div className="row gap-2" style={{ marginTop: 12, marginBottom: "var(--space-sm)", alignItems: "center" }}>
         {/* Kind filter — native <select> for testability */}
         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <span className="muted small">Kind</span>
@@ -205,9 +205,12 @@ export default function ConnectionLogs() {
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
           className="input"
-          style={{ fontSize: "0.8rem" }}
+          style={{ fontSize: "0.8rem", flex: 1 }}
         />
+      </div>
 
+      {/* Filter toolbar — row 2: Rollups checkbox on its own line */}
+      <div className="row gap-2" style={{ marginBottom: "var(--space-md)", alignItems: "center" }}>
         {/* Rollups toggle — native checkbox for testability */}
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
           <input
