@@ -538,3 +538,219 @@ var _ = api.JSONHandlerTimeout
 
 // _ silences strings if no downstream test imports it via the helper.
 var _ = strings.Contains
+
+// ---------------------------------------------------------------------------
+// Security-focused stack (cross-cutting middleware tests)
+// ---------------------------------------------------------------------------
+
+// securityStack is the bundle of live components owned by one
+// bootSecurityStack call. Lighter weight than e2eStack: no client, no
+// tunnel, no proxy — only the API server's HTTP handler attached to a
+// random loopback listener.
+type securityStack struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
+	db         *sql.DB
+	store      *store.Store
+	apiSrv     *http.Server
+	apiAddr    string // host:port the test should dial
+	apiURL     string // "http://" or "https://" prefix + apiAddr
+	httpsOn    bool
+	cleanupFns []func()
+}
+
+// securityOpt configures the security stack.
+type securityOpt func(*securityCfg)
+
+type securityCfg struct {
+	httpsEnabled     bool
+	secureCookies    bool
+	trustedProxies   []string
+	loginPerIPLimit  int // 0 = use production default
+	loginGlobalLimit int
+}
+
+// withSecHTTPS enables native TLS on the API listener (uses a self-signed
+// cert generated in-process). Required to assert HSTS header presence.
+func withSecHTTPS() securityOpt {
+	return func(c *securityCfg) { c.httpsEnabled = true }
+}
+
+// withSecCookies forces SecureCookies on the Deps struct.
+func withSecCookies(b bool) securityOpt {
+	return func(c *securityCfg) { c.secureCookies = b }
+}
+
+// withSecTrustedProxies sets Deps.TrustedProxies.
+func withSecTrustedProxies(cidrs ...string) securityOpt {
+	return func(c *securityCfg) { c.trustedProxies = cidrs }
+}
+
+// withSecLoginRateLimit overrides the per-IP + global login rate-limit
+// thresholds. Use small values (e.g., 3) so the test triggers the limiter
+// without 11 actual requests.
+func withSecLoginRateLimit(perIP, global int) securityOpt {
+	return func(c *securityCfg) {
+		c.loginPerIPLimit = perIP
+		c.loginGlobalLimit = global
+	}
+}
+
+// bootSecurityStack boots a minimal relay: temp DB, seeded admin, API server
+// on a random loopback listener. Returns a stack the test can hit via
+// http.Client. Used only by TestSec_* tests in e2e_security_test.go.
+func bootSecurityStack(t *testing.T, opts ...securityOpt) *securityStack {
+	t.Helper()
+	cfg := &securityCfg{}
+	for _, o := range opts {
+		o(cfg)
+	}
+	s := &securityStack{httpsOn: cfg.httpsEnabled}
+
+	// Register TempDir BEFORE shutdown so LIFO cleanup order is:
+	// shutdown (DB close + server drain) → TempDir removal.
+	// If shutdown is registered first, TempDir runs first and Windows
+	// fails to unlink the open DB file.
+	dir := t.TempDir()
+	t.Cleanup(s.shutdown)
+	dbPath := filepath.Join(dir, "sec.db")
+	d, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	s.cleanupFns = append(s.cleanupFns, func() { _ = d.Close() })
+	if err := db.Migrate(d); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	s.db = d
+
+	st := store.New(d)
+	s.store = st
+	if err := st.SeedAdmin(context.Background(), e2eAdminEmail, e2eAdminPassword); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+
+	// Pick a random loopback port for the API.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s.apiAddr = ln.Addr().String()
+
+	deps := api.Deps{
+		Users:                        st,
+		Sessions:                     st,
+		Settings:                     st,
+		Roles:                        st,
+		Log:                          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		SecureCookies:                cfg.secureCookies,
+		HTTPSEnabled:                 cfg.httpsEnabled,
+		TrustedProxies:               cfg.trustedProxies,
+		LoginRateLimitPerIPOverride:  cfg.loginPerIPLimit,
+		LoginRateLimitGlobalOverride: cfg.loginGlobalLimit,
+		DB:                           d,
+	}
+	apiSrv := &http.Server{
+		Handler:           api.NewRouter(deps),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	s.apiSrv = apiSrv
+
+	if cfg.httpsEnabled {
+		s.apiURL = "https://" + s.apiAddr
+		// Generate a temporary self-signed cert.
+		certPEM, keyPEM := genSelfSignedCert(t, "127.0.0.1")
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			t.Fatalf("x509 keypair: %v", err)
+		}
+		apiSrv.TLSConfig = &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
+		}
+		go func() {
+			_ = apiSrv.ServeTLS(ln, "", "")
+		}()
+	} else {
+		s.apiURL = "http://" + s.apiAddr
+		go func() {
+			_ = apiSrv.Serve(ln)
+		}()
+	}
+
+	// Wait for the listener to accept (poll healthz).
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		c := s.client()
+		resp, err := c.Get(s.apiURL + "/healthz")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return s
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("api never became ready at %s", s.apiURL)
+	return nil
+}
+
+// client returns an *http.Client with InsecureSkipVerify (the self-signed
+// cert isn't trusted by the system root pool) and an isolated cookie jar.
+func (s *securityStack) client() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}, //nolint:gosec
+	}
+	return &http.Client{
+		Transport:     tr,
+		Jar:           jar,
+		Timeout:       5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// shutdown drains the api server + closes the DB. Idempotent.
+func (s *securityStack) shutdown() {
+	if s.apiSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.apiSrv.Shutdown(ctx)
+	}
+	for _, f := range s.cleanupFns {
+		f()
+	}
+}
+
+// genSelfSignedCert generates an in-memory self-signed cert for the given
+// host. Returns PEM-encoded cert + key. Used by bootSecurityStack when
+// withSecHTTPS() is set.
+func genSelfSignedCert(t *testing.T, host string) ([]byte, []byte) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("gen key: %v", err)
+	}
+	tpl := x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: host},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.ParseIP(host)},
+		DNSNames:     []string{host},
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tpl, &tpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM
+}
