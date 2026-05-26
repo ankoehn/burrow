@@ -30,3 +30,5 @@ export { FormField } from "./FormField";
 export type { FormFieldProps, FormFieldWidth } from "./FormField";
 export { FormFieldGroup } from "./FormFieldGroup";
 export type { FormFieldGroupProps } from "./FormFieldGroup";
+export { MetricStrip, MetricTile } from "./MetricStrip";
+export type { MetricStripProps, MetricTileProps } from "./MetricStrip";
