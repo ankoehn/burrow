@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, Input } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
 import type { Session } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -114,7 +114,7 @@ export default function Account() {
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
 
   return (
-    <div className="account-page form-narrow">
+    <div className="account-page">
       <div className="page-head" style={{ marginBottom: 8 }}>
         <div>
           <h1>Account</h1>
@@ -145,46 +145,45 @@ export default function Account() {
           </div>
         </div>
         <form onSubmit={handleSubmit} className="pw-form">
-          <div className="field">
-            <label htmlFor="current-password">Current password</label>
-            <Input
-              id="current-password"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="new-password">New password</label>
-            <Input
-              id="new-password"
-              type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="confirm-password">Confirm new password</label>
-            <Input
-              id="confirm-password"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-            />
-          </div>
+          <FormFieldGroup>
+            <FormField label="Current password" htmlFor="current-password" w="md">
+              <Input
+                id="current-password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+              />
+            </FormField>
+            <FormField label="New password" htmlFor="new-password" w="md">
+              <Input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+              />
+            </FormField>
+            <FormField label="Confirm new password" htmlFor="confirm-password" w="md">
+              <Input
+                id="confirm-password"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+              />
+            </FormField>
+          </FormFieldGroup>
           {clientError && (
             <p role="alert" className="field-error">{clientError}</p>
           )}
           {serverError && (
             <p role="alert" className="field-error">{serverError}</p>
           )}
-          <div className="actions">
+          <div className="actions" style={{ marginTop: "var(--space-md)" }}>
             <Button type="submit" variant="primary" disabled={changePw.isPending}>
               {changePw.isPending ? "Saving…" : "Change password"}
             </Button>
