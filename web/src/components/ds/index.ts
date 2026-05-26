@@ -24,3 +24,5 @@ export type {
   SkeletonRowsProps,
   NotAuthorizedProps,
 } from "./States";
+export { PageHeader } from "./PageHeader";
+export type { PageHeaderProps } from "./PageHeader";
