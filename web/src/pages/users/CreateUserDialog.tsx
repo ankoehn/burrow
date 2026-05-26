@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input, Select, Dialog } from "@/components/ds";
+import { Button, Input, Select, Dialog, FormField, FormFieldGroup } from "@/components/ds";
 import type { UserAdmin, UserRole } from "@/lib/contract";
 import { toast } from "sonner";
 
@@ -40,19 +40,17 @@ export function CreateUserDialog({ open, onClose }: { open: boolean; onClose: ()
       }
     >
       <form className="pw-form" onSubmit={(e) => { e.preventDefault(); setFormError(""); create.mutate(); }}>
-        <div className="field">
-          <label htmlFor="cu-email">Email</label>
-          <Input id="cu-email" type="email" autoComplete="off" value={email} invalid={!!formError} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-        </div>
-        <div className="field">
-          <label htmlFor="cu-pw">Password</label>
-          <Input id="cu-pw" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="cu-pw-hint" />
-          <p id="cu-pw-hint" className="muted">Minimum 8 characters. The user can change it after signing in.</p>
-        </div>
-        <div className="field">
-          <label htmlFor="cu-role">Role</label>
-          <Select id="cu-role" options={[{ value: "user", label: "User" }, { value: "admin", label: "Admin" }]} value={role} onChange={(v) => setRole(v as UserRole)} />
-        </div>
+        <FormFieldGroup>
+          <FormField label="Email" htmlFor="cu-email" w="md">
+            <Input id="cu-email" type="email" autoComplete="off" value={email} invalid={!!formError} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          </FormField>
+          <FormField label="Password" htmlFor="cu-pw" w="md" help="Minimum 8 characters. The user can change it after signing in.">
+            <Input id="cu-pw" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </FormField>
+          <FormField label="Role" htmlFor="cu-role" w="md">
+            <Select id="cu-role" options={[{ value: "user", label: "User" }, { value: "admin", label: "Admin" }]} value={role} onChange={(v) => setRole(v as UserRole)} />
+          </FormField>
+        </FormFieldGroup>
         {formError && <p role="alert" className="field-error">{formError}</p>}
         <button type="submit" hidden />
       </form>
