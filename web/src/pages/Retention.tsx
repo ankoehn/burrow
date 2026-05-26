@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input } from "@/components/ds";
+import { Button, Input, FormField, FormFieldGroup } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import type { RetentionSettings } from "@/lib/contract";
@@ -109,7 +109,7 @@ export default function Retention() {
             if (!hasErrors) save.mutate();
           }}
         >
-          <div className="form-grid">
+          <FormFieldGroup>
             {FIELD_META.map(({ key, label, min, max, placeholder }) => {
               // v0.5.1 P3.7: only render the inline error after the user has
               // blurred the field (or submitted the form). The `invalid`
@@ -117,9 +117,16 @@ export default function Retention() {
               // clean even when a backend default is out of range.
               const hasError = key in errors;
               const showError = hasError && touched[key];
+              const help = key === "audit_retention_days" ? data?.audit_retention_note : undefined;
               return (
-                <div className="field" key={key}>
-                  <label htmlFor={`ret-${key}`}>{label}</label>
+                <FormField
+                  key={key}
+                  label={label}
+                  htmlFor={`ret-${key}`}
+                  w="sm"
+                  help={help}
+                  error={showError ? errors[key] : undefined}
+                >
                   <Input
                     id={`ret-${key}`}
                     type="number"
@@ -133,19 +140,10 @@ export default function Retention() {
                     invalid={showError}
                     aria-invalid={showError || undefined}
                   />
-                  {showError && (
-                    <p role="alert" className="field-error">{errors[key]}</p>
-                  )}
-                  {/* Show the advisory note below the audit_retention_days field */}
-                  {key === "audit_retention_days" && data?.audit_retention_note && (
-                    <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                      {data.audit_retention_note}
-                    </p>
-                  )}
-                </div>
+                </FormField>
               );
             })}
-          </div>
+          </FormFieldGroup>
 
           <div className="actions" style={{ marginTop: 16 }}>
             <Button
