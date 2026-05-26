@@ -32,3 +32,5 @@ export { FormFieldGroup } from "./FormFieldGroup";
 export type { FormFieldGroupProps } from "./FormFieldGroup";
 export { MetricStrip, MetricTile } from "./MetricStrip";
 export type { MetricStripProps, MetricTileProps } from "./MetricStrip";
+export { AccessModeCard } from "./AccessModeCard";
+export type { AccessModeCardProps } from "./AccessModeCard";
