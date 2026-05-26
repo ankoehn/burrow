@@ -307,7 +307,7 @@ export default function Webhooks() {
             <Input id="wh-name" value={name} onChange={(e) => setName(e.target.value)} />
           </FormField>
           <FormField label="URL" htmlFor="wh-url" w="lg">
-            <Input id="wh-url" className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" />
+            <Input id="wh-url" className="mono" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" />
           </FormField>
         </FormFieldGroup>
         <div className="field">
