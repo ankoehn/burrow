@@ -3,7 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, Input, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows } from "@/components/ds";
 import type { Budget, CostSummary } from "@/lib/contract";
 
 type Window = CostSummary["window"];
@@ -192,22 +192,20 @@ export default function CostBudgets() {
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="budget-scope">Scope</label>
-          <Select id="budget-scope" value={scope} onChange={(v) => setScope(v as Budget["scope"])} options={SCOPE_OPTIONS} />
-        </div>
-        <div className="field">
-          <label htmlFor="budget-subject">Subject</label>
-          <Input id="budget-subject" className="mono" value={subjectId} onChange={(e) => setSubjectId(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="budget-daily">Daily USD</label>
-          <Input id="budget-daily" type="number" className="mono" value={dailyUsd} onChange={(e) => setDailyUsd(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="budget-action">Action on exceed</label>
-          <Select id="budget-action" value={action} onChange={(v) => setAction(v as Budget["action_on_exceed"])} options={ACTION_OPTIONS} />
-        </div>
+        <FormFieldGroup>
+          <FormField label="Scope" htmlFor="budget-scope" w="md">
+            <Select id="budget-scope" value={scope} onChange={(v) => setScope(v as Budget["scope"])} options={SCOPE_OPTIONS} />
+          </FormField>
+          <FormField label="Subject" htmlFor="budget-subject" w="md">
+            <Input id="budget-subject" className="mono" value={subjectId} onChange={(e) => setSubjectId(e.target.value)} />
+          </FormField>
+          <FormField label="Daily USD" htmlFor="budget-daily" w="sm">
+            <Input id="budget-daily" type="number" className="mono" value={dailyUsd} onChange={(e) => setDailyUsd(e.target.value)} />
+          </FormField>
+          <FormField label="Action on exceed" htmlFor="budget-action" w="md">
+            <Select id="budget-action" value={action} onChange={(v) => setAction(v as Budget["action_on_exceed"])} options={ACTION_OPTIONS} />
+          </FormField>
+        </FormFieldGroup>
         {err && <p role="alert" className="notice-inline error">{err}</p>}
       </Dialog>
       <Toaster />
