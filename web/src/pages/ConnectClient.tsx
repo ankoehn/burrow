@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { NewToken } from "@/lib/contract";
 
@@ -50,14 +50,32 @@ export default function ConnectClient() {
 
       <section className="account-section" aria-labelledby="ob-1">
         <div className="section-head"><div className="left"><h2 id="ob-1">Name this client</h2></div></div>
-        <div className="field">
-          <label htmlFor="ob-name">Client name</label>
-          <Input id="ob-name" aria-label="Client name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. office-box-1" />
-          <p className="muted">Lowercase letters, digits, and hyphens. Once issued, the name lives with the token.</p>
+        <FormFieldGroup>
+          <FormField
+            label="Client name"
+            htmlFor="ob-name"
+            w="md"
+            help="Lowercase letters, digits, and hyphens. Once issued, the name lives with the token."
+          >
+            <Input
+              id="ob-name"
+              aria-label="Client name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. office-box-1"
+            />
+          </FormField>
+        </FormFieldGroup>
+        <div style={{ marginTop: "var(--space-md)" }}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!name || mint.isPending}
+            onClick={() => { setError(""); mint.mutate(); }}
+          >
+            {mint.isPending ? "Generating…" : "Generate token"}
+          </Button>
         </div>
-        <Button variant="primary" size="sm" disabled={!name || mint.isPending} onClick={() => { setError(""); mint.mutate(); }}>
-          {mint.isPending ? "Generating…" : "Generate token"}
-        </Button>
         {error && <p role="alert" className="field-error">{error}</p>}
       </section>
 
