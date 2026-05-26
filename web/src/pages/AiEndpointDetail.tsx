@@ -5,7 +5,7 @@ import { MoreHorizontal } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, DropdownMenu, ErrorNotice, Input, MetricStrip, MetricTile, Select, SkeletonRows, Switch } from "@/components/ds";
+import { Button, Dialog, DropdownMenu, ErrorNotice, Input, MetricStrip, MetricTile, PageHeader, Select, SkeletonRows, Switch } from "@/components/ds";
 import type {
   AiEndpoint, ModelAliasV5, Provider, Service, ServiceAIConfig,
 } from "@/lib/contract";
@@ -224,22 +224,33 @@ export default function AiEndpointDetail() {
   if (svc.error || cfg.error || metrics.error) {
     const e = svc.error ?? cfg.error ?? metrics.error;
     return (
-      <ErrorNotice
-        action={
-          <Button variant="secondary" size="sm" onClick={() => { void svc.refetch(); void cfg.refetch(); void metrics.refetch(); }}>
-            Retry
-          </Button>
-        }
-      >
-        Couldn't load endpoint: {e instanceof ApiError ? e.message : "Unknown error"}
-      </ErrorNotice>
+      <div>
+        <PageHeader
+          title="AI endpoint"
+          subtitle="Per-endpoint metering, cache, redaction, and inspector."
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => nav("/ai/endpoints")}>
+              ← Back to endpoints
+            </Button>
+          }
+        />
+        <ErrorNotice
+          action={
+            <Button variant="secondary" size="sm" onClick={() => { void svc.refetch(); void cfg.refetch(); void metrics.refetch(); }}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn't load endpoint: {e instanceof ApiError ? e.message : "Unknown error"}
+        </ErrorNotice>
+      </div>
     );
   }
 
   if (!draft || !metrics.data || !svc.data) {
     return (
       <div className="ai-endpoint-detail-page">
-        <div className="page-head"><div><h1>AI endpoint</h1></div></div>
+        <PageHeader title="AI endpoint" subtitle="Per-endpoint metering, cache, redaction, and inspector." />
         <SkeletonRows n={6} />
       </div>
     );
@@ -282,35 +293,35 @@ export default function AiEndpointDetail() {
 
   return (
     <div className="ai-endpoint-detail-page">
-      <div className="page-head">
-        <div>
-          <h1 id={headingId}>AI endpoint · {svc.data.name}</h1>
-          <p className="sub">Routing, traffic, and recent traffic for this gateway endpoint.</p>
-        </div>
-        <div className="row gap-2">
-          <label className="row gap-2" style={{ alignItems: "center" }}>
-            <span>Pause endpoint</span>
-            <Switch
-              aria-label="Pause endpoint"
-              checked={routing.paused}
-              onChange={togglePause}
+      <PageHeader
+        title={`AI endpoint · ${svc.data.name}`}
+        subtitle="Routing, traffic, and recent traffic for this gateway endpoint."
+        actions={
+          <div className="row gap-2">
+            <label className="row gap-2" style={{ alignItems: "center" }}>
+              <span>Pause endpoint</span>
+              <Switch
+                aria-label="Pause endpoint"
+                checked={routing.paused}
+                onChange={togglePause}
+              />
+            </label>
+            <DropdownMenu
+              trigger={
+                <button type="button" className="icon-btn" aria-label="More actions">
+                  <MoreHorizontal size={14} />
+                </button>
+              }
+              items={[
+                { label: "Rotate cache", onSelect: () => clearCache.mutate() },
+                { label: "Clear cache", onSelect: () => clearCache.mutate() },
+                { label: "Disable", danger: true, onSelect: () => disable.mutate() },
+                { label: "Export logs (NDJSON)", onSelect: () => { void apiFetch(`/services/${id}/inspector/export?format=ndjson`); } },
+              ]}
             />
-          </label>
-          <DropdownMenu
-            trigger={
-              <button type="button" className="icon-btn" aria-label="More actions">
-                <MoreHorizontal size={14} />
-              </button>
-            }
-            items={[
-              { label: "Rotate cache", onSelect: () => clearCache.mutate() },
-              { label: "Clear cache", onSelect: () => clearCache.mutate() },
-              { label: "Disable", danger: true, onSelect: () => disable.mutate() },
-              { label: "Export logs (NDJSON)", onSelect: () => { void apiFetch(`/services/${id}/inspector/export?format=ndjson`); } },
-            ]}
-          />
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       <div className="meta-strip">
         {resolvedAlias && <span className="mono">{resolvedAlias}</span>}
