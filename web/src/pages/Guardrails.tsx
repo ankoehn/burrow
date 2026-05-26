@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Button, Input, Select, SkeletonRows, Switch,
+  Button, Input, PageHeader, Select, SkeletonRows, Switch,
 } from "@/components/ds";
 import type {
   GuardrailSettings, RedactionRule, RedactionSettings,
@@ -165,7 +165,7 @@ export default function Guardrails() {
   if (!redactDraft || !guardDraft || !rules.data) {
     return (
       <div className="guardrails-page">
-        <div className="page-head"><div><h1>Guardrails &amp; redaction</h1></div></div>
+        <PageHeader title="Guardrails & redaction" />
         <SkeletonRows n={4} />
       </div>
     );
@@ -173,12 +173,10 @@ export default function Guardrails() {
 
   return (
     <div className="guardrails-page">
-      <div className="page-head">
-        <div>
-          <h1>Guardrails &amp; redaction</h1>
-          <p className="sub">Filter outbound prompts, redact PII, and block prompt-injection attempts.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Guardrails & redaction"
+        subtitle="Filter outbound prompts, redact PII, and block prompt-injection attempts."
+      />
 
       <Accordion
         id="regex"

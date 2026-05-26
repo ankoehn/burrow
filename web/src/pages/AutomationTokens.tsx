@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, EmptyState, Input, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, EmptyState, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import type { AutomationToken, CreatedAutomationToken } from "@/lib/contract";
 
 const EXPIRY_OPTIONS = [
@@ -55,13 +55,11 @@ export default function AutomationTokens() {
 
   return (
     <div className="automation-page">
-      <div className="page-head">
-        <div>
-          <h1>Automation tokens</h1>
-          <p className="sub">Long-lived bearer tokens for CI / CLI / bots — scoped to your own permissions.</p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Mint token</Button>
-      </div>
+      <PageHeader
+        title="Automation tokens"
+        subtitle="Long-lived bearer tokens for CI / CLI / bots — scoped to your own permissions."
+        actions={<Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Mint token</Button>}
+      />
 
       {!tokens.data ? (
         <SkeletonRows n={2} />

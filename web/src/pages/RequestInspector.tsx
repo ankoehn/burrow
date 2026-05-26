@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Badge, Button, Dialog, Input, SkeletonRows, Tabs,
+  Badge, Button, Dialog, Input, PageHeader, SkeletonRows, Tabs,
 } from "@/components/ds";
 import type { InspectorEntry, ServiceAIConfig } from "@/lib/contract";
 
@@ -96,7 +96,7 @@ export default function RequestInspector() {
   if (cfg.data && !cfg.data.inspector.enabled) {
     return (
       <div className="inspector-page">
-        <div className="page-head"><div><h1>Request inspector</h1></div></div>
+        <PageHeader title="Request inspector" />
         <p className="muted">
           Request inspector is off for this tunnel — enable in Access settings.
         </p>
@@ -107,7 +107,7 @@ export default function RequestInspector() {
   if (!list.data) {
     return (
       <div className="inspector-page">
-        <div className="page-head"><div><h1>Request inspector</h1></div></div>
+        <PageHeader title="Request inspector" />
         <SkeletonRows n={6} />
       </div>
     );
@@ -119,12 +119,10 @@ export default function RequestInspector() {
 
   return (
     <div className="inspector-page">
-      <div className="page-head">
-        <div>
-          <h1>Request inspector</h1>
-          <p className="sub">Tail and replay traffic on this AI endpoint.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Request inspector"
+        subtitle="Tail and replay traffic on this AI endpoint."
+      />
 
       <div className="row gap-2" style={{ alignItems: "center", margin: "12px 0" }}>
         <Input

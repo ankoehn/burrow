@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input, SkeletonRows } from "@/components/ds";
+import { Button, Input, PageHeader, SkeletonRows } from "@/components/ds";
 import type { AuditEvent } from "@/lib/contract";
 import { formatTimestampWithTooltip } from "@/lib/format";
 
@@ -55,15 +55,10 @@ export default function AuditLog() {
 
   return (
     <div className="audit-page">
-      <div className="page-head">
-        <div>
-          <h1>Audit log</h1>
-          <p>
-            Hash-chained — each entry includes the SHA-256 of the previous one. Click
-            {" "}<strong>Verify chain</strong> to confirm integrity.
-          </p>
-        </div>
-        <div className="row gap-2">
+      <PageHeader
+        title="Audit log"
+        subtitle={<>Hash-chained — each entry includes the SHA-256 of the previous one. Click <strong>Verify chain</strong> to confirm integrity.</>}
+        actions={<>
           <Button
             variant="secondary"
             size="sm"
@@ -79,8 +74,8 @@ export default function AuditLog() {
           >
             Verify chain
           </Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {verify.data && (
         verify.data.ok ? (

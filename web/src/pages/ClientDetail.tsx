@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { Badge, SkeletonRows } from "@/components/ds";
+import { Badge, PageHeader, SkeletonRows } from "@/components/ds";
 import type { ClientDetail as ClientDetailT } from "@/lib/contract";
 import { AccessModePanel } from "@/components/AccessModePanel";
 
@@ -18,7 +18,7 @@ export default function ClientDetail() {
   if (error) {
     return (
       <div className="users-page">
-        <div className="page-head"><div><h1>Client</h1></div></div>
+        <PageHeader title="Client" />
         <div className="notice-block error">
           <div className="icon-bubble"><AlertTriangle size={18} /></div>
           <p role="alert">{error instanceof ApiError ? error.message : "client not found"}</p>
@@ -30,12 +30,10 @@ export default function ClientDetail() {
 
   return (
     <div className="users-page">
-      <div className="page-head">
-        <div>
-          <h1>{data.token_name}</h1>
-          <p className="sub mono">{data.session_id} · {data.os}/{data.arch} · burrow {data.client_version}</p>
-        </div>
-      </div>
+      <PageHeader
+        title={data.token_name}
+        subtitle={<span className="mono">{data.session_id} · {data.os}/{data.arch} · burrow {data.client_version}</span>}
+      />
       <section className="account-section" aria-labelledby="sec-services">
         <div className="section-head"><div className="left"><h2 id="sec-services">Services</h2></div></div>
         <div className="table-wrap">

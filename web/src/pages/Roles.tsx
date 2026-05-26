@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, SkeletonRows } from "@/components/ds";
+import { Button, Badge, Dialog, PageHeader, SkeletonRows } from "@/components/ds";
 import { CustomRoleEditor } from "@/components/CustomRoleEditor";
 import type { RoleSummary, RoleDetail } from "@/lib/contract";
 
@@ -49,7 +49,7 @@ export default function Roles() {
   if (error) {
     return (
       <div className="users-page">
-        <div className="page-head"><div><h1>Roles</h1></div></div>
+        <PageHeader title="Roles" />
         <div className="notice-block error">
           <div className="icon-bubble"><AlertTriangle size={18} /></div>
           <p role="alert">Failed to load roles: {error instanceof ApiError ? error.message : "Unknown error"}</p>
@@ -60,10 +60,11 @@ export default function Roles() {
 
   return (
     <div className="users-page">
-      <div className="page-head">
-        <div><h1>Roles</h1><p className="sub">What each role is allowed to do.</p></div>
-        <Button variant="primary" size="sm" onClick={openNew}>New role</Button>
-      </div>
+      <PageHeader
+        title="Roles"
+        subtitle="What each role is allowed to do."
+        actions={<Button variant="primary" size="sm" onClick={openNew}>New role</Button>}
+      />
       {isLoading ? (
         <div className="table-wrap"><SkeletonRows n={2} /></div>
       ) : (

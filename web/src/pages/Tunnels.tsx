@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { Badge, Button, Dialog, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Dialog, Input, PageHeader, SkeletonRows } from "@/components/ds";
 import type { AccessMode } from "@/lib/contract";
 import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
 import { Toaster } from "@/components/ui/sonner";
@@ -120,11 +120,7 @@ export default function Tunnels() {
   }, [qc]);
   return (
     <div className="tunnels-page" style={{ position: "relative" }}>
-      <div className="page-head">
-        <div>
-          <h1>Tunnels</h1>
-        </div>
-      </div>
+      <PageHeader title="Tunnels" />
       <div className="row gap-2" style={{ margin: "12px 0" }}>
         <Input
           type="search"

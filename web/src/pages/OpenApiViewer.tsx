@@ -1,16 +1,12 @@
-// P1-14: Embed the relay-served OpenAPI viewer inside the dashboard chrome
-// so admins keep the sidebar/navigation context instead of being kicked out
-// to a separate browser tab. The viewer itself is the canonical HTML asset
-// served at /api/v1/openapi/viewer/ — we just frame it.
+import { PageHeader } from "@/components/ds";
+
 export default function OpenApiViewer() {
   return (
     <div className="openapi-viewer-page" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="page-head">
-        <div>
-          <h1>OpenAPI</h1>
-          <p className="sub">Browse this relay&apos;s JSON/HTTP API. The full spec is also available at <code className="mono">/api/v1/openapi.yaml</code>.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="OpenAPI"
+        subtitle={<>Browse this relay&apos;s JSON/HTTP API. The full spec is also available at <code className="mono">/api/v1/openapi.yaml</code>.</>}
+      />
       <iframe
         src="/api/v1/openapi/viewer/"
         title="OpenAPI viewer"

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows, ErrorNotice } from "@/components/ds";
+import { Button, Badge, Dialog, ErrorNotice, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { Service, AccessMode } from "@/lib/contract";
 import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
@@ -98,15 +98,11 @@ export default function Services() {
 
   return (
     <div className="services-page" style={{ position: "relative" }}>
-      <div className="page-head">
-        <div>
-          <h1>Services</h1>
-          <p className="sub">Durable services exposed through this relay, with their access configuration.</p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => { setNewOpen(true); setNsErr(null); }}>
-          + New service
-        </Button>
-      </div>
+      <PageHeader
+        title="Services"
+        subtitle="Durable services exposed through this relay, with their access configuration."
+        actions={<Button variant="primary" size="sm" onClick={() => { setNewOpen(true); setNsErr(null); }}>+ New service</Button>}
+      />
 
       {error ? (
         <ErrorNotice

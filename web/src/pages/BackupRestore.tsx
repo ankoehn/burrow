@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, EmptyState, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, EmptyState, PageHeader, SkeletonRows } from "@/components/ds";
 import { formatBytes } from "@/lib/format";
 import type { BackupRow } from "@/lib/contract";
 
@@ -68,18 +68,11 @@ export default function BackupRestore() {
 
   return (
     <div className="backup-page">
-      <div className="page-head">
-        <div>
-          <h1>Backup &amp; restore</h1>
-          <p className="muted">
-            Backups include the database, the relay's TLS cert state, and config — but
-            <strong> not</strong> ephemeral session/audit-chain pointers reset on restore.
-          </p>
-        </div>
-        <Button variant="primary" size="sm" disabled={create.isPending} onClick={() => create.mutate()}>
-          {create.isPending ? "Creating…" : "Create backup"}
-        </Button>
-      </div>
+      <PageHeader
+        title="Backup & restore"
+        subtitle={<>Backups include the database, the relay&apos;s TLS cert state, and config — but<strong> not</strong> ephemeral session/audit-chain pointers reset on restore.</>}
+        actions={<Button variant="primary" size="sm" disabled={create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Creating…" : "Create backup"}</Button>}
+      />
 
       <section className="card">
         <h2>Backup history</h2>

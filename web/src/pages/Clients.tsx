@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { Button, Input, Badge, SkeletonRows } from "@/components/ds";
+import { Button, Input, Badge, PageHeader, SkeletonRows } from "@/components/ds";
 import type { ClientView } from "@/lib/contract";
 
 export default function Clients() {
@@ -19,7 +19,7 @@ export default function Clients() {
   if (error) {
     return (
       <div className="users-page">
-        <div className="page-head"><div><h1>Clients</h1></div></div>
+        <PageHeader title="Clients" />
         <div className="notice-block error">
           <div className="icon-bubble"><AlertTriangle size={18} /></div>
           <p role="alert">Couldn't load clients: {error instanceof ApiError ? error.message : "Unknown error"}</p>
@@ -33,10 +33,11 @@ export default function Clients() {
 
   return (
     <div className="users-page">
-      <div className="page-head">
-        <div><h1>Clients</h1><p className="sub">Machines running burrow connected to this relay.</p></div>
-        <Link to="/clients/connect"><Button variant="primary" size="sm">Connect a client</Button></Link>
-      </div>
+      <PageHeader
+        title="Clients"
+        subtitle="Machines running burrow connected to this relay."
+        actions={<Link to="/clients/connect"><Button variant="primary" size="sm">Connect a client</Button></Link>}
+      />
       <div className="row gap-2" style={{ margin: "12px 0" }}>
         <Input type="search" role="searchbox" aria-label="Search clients" placeholder="search by client or token…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>

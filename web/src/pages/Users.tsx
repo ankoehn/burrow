@@ -4,7 +4,7 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, Input, Select, Badge, Dialog, SkeletonRows } from "@/components/ds";
+import { Button, Input, Select, Badge, Dialog, PageHeader, SkeletonRows } from "@/components/ds";
 import type { UserAdmin, UsersPage, UserRole } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -38,7 +38,7 @@ export default function Users() {
   if (error instanceof ApiError && error.status === 403) {
     return (
       <div className="users-page">
-        <div className="page-head"><div><h1>Users</h1></div></div>
+        <PageHeader title="Users" />
         <div className="notice-block warn">
           <div className="icon-bubble"><ShieldAlert size={18} /></div>
           <p role="alert">Admin access required.</p>
@@ -49,7 +49,7 @@ export default function Users() {
   if (error) {
     return (
       <div className="users-page">
-        <div className="page-head"><div><h1>Users</h1></div></div>
+        <PageHeader title="Users" />
         <div className="notice-block error">
           <div className="icon-bubble"><AlertTriangle size={18} /></div>
           <p role="alert">Failed to load users: {error instanceof ApiError ? error.message : "Unknown error"}</p>
@@ -63,10 +63,11 @@ export default function Users() {
 
   return (
     <div className="users-page" style={{ position: "relative" }}>
-      <div className="page-head">
-        <div><h1>Users</h1><p className="sub">People who can sign in to this Burrow relay.</p></div>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>Create user</Button>
-      </div>
+      <PageHeader
+        title="Users"
+        subtitle="People who can sign in to this Burrow relay."
+        actions={<Button variant="primary" size="sm" onClick={() => setCreating(true)}>Create user</Button>}
+      />
 
       <div className="users-filter-row row gap-2" style={{ margin: "12px 0", alignItems: "center" }}>
         <Input

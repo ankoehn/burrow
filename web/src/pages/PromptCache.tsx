@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Button, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows, Switch, Tabs,
+  Button, Dialog, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows, Switch, Tabs,
 } from "@/components/ds";
 import type { CacheSettings, SemanticCacheSettings, CacheStatsV5, Service, ServiceAIConfig } from "@/lib/contract";
 import { formatBytes } from "@/lib/format";
@@ -380,7 +380,7 @@ export default function PromptCache() {
   if (!draft) {
     return (
       <div className="prompt-cache-page">
-        <div className="page-head"><div><h1>Prompt cache</h1></div></div>
+        <PageHeader title="Prompt cache" />
         <SkeletonRows n={4} />
       </div>
     );
@@ -388,15 +388,11 @@ export default function PromptCache() {
 
   return (
     <div className="prompt-cache-page">
-      <div className="page-head">
-        <div>
-          <h1>Prompt cache</h1>
-          <p>The cache lives on this relay. No data is sent anywhere.</p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => setClearOpen(true)}>
-          Clear cache
-        </Button>
-      </div>
+      <PageHeader
+        title="Prompt cache"
+        subtitle="The cache lives on this relay. No data is sent anywhere."
+        actions={<Button variant="secondary" size="sm" onClick={() => setClearOpen(true)}>Clear cache</Button>}
+      />
 
       <Tabs
         value={tab}

@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input, PageHeader } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { NewToken } from "@/lib/contract";
 
@@ -46,7 +46,10 @@ export default function ConnectClient() {
 
   return (
     <div className="account-page">
-      <div className="page-head"><div><h1>Connect a client</h1><p className="sub">Bring a machine online so it can expose a local service through this Burrow relay.</p></div></div>
+      <PageHeader
+        title="Connect a client"
+        subtitle="Bring a machine online so it can expose a local service through this Burrow relay."
+      />
 
       <section className="account-section" aria-labelledby="ob-1">
         <div className="section-head"><div className="left"><h2 id="ob-1">Name this client</h2></div></div>

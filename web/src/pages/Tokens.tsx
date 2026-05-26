@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp, formatRelativeTime } from "@/lib/format";
-import { Button, FormField, FormFieldGroup, Input, Dialog } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input, Dialog, PageHeader } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -27,11 +27,7 @@ export default function Tokens() {
   });
   return (
     <div className="tokens-page" style={{ position: "relative" }}>
-      <div className="page-head">
-        <div>
-          <h1>Client tokens</h1>
-        </div>
-      </div>
+      <PageHeader title="Client tokens" />
 
       <form
         className="tokens-form"

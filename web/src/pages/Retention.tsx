@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input, FormField, FormFieldGroup } from "@/components/ds";
+import { Button, Input, FormField, FormFieldGroup, PageHeader } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import type { RetentionSettings } from "@/lib/contract";
@@ -90,12 +90,10 @@ export default function Retention() {
 
   return (
     <div className="account-page">
-      <div className="page-head">
-        <div>
-          <h1>Retention &amp; compliance</h1>
-          <p className="sub">Configure how long Burrow retains logs and ring-buffer entries.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Retention & compliance"
+        subtitle="Configure how long Burrow retains logs and ring-buffer entries."
+      />
 
       <section className="account-section">
         <form

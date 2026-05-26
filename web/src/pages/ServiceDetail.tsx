@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, ErrorNotice, SkeletonRows, Tabs } from "@/components/ds";
+import { Badge, ErrorNotice, PageHeader, SkeletonRows, Tabs } from "@/components/ds";
 import { AccessModePanel } from "@/components/AccessModePanel";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { UpstreamCredentialsPanel } from "@/pages/UpstreamCredentials";
@@ -32,9 +32,7 @@ export default function ServiceDetail() {
   if (isLoading) {
     return (
       <div className="service-detail-page">
-        <div className="page-head">
-          <div><h1>Service</h1></div>
-        </div>
+        <PageHeader title="Service" />
         <SkeletonRows n={4} />
       </div>
     );
@@ -43,9 +41,7 @@ export default function ServiceDetail() {
   if (error || !svc) {
     return (
       <div className="service-detail-page">
-        <div className="page-head">
-          <div><h1>Service</h1></div>
-        </div>
+        <PageHeader title="Service" />
         <ErrorNotice
           action={
             <button type="button" onClick={() => void refetch()}>
@@ -61,11 +57,7 @@ export default function ServiceDetail() {
 
   return (
     <div className="service-detail-page">
-      <div className="page-head">
-        <div>
-          <h1>Service · {svc.name}</h1>
-        </div>
-      </div>
+      <PageHeader title={`Service · ${svc.name}`} />
 
       {/* Meta strip */}
       <div className="meta-strip" style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}>

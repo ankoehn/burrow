@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { PageHeader } from "@/components/ds";
 import type { DatabaseStatus } from "@/lib/contract";
 
 export default function DatabaseBackend() {
@@ -13,12 +14,7 @@ export default function DatabaseBackend() {
 
   return (
     <div className="account-page">
-      <div className="page-head">
-        <div>
-          <h1>Database backend</h1>
-          <p className="sub">The storage engine Burrow is currently using.</p>
-        </div>
-      </div>
+      <PageHeader title="Database backend" subtitle="The storage engine Burrow is currently using." />
 
       <section className="account-section">
         {status && (

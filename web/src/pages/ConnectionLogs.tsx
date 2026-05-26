@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
-import { Button, Badge, SkeletonRows } from "@/components/ds";
+import { Button, Badge, PageHeader, SkeletonRows } from "@/components/ds";
 import type { ConnectionLog, ConnectionLogRollup, ConnectionLogKind, Service } from "@/lib/contract";
 
 // Translate date-range preset to since/until ISO strings.
@@ -138,14 +138,10 @@ export default function ConnectionLogs() {
 
   return (
     <div className="connection-logs-page">
-      <div className="page-head">
-        <h1>Connection logs</h1>
-        <div className="row gap-2">
-          <Button variant="secondary" size="sm" onClick={handleExport}>
-            Export
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Connection logs"
+        actions={<Button variant="secondary" size="sm" onClick={handleExport}>Export</Button>}
+      />
 
       {/* Filter toolbar */}
       <div className="row gap-2" style={{ margin: "12px 0", flexWrap: "wrap", alignItems: "center" }}>

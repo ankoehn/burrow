@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input, Select, FormField, FormFieldGroup } from "@/components/ds";
+import { Button, Input, Select, FormField, FormFieldGroup, PageHeader } from "@/components/ds";
 import type { SettingsMap } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -58,7 +58,7 @@ export default function Settings() {
 
   return (
     <div className="account-page">
-      <div className="page-head"><div><h1>Settings</h1><p className="sub">Admin-only configuration for this Burrow relay.</p></div></div>
+      <PageHeader title="Settings" subtitle="Admin-only configuration for this Burrow relay." />
 
       {/* ---- v0.5.0 nav cards ---- */}
       <section className="account-section" aria-labelledby="sec-configuration">

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, DropdownMenu, ErrorNotice, MetricStrip, MetricTile, SkeletonRows } from "@/components/ds";
+import { Badge, Button, DropdownMenu, ErrorNotice, MetricStrip, MetricTile, PageHeader, SkeletonRows } from "@/components/ds";
 import type { AiEndpoint, CostSummary } from "@/lib/contract";
 
 function fmtInt(n: number): string {
@@ -69,11 +69,7 @@ export default function AiEndpoints() {
   if (featureAbsent) {
     return (
       <div className="ai-endpoints-page">
-        <div className="page-head">
-          <div>
-            <h1>AI endpoints</h1>
-          </div>
-        </div>
+        <PageHeader title="AI endpoints" />
         <div className="state-card">
           <p>
             The AI gateway isn&apos;t available on this relay. Ask your operator to
@@ -86,15 +82,10 @@ export default function AiEndpoints() {
 
   return (
     <div className="ai-endpoints-page">
-      <div className="page-head">
-        <div>
-          <h1>AI endpoints</h1>
-          <p className="sub">
-            Services exposing an OpenAI-compatible API through this relay — with cache,
-            cost, and traffic at a glance.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="AI endpoints"
+        subtitle="Services exposing an OpenAI-compatible API through this relay — with cache, cost, and traffic at a glance."
+      />
 
       <MetricStrip ariaLabel="AI endpoint metrics">
         <MetricTile label="Requests (24h)" value={fmtInt(totalRequests)} />

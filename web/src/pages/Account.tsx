@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input, PageHeader } from "@/components/ds";
 import type { Session } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -115,11 +115,7 @@ export default function Account() {
 
   return (
     <div className="account-page">
-      <div className="page-head" style={{ marginBottom: 8 }}>
-        <div>
-          <h1>Account</h1>
-        </div>
-      </div>
+      <PageHeader title="Account" />
 
       <section className="account-section" aria-labelledby="sec-profile">
         <div className="section-head">

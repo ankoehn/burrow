@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Dialog, EmptyState, ErrorNotice, Input, Select, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Dialog, EmptyState, ErrorNotice, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import type { ProvisioningKey, ProvisioningPending } from "@/lib/contract";
 
 interface CreatedProvisioningKey {
@@ -81,15 +81,11 @@ export default function ProvisioningKeys() {
 
   return (
     <div className="provisioning-page">
-      <div className="page-head">
-        <div>
-          <h1>Provisioning keys</h1>
-          <p className="sub">Mint long-lived keys that newly-launched clients use to enrol with this relay.</p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
-          Mint provisioning key
-        </Button>
-      </div>
+      <PageHeader
+        title="Provisioning keys"
+        subtitle="Mint long-lived keys that newly-launched clients use to enrol with this relay."
+        actions={<Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Mint provisioning key</Button>}
+      />
 
       <section className="card">
         <h2>Active provisioning keys</h2>

@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Checkbox, Dialog, DropdownMenu, FormField, FormFieldGroup, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, FormField, FormFieldGroup, Input, PageHeader, SkeletonRows } from "@/components/ds";
 import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
 import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
@@ -197,17 +197,11 @@ export default function Webhooks() {
 
   return (
     <div className="webhooks-page">
-      <div className="page-head">
-        <div>
-          <h1>Webhooks</h1>
-          <p className="muted">
-            Burrow signs every webhook with an HMAC-SHA256 signature in the
-            {" "}<code className="mono">Burrow-Signature</code> header. Verify on receipt.
-            {" "}<a href="/docs/webhooks" className="link-inline">Docs</a>
-          </p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add webhook</Button>
-      </div>
+      <PageHeader
+        title="Webhooks"
+        subtitle={<>Burrow signs every webhook with an HMAC-SHA256 signature in the{" "}<code className="mono">Burrow-Signature</code> header. Verify on receipt.{" "}<a href="/docs/webhooks" className="link-inline">Docs</a></>}
+        actions={<Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>Add webhook</Button>}
+      />
 
       {/* P0-10: render the Webhooks table unconditionally; the empty state
           becomes an in-table row so Playwright + the page-head CTA agree on

@@ -3,7 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, FormField, FormFieldGroup, Input, MetricStrip, MetricTile, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, FormField, FormFieldGroup, Input, MetricStrip, MetricTile, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import type { Budget, CostSummary } from "@/lib/contract";
 
 type Window = CostSummary["window"];
@@ -113,7 +113,7 @@ export default function CostBudgets() {
   if (!budgets.data && !featureAbsent) {
     return (
       <div className="cost-page">
-        <div className="page-head"><div><h1>Cost &amp; budgets</h1></div></div>
+        <PageHeader title="Cost & budgets" />
         <SkeletonRows n={4} />
       </div>
     );
@@ -121,24 +121,11 @@ export default function CostBudgets() {
 
   return (
     <div className="cost-page">
-      <div className="page-head">
-        <div>
-          <h1>Cost &amp; budgets</h1>
-          <p className="muted">
-            Estimates from the pricing table shipped with Burrow v0.4. Operators can edit
-            this table in Settings.
-          </p>
-        </div>
-        <div className="row gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => { void apiFetch("/cost/export?format=ndjson&window=month"); }}
-          >
-            Export cost report
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Cost & budgets"
+        subtitle="Estimates from the pricing table shipped with Burrow v0.4. Operators can edit this table in Settings."
+        actions={<Button variant="secondary" size="sm" onClick={() => { void apiFetch("/cost/export?format=ndjson&window=month"); }}>Export cost report</Button>}
+      />
 
       <MetricStrip ariaLabel="Spend by window">
         {WINDOWS.map((w, i) => (
