@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Button, Dialog, Input, Select, SkeletonRows, Switch, Tabs,
+  Button, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows, Switch, Tabs,
 } from "@/components/ds";
 import type { CacheSettings, SemanticCacheSettings, CacheStatsV5, Service, ServiceAIConfig } from "@/lib/contract";
 import { formatBytes } from "@/lib/format";
@@ -60,18 +60,16 @@ function ExactPanel({
         />
         <span>Cache exact (verbatim) requests</span>
       </div>
-      <div className="form-grid">
-        <div className="field">
-          <label htmlFor="cache-applies">Applies per</label>
+      <FormFieldGroup>
+        <FormField label="Applies per" htmlFor="cache-applies" w="md">
           <Select
             id="cache-applies"
             value={draft.applies_per}
             onChange={(v) => setDraft({ ...draft, applies_per: v as CacheSettings["applies_per"] })}
             options={APPLIES_OPTIONS}
           />
-        </div>
-        <div className="field">
-          <label htmlFor="cache-ttl">TTL (seconds)</label>
+        </FormField>
+        <FormField label="TTL (seconds)" htmlFor="cache-ttl" w="sm">
           <Input
             id="cache-ttl"
             type="number"
@@ -80,9 +78,8 @@ function ExactPanel({
             value={draft.ttl_seconds}
             onChange={(e) => setDraft({ ...draft, ttl_seconds: Number(e.target.value) })}
           />
-        </div>
-        <div className="field">
-          <label htmlFor="cache-max-entries">Max entries</label>
+        </FormField>
+        <FormField label="Max entries" htmlFor="cache-max-entries" w="sm">
           <Input
             id="cache-max-entries"
             type="number"
@@ -91,9 +88,8 @@ function ExactPanel({
             value={draft.max_entries}
             onChange={(e) => setDraft({ ...draft, max_entries: Number(e.target.value) })}
           />
-        </div>
-        <div className="field">
-          <label htmlFor="cache-max-per-entry">Max per-entry (KiB)</label>
+        </FormField>
+        <FormField label="Max per-entry (KiB)" htmlFor="cache-max-per-entry" w="sm">
           <Input
             id="cache-max-per-entry"
             type="number"
@@ -102,8 +98,8 @@ function ExactPanel({
             value={draft.max_per_entry_kb}
             onChange={(e) => setDraft({ ...draft, max_per_entry_kb: Number(e.target.value) })}
           />
-        </div>
-      </div>
+        </FormField>
+      </FormFieldGroup>
       <div className="actions">
         <Button variant="primary" size="sm" disabled={isSaving} onClick={onSave}>
           {isSaving ? "Saving…" : "Save cache settings"}
