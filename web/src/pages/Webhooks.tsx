@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, SkeletonRows } from "@/components/ds";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, FormField, FormFieldGroup, Input, SkeletonRows } from "@/components/ds";
 import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
 import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
@@ -302,14 +302,14 @@ export default function Webhooks() {
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="wh-name">Name</label>
-          <Input id="wh-name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="wh-url">URL</label>
-          <Input id="wh-url" className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" />
-        </div>
+        <FormFieldGroup>
+          <FormField label="Name" htmlFor="wh-name" w="md">
+            <Input id="wh-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField label="URL" htmlFor="wh-url" w="lg">
+            <Input id="wh-url" className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hook" />
+          </FormField>
+        </FormFieldGroup>
         <div className="field">
           <label>Events</label>
           <EventsPicker selected={addEvents} onChange={setAddEvents} />
