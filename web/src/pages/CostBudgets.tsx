@@ -3,7 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, FormField, FormFieldGroup, Input, MetricStrip, MetricTile, Select, SkeletonRows } from "@/components/ds";
 import type { Budget, CostSummary } from "@/lib/contract";
 
 type Window = CostSummary["window"];
@@ -38,14 +38,16 @@ function pctClass(pct: number | null): string {
 
 function SpendTile({ w, summary }: { w: Window; summary: CostSummary | undefined }) {
   return (
-    <div role="group" aria-label={`${WINDOW_LABEL[w]} spend metric`} className="metric-tile">
-      <div className="metric-label">{WINDOW_LABEL[w]}</div>
-      <div className="metric-value mono">{summary ? fmtUsd(summary.total_usd) : "—"}</div>
-      <div className="metric-sub muted mono">
-        {summary ? `${summary.tokens_in.toLocaleString()} → ${summary.tokens_out.toLocaleString()}` : "—"}
-      </div>
-      <div className={`pct-bar ${pctClass(summary?.pct_of_budget ?? null)}`} style={{ height: 4 }} />
-    </div>
+    <MetricTile
+      label={WINDOW_LABEL[w]}
+      value={summary ? fmtUsd(summary.total_usd) : "—"}
+      sub={summary ? `${summary.tokens_in.toLocaleString()} → ${summary.tokens_out.toLocaleString()}` : "—"}
+    >
+      <div
+        className={`pct-bar ${pctClass(summary?.pct_of_budget ?? null)}`}
+        style={{ height: 4 }}
+      />
+    </MetricTile>
   );
 }
 
@@ -138,11 +140,11 @@ export default function CostBudgets() {
         </div>
       </div>
 
-      <div className="metric-strip" role="list" aria-label="Spend by window">
+      <MetricStrip ariaLabel="Spend by window">
         {WINDOWS.map((w, i) => (
           <SpendTile key={w} w={w} summary={cost[i]!.data} />
         ))}
-      </div>
+      </MetricStrip>
 
       <section className="card">
         <h2>Budgets</h2>
