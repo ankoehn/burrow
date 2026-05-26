@@ -98,7 +98,7 @@ export default function Users() {
         <div className="table-wrap">
           <table className="data" aria-label="Users">
             <thead>
-              <tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th className="col-actions"></th></tr>
+              <tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th className="col-actions" aria-label="Row actions"></th></tr>
             </thead>
             <tbody>
               {rows.map((u) => (
@@ -121,13 +121,15 @@ export default function Users() {
               ))}
             </tbody>
           </table>
-          <div className="row gap-2" style={{ marginTop: 12, alignItems: "center" }}>
-            <span className="muted">Showing {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} of {total}</span>
-            <div style={{ marginLeft: "auto" }} className="row gap-2">
-              <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</Button>
-              <Button variant="secondary" size="sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
+          {total > PAGE && (
+            <div className="row gap-2" style={{ marginTop: 12, alignItems: "center" }}>
+              <span className="muted">Showing {offset + 1}–{Math.min(offset + PAGE, total)} of {total}</span>
+              <div style={{ marginLeft: "auto" }} className="row gap-2">
+                <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</Button>
+                <Button variant="secondary" size="sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
