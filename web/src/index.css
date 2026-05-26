@@ -1705,3 +1705,13 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
 .roles-page table.data th:nth-child(2) {
   max-width: 640px;
 }
+
+/* Sidebar — scroll the nav list when the viewport is shorter than
+   the menu fits in. Footer (admin email + Log out) sticks to the
+   bottom; brand stays at top. (F18) */
+.sidebar {
+  height: 100vh;
+  overflow: hidden;
+  position: sticky;
+  top: 0;
+}
