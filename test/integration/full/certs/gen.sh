@@ -55,3 +55,15 @@ openssl x509 -req -in wildcard.test.local.csr -days 3650 \
 # Cleanup CSR + serial (not committed).
 rm -f wildcard.test.local.csr wildcard.test.local.cnf ca.srl
 echo "[gen.sh] regenerated test CA + *.test.local cert (10-year validity)"
+
+# 3. Client cert for mTLS e2e tests (spec 09 strengthened + spec 23).
+# CN is opaque — Burrow's mTLS gate only verifies signature chain
+# against the operator-supplied CA, not the CN.
+openssl req -new -newkey rsa:2048 -nodes \
+  -keyout client.key -out client.csr \
+  -subj "/C=US/O=Burrow Test/CN=e2e-mtls-client"
+openssl x509 -req -in client.csr -days 3650 \
+  -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt \
+  -extensions v3_req
+rm -f client.csr ca.srl
+echo "[gen.sh] regenerated client cert for mTLS tests"
