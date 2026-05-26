@@ -193,6 +193,43 @@ func TestSec_CSRFRejection(t *testing.T) {
 	}
 }
 
+func TestSec_LoginRateLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip e2e in -short")
+	}
+	// Use limit=3 to keep the test fast.
+	s := bootSecurityStack(t, withSecLoginRateLimit(3, 100))
+	c := s.client()
+
+	post := func() (status int, body string) {
+		r, err := c.Post(s.apiURL+"/api/v1/auth/login", "application/json",
+			strings.NewReader(`{"email":"nobody@x","password":"wrong"}`))
+		if err != nil {
+			t.Fatalf("post login: %v", err)
+		}
+		rb, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		return r.StatusCode, string(rb)
+	}
+
+	// First 3 attempts should be 401 (rate-limit allows them through).
+	for i := 0; i < 3; i++ {
+		s, b := post()
+		if s != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d body=%s", i+1, s, b)
+		}
+	}
+
+	// 4th attempt should be 429.
+	s4, b4 := post()
+	if s4 != http.StatusTooManyRequests {
+		t.Fatalf("attempt 4: want 429, got %d body=%s", s4, b4)
+	}
+	if !strings.Contains(strings.ToLower(b4), "too many") {
+		t.Errorf("429 body should say 'too many', got %q", b4)
+	}
+}
+
 // silence unused-import lints when later sub-tests are added in subsequent
 // commits — io/json/context/time are imported up-front so this file stays
 // edit-friendly for the next four TestSec_* tasks.
