@@ -230,6 +230,77 @@ func TestSec_LoginRateLimit(t *testing.T) {
 	}
 }
 
+func TestSec_TrustedProxyXFF(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip e2e in -short")
+	}
+	// All requests in this test come from 127.0.0.1 (the test's loopback).
+	// Trust 127.0.0.0/8 so X-Forwarded-For is honored from the loopback peer.
+	s := bootSecurityStack(t,
+		withSecLoginRateLimit(2, 100),
+		withSecTrustedProxies("127.0.0.0/8"),
+	)
+	c := s.client()
+
+	postWithXFF := func(xff string) int {
+		req, _ := http.NewRequest("POST", s.apiURL+"/api/v1/auth/login",
+			strings.NewReader(`{"email":"nobody@x","password":"wrong"}`))
+		req.Header.Set("Content-Type", "application/json")
+		if xff != "" {
+			req.Header.Set("X-Forwarded-For", xff)
+		}
+		r, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		_ = r.Body.Close()
+		return r.StatusCode
+	}
+
+	// XFF=1.1.1.1: 2 attempts allowed, 3rd is 429.
+	if got := postWithXFF("1.1.1.1"); got != http.StatusUnauthorized {
+		t.Fatalf("XFF=1.1.1.1 attempt 1: want 401, got %d", got)
+	}
+	if got := postWithXFF("1.1.1.1"); got != http.StatusUnauthorized {
+		t.Fatalf("XFF=1.1.1.1 attempt 2: want 401, got %d", got)
+	}
+	if got := postWithXFF("1.1.1.1"); got != http.StatusTooManyRequests {
+		t.Fatalf("XFF=1.1.1.1 attempt 3: want 429, got %d", got)
+	}
+
+	// XFF=2.2.2.2 (different key under trust): independent bucket.
+	if got := postWithXFF("2.2.2.2"); got != http.StatusUnauthorized {
+		t.Fatalf("XFF=2.2.2.2 attempt 1: want 401, got %d", got)
+	}
+
+	// Boot a second stack with EMPTY trusted proxies. XFF should be ignored;
+	// the only key is the loopback peer, so 1.1.1.1 vs 2.2.2.2 share a bucket.
+	s2 := bootSecurityStack(t, withSecLoginRateLimit(2, 100)) // no trustedProxies
+	c2 := s2.client()
+	postWithXFF2 := func(xff string) int {
+		req, _ := http.NewRequest("POST", s2.apiURL+"/api/v1/auth/login",
+			strings.NewReader(`{"email":"nobody@x","password":"wrong"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", xff)
+		r, err := c2.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		_ = r.Body.Close()
+		return r.StatusCode
+	}
+	if got := postWithXFF2("1.1.1.1"); got != http.StatusUnauthorized {
+		t.Fatalf("[no-trust] attempt 1: want 401, got %d", got)
+	}
+	if got := postWithXFF2("2.2.2.2"); got != http.StatusUnauthorized {
+		t.Fatalf("[no-trust] attempt 2: want 401, got %d", got)
+	}
+	// Two XFFs should share the loopback bucket → 3rd attempt with any XFF triggers.
+	if got := postWithXFF2("3.3.3.3"); got != http.StatusTooManyRequests {
+		t.Fatalf("[no-trust] attempt 3: want 429 (XFF ignored, shared peer bucket), got %d", got)
+	}
+}
+
 // silence unused-import lints when later sub-tests are added in subsequent
 // commits — io/json/context/time are imported up-front so this file stays
 // edit-friendly for the next four TestSec_* tasks.
