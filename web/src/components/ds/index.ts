@@ -28,3 +28,5 @@ export { PageHeader } from "./PageHeader";
 export type { PageHeaderProps } from "./PageHeader";
 export { FormField } from "./FormField";
 export type { FormFieldProps, FormFieldWidth } from "./FormField";
+export { FormFieldGroup } from "./FormFieldGroup";
+export type { FormFieldGroupProps } from "./FormFieldGroup";
