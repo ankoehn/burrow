@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, Input, Select, SkeletonRows, ErrorNotice } from "@/components/ds";
+import { Button, Badge, Dialog, FormField, FormFieldGroup, Input, Select, SkeletonRows, ErrorNotice } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { Service, AccessMode } from "@/lib/contract";
 import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
@@ -250,26 +250,25 @@ export default function Services() {
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="ns-name">Name</label>
-          <Input id="ns-name" placeholder="e.g. web-prod" value={nsName} onChange={(e) => setNsName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="ns-type">Type</label>
-          <Select
-            id="ns-type"
-            value={nsType}
-            onChange={(v) => setNsType(v as "http" | "tcp")}
-            options={[
-              { value: "http", label: "HTTP" },
-              { value: "tcp", label: "TCP" },
-            ]}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="ns-local">Local address</label>
-          <Input id="ns-local" className="mono" value={nsLocal} onChange={(e) => setNsLocal(e.target.value)} placeholder="127.0.0.1:3000" />
-        </div>
+        <FormFieldGroup>
+          <FormField label="Name" htmlFor="ns-name" w="md">
+            <Input id="ns-name" placeholder="e.g. web-prod" value={nsName} onChange={(e) => setNsName(e.target.value)} />
+          </FormField>
+          <FormField label="Type" htmlFor="ns-type" w="md">
+            <Select
+              id="ns-type"
+              value={nsType}
+              onChange={(v) => setNsType(v as "http" | "tcp")}
+              options={[
+                { value: "http", label: "HTTP" },
+                { value: "tcp", label: "TCP" },
+              ]}
+            />
+          </FormField>
+          <FormField label="Local address" htmlFor="ns-local" w="md">
+            <Input id="ns-local" className="mono" value={nsLocal} onChange={(e) => setNsLocal(e.target.value)} placeholder="127.0.0.1:3000" />
+          </FormField>
+        </FormFieldGroup>
         {nsErr && <p role="alert" className="notice-inline error">{nsErr}</p>}
       </Dialog>
       <Toaster />
