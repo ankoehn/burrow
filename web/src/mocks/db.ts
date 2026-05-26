@@ -3,7 +3,7 @@ import type {
   Service, ServiceApiKey, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
   GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
-  WebhookDelivery, WebAuthnCredential, ProvisioningKey, ProvisioningPending,
+  WebhookDelivery, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
   ModelAliasV5, UpstreamCredentialBinding, CustomDomain,
   RetentionSettings, DatabaseStatus,
@@ -64,7 +64,6 @@ export interface MockDb {
   audit: AuditEvent[];
   webhooks: Webhook[];
   webhookDeliveries: WebhookDelivery[];
-  webauthnCredentials: WebAuthnCredential[];
   provisioningKeys: ProvisioningKey[];
   provisioningPending: ProvisioningPending[];
   automationTokens: AutomationToken[];
@@ -222,9 +221,6 @@ function seed(): MockDb {
     webhookDeliveries: [
       { id: "wd_001", webhook_id: "wh_ops", event: "audit.tokens.create", ts: "2026-05-19T07:00:00Z", url: "https://example.com/hook", status_code: 502, attempt: 1, latency_ms: 100, request_body_preview: "{...}", response_body_preview: "gateway" },
       { id: "wd_002", webhook_id: "wh_ops", event: "audit.tokens.create", ts: "2026-05-19T07:00:05Z", url: "https://example.com/hook", status_code: 502, attempt: 2, latency_ms: 110, request_body_preview: "{...}", response_body_preview: "gateway" },
-    ],
-    webauthnCredentials: [
-      { id: "wc_yubi5", label: "YubiKey 5", created_at: "2026-04-01T08:00:00Z", last_used: "2026-05-15T09:00:00Z" },
     ],
     provisioningKeys: [
       { id: "pk_fleet", name: "fleet", prefix: "bup_w7s9z", scope: "multi", expires_at: null, default_role: "user", last_used: "2026-05-15T09:00:00Z", created_at: "2026-04-01T08:00:00Z" },

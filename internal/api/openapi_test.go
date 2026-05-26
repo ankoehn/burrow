@@ -22,7 +22,6 @@ import (
 	"github.com/ankoehn/burrow/internal/mcpserv"
 	"github.com/ankoehn/burrow/internal/quota"
 	"github.com/ankoehn/burrow/internal/store"
-	bwebauthn "github.com/ankoehn/burrow/internal/webauthn"
 	"github.com/go-chi/chi/v5"
 	"gopkg.in/yaml.v3"
 )
@@ -184,7 +183,6 @@ func TestOpenAPIRouteCoverage_FullIntegrationMux(t *testing.T) {
 		IPGeo:             stub,
 		IPGeoServices:     stub,
 		GeoLookup:         stub,
-		WebAuthn:          stub,
 		BackupDir:         t.TempDir(),
 		BackupRunner:      stub,
 		RestoreRunner:     stub,
@@ -719,32 +717,6 @@ func (*fullDepsStub) DBPath() string {
 func (*fullDepsStub) DBAgeSeconds() int64 {
 	stubPanic("GeoLookup.DBAgeSeconds")
 	return 0
-}
-
-// WebAuthnProvider.
-func (*fullDepsStub) BeginRegister(context.Context, string) (*bwebauthn.BeginRegisterResult, error) {
-	stubPanic("BeginRegister")
-	return nil, nil
-}
-func (*fullDepsStub) FinishRegister(context.Context, string, string, string, *http.Request) (*db.WebAuthnCredential, error) {
-	stubPanic("FinishRegister")
-	return nil, nil
-}
-func (*fullDepsStub) BeginLogin(context.Context, string) (*bwebauthn.BeginLoginResult, error) {
-	stubPanic("BeginLogin")
-	return nil, nil
-}
-func (*fullDepsStub) FinishLogin(context.Context, string, *http.Request) (string, error) {
-	stubPanic("FinishLogin")
-	return "", nil
-}
-func (*fullDepsStub) ListCredentialsForUser(context.Context, string) ([]db.WebAuthnCredential, error) {
-	stubPanic("ListCredentialsForUser")
-	return nil, nil
-}
-func (*fullDepsStub) DeleteCredential(context.Context, string, string) error {
-	stubPanic("DeleteCredential")
-	return nil
 }
 
 // BackupRunner.

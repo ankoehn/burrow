@@ -2,8 +2,8 @@
 // Hits the build-tagged /api/v1/internal/test-reset endpoint (Plan 1 T18).
 // Truncates mutable tables (audit, tokens, sessions, services + per-service
 // rows, webhooks, connection-logs, rate limits, model_aliases, budgets,
-// webauthn credentials, automation tokens, non-seeded users) while preserving
-// migrations + the seeded admin.
+// automation tokens, non-seeded users) while preserving migrations + the
+// seeded admin.
 
 import type { APIRequestContext } from "@playwright/test";
 import { RESET_URL } from "./env";

@@ -521,7 +521,6 @@ func main() {
 					InspectorServices: cacheServiceLookupAdapter{db: db.Wrap(database)},
 					InspectorReplayer: newInspectorReplayer(v04.AIChain, log),
 					ModelAliases:      db.Wrap(database),
-					WebAuthn:          webauthnProviderOrNil(v04.WebAuthn),
 					IPGeo:             db.Wrap(database),
 					IPGeoServices:     db.Wrap(database),
 					GeoLookup:         v04.GeoLookup,

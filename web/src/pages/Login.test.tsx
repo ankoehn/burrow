@@ -51,16 +51,11 @@ describe("Login", () => {
     expect(screen.getByRole("button", { name: /^sign in$/i }).className).toContain("btn-primary");
   });
 
-  it("primary and passkey buttons both span the form width (S2)", () => {
+  it("submit button spans the form width (S2)", () => {
     setup();
     const primary = screen.getByRole("button", { name: /^sign in$/i });
-    const passkey = screen.getByRole("button", { name: /passkey/i });
-    // Assertion: both have full-width via class OR inline style. The exact
-    // mechanism may be className containing "btn-block" or "w-full" or an
-    // inline style; the test verifies whichever pattern the repo uses.
     const widthSignal = (el: HTMLElement) => el.className + " " + (el.getAttribute("style") || "");
     expect(widthSignal(primary)).toMatch(/btn-block|w-full|width:\s*100%|width:100%/i);
-    expect(widthSignal(passkey)).toMatch(/btn-block|w-full|width:\s*100%|width:100%/i);
   });
 
   it("shows banner on 401 and stays on /login (no global redirect)", async () => {

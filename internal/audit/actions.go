@@ -74,11 +74,6 @@ const (
 	ActionMtlsCertRotated = "mtls.cert.rotated"
 	ActionIPGeoUpdate     = "ipgeo.update"
 
-	ActionWebAuthnCredentialRegister = "webauthn.credential.register"
-	ActionWebAuthnCredentialDelete   = "webauthn.credential.delete"
-	ActionWebAuthnLoginSuccess       = "webauthn.login.success"
-	ActionWebAuthnLoginFailure       = "webauthn.login.failure"
-
 	ActionAutomationTokenMint   = "automation.token.mint"
 	ActionAutomationTokenRevoke = "automation.token.revoke"
 
@@ -136,8 +131,6 @@ var AllActions = []string{
 	ActionWebhookCreate, ActionWebhookUpdate, ActionWebhookDelete, ActionWebhookDeliveryFailed,
 	ActionBackupRun, ActionBackupRestore, ActionAuditExport,
 	ActionMtlsCAUpdate, ActionMtlsCertRotated, ActionIPGeoUpdate,
-	ActionWebAuthnCredentialRegister, ActionWebAuthnCredentialDelete,
-	ActionWebAuthnLoginSuccess, ActionWebAuthnLoginFailure,
 	ActionAutomationTokenMint, ActionAutomationTokenRevoke,
 	ActionMCPToolCall,
 	ActionServiceUpstreamCredentialBind, ActionServiceUpstreamCredentialUnbind,

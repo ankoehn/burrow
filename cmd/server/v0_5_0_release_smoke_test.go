@@ -91,11 +91,7 @@ func bootSmokeServer(t *testing.T) *smokeStack {
 	// Build the exact cache (normally from buildV04Stack).
 	cacheEngine := exact.New(wrapped, log)
 
-	cfg := &config.ServerConfig{
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow Test",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{}
 	// Build the full v0.4.0 stack to get quota, cost, inspector etc.
 	v04, err := buildV04Stack(context.Background(), cfg, sqldb, st, log)
 	if err != nil {
@@ -139,7 +135,6 @@ func bootSmokeServer(t *testing.T) *smokeStack {
 		CostEngine:        v04.CostEngine,
 		Bearer:            api.NewStoreBearerStore(st),
 		Automation:        st,
-		WebAuthn:          webauthnProviderOrNil(v04.WebAuthn),
 		// v0.5.0 Task 17 wiring.
 		ServiceAIConfigs:   wrapped,
 		CredentialVault:    v05.CredVault,

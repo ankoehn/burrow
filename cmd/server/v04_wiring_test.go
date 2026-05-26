@@ -49,12 +49,7 @@ func freshTestStack(t *testing.T) (*store.Store, *db.DB) {
 // service_ai_config blob is present).
 func TestBuildV04Stack_DefaultsCarryNonNilAIChain(t *testing.T) {
 	st, wrapped := freshTestStack(t)
-	cfg := &config.ServerConfig{
-		// Minimum config to make WebAuthn / cost engine happy.
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{}
 	stack, err := buildV04Stack(context.Background(), cfg, wrapped.DB(), st, discardLog())
 	if err != nil {
 		t.Fatalf("buildV04Stack: %v", err)
@@ -103,11 +98,7 @@ func TestBuildV04Stack_DefaultsCarryNonNilAIChain(t *testing.T) {
 // has no AI features enabled.
 func TestAIChain_PassThroughWhenNoServiceConfig(t *testing.T) {
 	st, wrapped := freshTestStack(t)
-	cfg := &config.ServerConfig{
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{}
 	stack, err := buildV04Stack(context.Background(), cfg, wrapped.DB(), st, discardLog())
 	if err != nil {
 		t.Fatalf("buildV04Stack: %v", err)
@@ -148,12 +139,7 @@ func TestAIChain_PassThroughWhenNoServiceConfig(t *testing.T) {
 // invariant.
 func TestBuildMCPServer_BuiltWhenMCPListenSet(t *testing.T) {
 	st, wrapped := freshTestStack(t)
-	cfg := &config.ServerConfig{
-		MCPListen:      ":7800",
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{MCPListen: ":7800"}
 	stack, err := buildV04Stack(context.Background(), cfg, wrapped.DB(), st, discardLog())
 	if err != nil {
 		t.Fatalf("buildV04Stack: %v", err)
@@ -176,11 +162,7 @@ func TestBuildMCPServer_BuiltWhenMCPListenSet(t *testing.T) {
 // "OFF unless configured" default per spec Part P.1).
 func TestBuildMCPServer_NilWhenMCPListenEmpty(t *testing.T) {
 	st, wrapped := freshTestStack(t)
-	cfg := &config.ServerConfig{
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{}
 	stack, err := buildV04Stack(context.Background(), cfg, wrapped.DB(), st, discardLog())
 	if err != nil {
 		t.Fatalf("buildV04Stack: %v", err)

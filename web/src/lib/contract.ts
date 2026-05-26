@@ -358,14 +358,6 @@ export interface CreatedAutomationToken {
   plaintext: string;
 }
 
-// WebAuthn / passkeys (spec Part K).
-export interface WebAuthnCredential {
-  id: string;
-  label: string;
-  created_at: string;
-  last_used: string | null;
-}
-
 // Backups (spec Part L).
 export interface BackupRow {
   id: string;

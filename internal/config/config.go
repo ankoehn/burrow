@@ -112,30 +112,6 @@ type ServerConfig struct {
 	// reads a file CONTAINING the path, kept for consistency with the
 	// generic _FILE pattern).
 	PricingPath string `koanf:"pricing_path"`
-	// WebAuthnRPID is the Relying Party ID — a BARE hostname (no scheme, no
-	// port, no path) per the WebAuthn spec. When unset it is derived at
-	// LoadServer time:
-	//   - if AuthDomain set → AuthDomain;
-	//   - else            → host portion of HTTPListen (port stripped); if
-	//                       the host is empty (e.g. ":8080") it falls back
-	//                       to "localhost".
-	// Validation rejects values containing "://" (operator passed a URL by
-	// mistake). Env: BURROW_WEBAUTHN_RP_ID.
-	WebAuthnRPID string `koanf:"webauthn_rp_id"`
-	// WebAuthnRPName is the human-readable Relying Party display name shown
-	// in the browser's WebAuthn prompt. Defaults to "Burrow". Env:
-	// BURROW_WEBAUTHN_RP_NAME.
-	WebAuthnRPName string `koanf:"webauthn_rp_name"`
-	// WebAuthnOrigin is the FULL scheme://host[:port] URL the browser will
-	// send in clientDataJSON. The WebAuthn library verifies an EXACT match,
-	// so no trailing slash and no path component are permitted. When unset
-	// it is derived at LoadServer time:
-	//   - if AuthDomain set → "https://" + AuthDomain (production assumes TLS);
-	//   - else            → "http://" + derived RPID + ":" + HTTPListen port;
-	//                       when HTTPListen has no port it falls back to host.
-	// Validation requires http:// or https:// prefix, no trailing slash, and
-	// no path. Env: BURROW_WEBAUTHN_ORIGIN.
-	WebAuthnOrigin string `koanf:"webauthn_origin"`
 	// BackupDir is the on-disk directory the backup API and `burrowd backup`
 	// CLI write/read archives in (Task 20). Defaults to "<DatabasePath>.backups"
 	// so a stock deployment gets a working JSON API out of the box. When set
@@ -266,47 +242,10 @@ func applyFileSecrets(k *koanf.Koanf) error {
 	return k.Load(confmap.Provider(overrides, "."), nil)
 }
 
-// deriveV04Fields fills in the four post-merge derived defaults for v0.4.0:
-// WebAuthnRPID, WebAuthnOrigin, and BackupDir. Called only after koanf has
-// merged defaults < env < _FILE < overrides so the derivations see the
-// final values for HTTPListen / AuthDomain / DatabasePath.
-//
-// Precedence: an explicit value (env or override) always wins; this only
-// fills the blanks. Empty fields after derivation indicate a misconfigured
-// HTTPListen (no host/port at all) — the next validation pass will catch
-// that case.
+// deriveV04Fields fills in the post-merge derived defaults for v0.4.0:
+// BackupDir. Called only after koanf has merged defaults < env < _FILE <
+// overrides so the derivations see the final values for DatabasePath.
 func deriveV04Fields(c *ServerConfig) {
-	// --- WebAuthn RPID ------------------------------------------------------
-	if c.WebAuthnRPID == "" {
-		if c.AuthDomain != "" {
-			c.WebAuthnRPID = c.AuthDomain
-		} else {
-			host, _, err := net.SplitHostPort(c.HTTPListen)
-			if err != nil || host == "" {
-				host = "localhost"
-			}
-			c.WebAuthnRPID = host
-		}
-	}
-	// --- WebAuthn Origin ----------------------------------------------------
-	if c.WebAuthnOrigin == "" {
-		if c.AuthDomain != "" {
-			// Production: HTTPS at the auth boundary is the safe assumption.
-			c.WebAuthnOrigin = "https://" + c.AuthDomain
-		} else {
-			// Local/dev: derive from HTTPListen. The host portion of the
-			// origin must match the RPID exactly (or be a subdomain of it),
-			// so we reuse the already-derived RPID for the host. Append the
-			// port from HTTPListen when present.
-			_, port, err := net.SplitHostPort(c.HTTPListen)
-			if err != nil || port == "" {
-				c.WebAuthnOrigin = "http://" + c.WebAuthnRPID
-			} else {
-				c.WebAuthnOrigin = "http://" + c.WebAuthnRPID + ":" + port
-			}
-		}
-	}
-	// --- BackupDir ----------------------------------------------------------
 	if c.BackupDir == "" {
 		c.BackupDir = c.DatabasePath + ".backups"
 	}
@@ -314,36 +253,10 @@ func deriveV04Fields(c *ServerConfig) {
 
 // validateV04Fields checks the spec-mandated shape of the v0.4.0 fields:
 //
-//   - WebAuthnRPID:   bare hostname (no scheme, no "://").
-//   - WebAuthnOrigin: http(s):// scheme, no trailing slash, no path.
-//   - MCPListen:      empty (disabled) or parseable as [host]:port.
+//   - MCPListen: empty (disabled) or parseable as [host]:port.
 //
 // Returns the first violation as an error.
 func validateV04Fields(c *ServerConfig) error {
-	// RP ID must NOT contain a URL scheme. The library will reject it later
-	// too, but fail fast at config-load time so misconfiguration is loud.
-	if strings.Contains(c.WebAuthnRPID, "://") {
-		return fmt.Errorf("webauthn_rp_id must be a bare hostname, not a URL (no scheme/\"://\"): %q", c.WebAuthnRPID)
-	}
-	// Origin must be a clean http(s):// URL with no trailing slash and no path.
-	switch {
-	case strings.HasPrefix(c.WebAuthnOrigin, "http://"), strings.HasPrefix(c.WebAuthnOrigin, "https://"):
-		// fall through to the structural checks below.
-	default:
-		return fmt.Errorf("webauthn_origin must start with http:// or https://, got %q", c.WebAuthnOrigin)
-	}
-	if strings.HasSuffix(c.WebAuthnOrigin, "/") {
-		return fmt.Errorf("webauthn_origin must not have a trailing slash: %q", c.WebAuthnOrigin)
-	}
-	// Strip the scheme and look for a remaining "/" — that would be a path.
-	rest := strings.TrimPrefix(strings.TrimPrefix(c.WebAuthnOrigin, "https://"), "http://")
-	if strings.ContainsRune(rest, '/') {
-		return fmt.Errorf("webauthn_origin must not contain a path component: %q", c.WebAuthnOrigin)
-	}
-	// MCP listener: empty means disabled. Non-empty must parse as [host]:port
-	// AND the port must be numeric in the 1-65535 range — net.SplitHostPort by
-	// itself accepts symbolic service names like ":http", which we want to
-	// reject at config-load time so operator typos fail loudly.
 	if c.MCPListen != "" {
 		_, port, err := net.SplitHostPort(c.MCPListen)
 		if err != nil {
@@ -426,12 +339,10 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"http_proxy_listen": ":8443", "http_proxy_tls_cert": "", "http_proxy_tls_key": "", "auth_domain": "",
 		// v0.4.0 (Task 24) defaults. The empty-string defaults disable the
 		// associated feature (MCP listener, geo lookup, pricing override).
-		// WebAuthn RP id/origin and BackupDir default to empty here and are
-		// derived after unmarshalling — once HTTPListen/AuthDomain/DatabasePath
-		// have been resolved through env+_FILE+overrides — so all derivation
-		// rules see the final post-merge values.
+		// BackupDir defaults to empty here and is derived after unmarshalling —
+		// once DatabasePath has been resolved through env+_FILE+overrides — so
+		// the derivation rule sees the final post-merge value.
 		"mcp_listen": "", "burrow_mcp_token": "", "geo_db_path": "", "pricing_path": "",
-		"webauthn_rp_id": "", "webauthn_rp_name": "Burrow", "webauthn_origin": "",
 		"backup_dir": "",
 		// v0.5.0 (Task 15): Postgres backend defaults — both off by default.
 		"database_url": "", "experimental_postgres_backend": false,
@@ -461,10 +372,8 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 	if (c.HTTPProxyTLSCert == "") != (c.HTTPProxyTLSKey == "") {
 		return nil, fmt.Errorf("invalid server config: http_proxy_tls_cert and http_proxy_tls_key must both be set or both be empty")
 	}
-	// v0.4.0 (Task 24): derive WebAuthn RP id/origin and BackupDir from the
-	// already-merged HTTPListen/AuthDomain/DatabasePath, then validate the
-	// new field shapes. Derivation must come BEFORE validation so the
-	// derived origin is the one we sanity-check.
+	// v0.4.0 (Task 24): derive BackupDir from the already-merged DatabasePath,
+	// then validate the v0.4.0 field shapes.
 	deriveV04Fields(&c)
 	if err := validateV04Fields(&c); err != nil {
 		return nil, fmt.Errorf("invalid server config: %w", err)

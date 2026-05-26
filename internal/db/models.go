@@ -134,19 +134,6 @@ type AuditEvent struct {
 	Hash         string
 }
 
-// WebAuthnCredential is a row of the webauthn_credentials table.
-type WebAuthnCredential struct {
-	ID         string // base64url credential id
-	UserID     string
-	Label      string
-	PublicKey  []byte
-	SignCount  int64
-	AAGUID     *string
-	Transports *string
-	CreatedAt  time.Time
-	LastUsed   *time.Time
-}
-
 // Webhook is a row of the webhooks table.
 type Webhook struct {
 	ID                  string

@@ -176,11 +176,7 @@ func buildV050EnvOnDB(t *testing.T, sqldb *sql.DB, driver, urlRedacted string) *
 	if err != nil {
 		t.Fatalf("buildV05Stack: %v", err)
 	}
-	cfg := &config.ServerConfig{
-		WebAuthnRPID:   "localhost",
-		WebAuthnRPName: "Burrow Test",
-		WebAuthnOrigin: "http://localhost:8080",
-	}
+	cfg := &config.ServerConfig{}
 	v04, err := buildV04Stack(context.Background(), cfg, sqldb, st, log)
 	if err != nil {
 		t.Fatalf("buildV04Stack: %v", err)
@@ -224,7 +220,6 @@ func buildV050EnvOnDB(t *testing.T, sqldb *sql.DB, driver, urlRedacted string) *
 		CostEngine:          v04.CostEngine,
 		Bearer:              api.NewStoreBearerStore(st),
 		Automation:          st,
-		WebAuthn:            webauthnProviderOrNil(v04.WebAuthn),
 		ServiceAIConfigs:    wrapped,
 		CredentialVault:     v05.CredVault,
 		CredentialDB:        wrapped,

@@ -6,7 +6,7 @@ import type {
   AiEndpoint, ServiceAIConfig, UsageEvent, RateLimit, Budget, PricingTable,
   PricingEntry, InspectorEntry, AuditEvent, AuditFingerprint, Webhook,
   CreatedWebhook, WebhookDelivery, AutomationToken, CreatedAutomationToken,
-  ModelAlias, BackupRow, WebAuthnCredential, MtlsConfig, IpGeoConfig,
+  ModelAlias, BackupRow, MtlsConfig, IpGeoConfig,
   CustomRoleInput, PermissionDef, CacheSettings, RedactionRule,
   RedactionSettings, GuardrailSettings, InspectorSettings, RoutingPolicy,
   ProvisioningKey, ProvisioningPending, CostSummary,
@@ -98,12 +98,11 @@ describe("contract", () => {
     const cat: CreatedAutomationToken = { token: at, plaintext: "bua_mock_abc" };
     const ma: ModelAlias = { alias: "fast", concrete_model: "llama3.1:8b", service_id: "svc_ai001", created_at: "2026-05-19T00:00:00Z" };
     const br: BackupRow = { id: "bk1", taken_at: "2026-05-19T00:00:00Z", version: "v0.4.0", size_bytes: 1024, db_sha256: "deadbeef", path: "/var/burrow/backups/bk1.tar.gz" };
-    const wc: WebAuthnCredential = { id: "wc1", label: "yubikey", created_at: "2026-05-19T00:00:00Z", last_used: null };
     const rr: RedactionRule = { id: "rr1", name: "email", pattern: "[a-z]+@[a-z]+", action: "mask", scope: "both" };
     const pk: ProvisioningKey = { id: "pk1", name: "fleet", prefix: "bup_", scope: "multi", expires_at: null, default_role: "user", last_used: null, created_at: "2026-05-19T00:00:00Z" };
     const pp: ProvisioningPending = { id: "pp1", hostname: "node-1", os: "linux", arch: "amd64", remote_ip: "1.2.3.4", provisioning_key_id: "pk1", first_seen: "2026-05-19T00:00:00Z" };
 
-    expect([ai, cfg, usage, pt, cs, budget, rl, ie, audit, fp, wh, cwh, wd, pd, cri, at, cat, ma, br, wc, rr, pk, pp]).toHaveLength(23);
+    expect([ai, cfg, usage, pt, cs, budget, rl, ie, audit, fp, wh, cwh, wd, pd, cri, at, cat, ma, br, rr, pk, pp]).toHaveLength(22);
   });
 
   it("v0.5.0 shapes compile against representative wire objects", () => {

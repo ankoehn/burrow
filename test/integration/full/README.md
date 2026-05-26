@@ -106,8 +106,8 @@ Adds a `postgres:16-alpine` testcontainer; rebuilds the relay image with
 client tokens, automation tokens, sessions, services + per-service rows
 (api-keys, access-policy, custom-domains, ai-config, upstream creds,
 ip-geo), webhooks + deliveries, connection-logs + rollups, rate limits,
-model aliases, budgets + alerts, cost pricing, webauthn credentials, and
-non-seeded users — preserving the schema_migrations table and the
+model aliases, budgets + alerts, cost pricing, and non-seeded users —
+preserving the schema_migrations table and the
 seeded admin row.
 
 **Compiled in ONLY under `-tags=integration`.** The default release

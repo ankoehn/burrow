@@ -1,8 +1,8 @@
 // v04_wiring.go — Task 25: compose every v0.4.0 engine (audit, webhook
 // dispatcher, quota, cost, cache, redact, guardrails, route, inspector,
 // aimeter) into a single aigw.Chain wired into the proxy via
-// proxy.WithAIChain. WebAuthn provider, GeoDB lookup, MCP listener, and
-// every API-layer Deps field follow the same constructor seam.
+// proxy.WithAIChain. GeoDB lookup, MCP listener, and every API-layer
+// Deps field follow the same constructor seam.
 //
 // Everything in this file is additive over the v0.3.0 main.go: the build
 // order is documented in the plan (Task 25, Step 3) and preserved here.
@@ -33,7 +33,6 @@ import (
 	"github.com/ankoehn/burrow/internal/redact"
 	"github.com/ankoehn/burrow/internal/route"
 	"github.com/ankoehn/burrow/internal/store"
-	"github.com/ankoehn/burrow/internal/webauthn"
 	"github.com/ankoehn/burrow/internal/webhook"
 )
 
@@ -63,7 +62,6 @@ type v04Stack struct {
 	RouteRouter       *route.Router
 	MeterSink         *aimeter.SQLSink
 	Metrics           *metrics.Recorder
-	WebAuthn          *webauthn.Provider
 	GeoLookup         proxy.GeoLookup
 	MCPServer         *mcpserv.Server
 	AIChain           *aigw.Chain
@@ -74,7 +72,7 @@ type v04Stack struct {
 //
 //	audit → aimeter.SQLSink → cost → quota →
 //	  cache → redact → guardrails → route → inspector →
-//	  webhook dispatcher → aigw.Chain → webauthn → mcp server
+//	  webhook dispatcher → aigw.Chain → mcp server
 //
 // The returned stack carries non-nil pointers for every dependency that
 // could be constructed from the supplied config + database; transient
@@ -175,22 +173,6 @@ func buildV04Stack(
 	// --- metrics recorder --------------------------------------------------
 	metricsRec := metrics.New()
 
-	// --- webauthn provider -------------------------------------------------
-	webauthnProvider, err := webauthn.New(
-		wrapped,
-		st,
-		cfg.WebAuthnRPID,
-		cfg.WebAuthnRPName,
-		cfg.WebAuthnOrigin,
-		log,
-	)
-	if err != nil {
-		// WebAuthn misconfiguration MUST NOT kill the server — log and run
-		// without it. The api routes degrade to 503 in that case.
-		log.Warn("v0.4 webauthn provider init failed; passkey login disabled", "err", err)
-		webauthnProvider = nil
-	}
-
 	// --- geo lookup (default build = noop; geo build tag = real MMDB) ------
 	geoLookup, err := proxy.OpenGeoDB(cfg.GeoDBPath)
 	if err != nil {
@@ -224,7 +206,6 @@ func buildV04Stack(
 		RouteRouter:       routeRouter,
 		MeterSink:         meterSink,
 		Metrics:           metricsRec,
-		WebAuthn:          webauthnProvider,
 		GeoLookup:         geoLookup,
 		MCPServer:         mcpServer,
 		AIChain:           aiChain,
@@ -399,18 +380,6 @@ func (a cacheServiceLookupAdapter) GetServiceAIConfig(_ context.Context, _ strin
 func (a cacheServiceLookupAdapter) ListAllServiceAIConfigs(_ context.Context) ([]api.CacheServiceConfigRow, error) {
 	// See GetServiceAIConfig — empty list for now.
 	return nil, nil
-}
-
-// webauthnProviderOrNil returns p as an api.WebAuthnProvider when p is
-// non-nil, otherwise nil (the api routes degrade to 503 when this is nil).
-// The helper exists because Go's interface-typed nil semantics make a
-// direct assignment of a typed-nil pointer to an interface field non-nil,
-// which would silently break the 503 fallback.
-func webauthnProviderOrNil(p *webauthn.Provider) api.WebAuthnProvider {
-	if p == nil {
-		return nil
-	}
-	return p
 }
 
 // mcpTunnelAdapter narrows *server.Server's ListUserTunnels to the

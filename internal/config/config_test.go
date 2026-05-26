@@ -539,8 +539,8 @@ func TestHTTPProxyTLSCertKeyFile(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Task 24 (v0.4.0): MCP listener, geo db, pricing override, WebAuthn RP,
-// backup dir, MCP token — defaults + env + _FILE + validation.
+// Task 24 (v0.4.0): MCP listener, geo db, pricing override, backup dir, MCP
+// token — defaults + env + _FILE + validation.
 // ---------------------------------------------------------------------------
 
 // TestV04DefaultsAllNewFields asserts every new v0.4.0 ServerConfig field
@@ -550,9 +550,6 @@ func TestHTTPProxyTLSCertKeyFile(t *testing.T) {
 //   MCPListen        ""     (MCP listener disabled)
 //   GeoDBPath        ""     (NoopGeoLookup)
 //   PricingPath      ""     (embedded pricing.yaml)
-//   WebAuthnRPID     "localhost"        (derived from default http_listen :8080)
-//   WebAuthnRPName   "Burrow"
-//   WebAuthnOrigin   "http://localhost:8080"
 //   BackupDir        "./burrow.db.backups"  (derived from default DatabasePath)
 //   BurrowMCPToken   ""     (empty; falls back to automation_tokens lookup)
 func TestV04DefaultsAllNewFields(t *testing.T) {
@@ -568,15 +565,6 @@ func TestV04DefaultsAllNewFields(t *testing.T) {
 	}
 	if c.PricingPath != "" {
 		t.Errorf("default pricing_path = %q, want \"\"", c.PricingPath)
-	}
-	if c.WebAuthnRPID != "localhost" {
-		t.Errorf("default webauthn_rp_id = %q, want \"localhost\" (derived from :8080)", c.WebAuthnRPID)
-	}
-	if c.WebAuthnRPName != "Burrow" {
-		t.Errorf("default webauthn_rp_name = %q, want \"Burrow\"", c.WebAuthnRPName)
-	}
-	if c.WebAuthnOrigin != "http://localhost:8080" {
-		t.Errorf("default webauthn_origin = %q, want \"http://localhost:8080\"", c.WebAuthnOrigin)
 	}
 	if c.BackupDir != "./burrow.db.backups" {
 		t.Errorf("default backup_dir = %q, want \"./burrow.db.backups\"", c.BackupDir)
@@ -619,125 +607,6 @@ func TestPricingPathEnvOverride(t *testing.T) {
 	}
 	if c.PricingPath != "/etc/burrow/pricing.yaml" {
 		t.Fatalf("pricing_path = %q, want /etc/burrow/pricing.yaml", c.PricingPath)
-	}
-}
-
-// TestWebAuthnRPIDEnvOverride asserts BURROW_WEBAUTHN_RP_ID takes effect
-// and that the explicit env value bypasses the derivation rule.
-func TestWebAuthnRPIDEnvOverride(t *testing.T) {
-	t.Setenv("BURROW_WEBAUTHN_RP_ID", "dash.example.com")
-	c, err := LoadServer(nil)
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if c.WebAuthnRPID != "dash.example.com" {
-		t.Fatalf("webauthn_rp_id = %q, want dash.example.com", c.WebAuthnRPID)
-	}
-}
-
-// TestWebAuthnRPNameEnvOverride asserts BURROW_WEBAUTHN_RP_NAME takes effect.
-func TestWebAuthnRPNameEnvOverride(t *testing.T) {
-	t.Setenv("BURROW_WEBAUTHN_RP_NAME", "Acme Tunnels")
-	c, err := LoadServer(nil)
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if c.WebAuthnRPName != "Acme Tunnels" {
-		t.Fatalf("webauthn_rp_name = %q, want Acme Tunnels", c.WebAuthnRPName)
-	}
-}
-
-// TestWebAuthnOriginEnvOverride asserts BURROW_WEBAUTHN_ORIGIN takes effect.
-func TestWebAuthnOriginEnvOverride(t *testing.T) {
-	t.Setenv("BURROW_WEBAUTHN_ORIGIN", "https://dash.example.com")
-	c, err := LoadServer(nil)
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if c.WebAuthnOrigin != "https://dash.example.com" {
-		t.Fatalf("webauthn_origin = %q, want https://dash.example.com", c.WebAuthnOrigin)
-	}
-}
-
-// TestWebAuthnDerivationFromAuthDomain asserts that when auth_domain is set
-// and neither rp_id nor origin is explicitly provided, both derive from
-// auth_domain (rp_id := auth_domain, origin := https://auth_domain).
-func TestWebAuthnDerivationFromAuthDomain(t *testing.T) {
-	t.Setenv("BURROW_AUTH_DOMAIN", "tunnels.example.com")
-	c, err := LoadServer(nil)
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if c.WebAuthnRPID != "tunnels.example.com" {
-		t.Fatalf("webauthn_rp_id derived = %q, want tunnels.example.com", c.WebAuthnRPID)
-	}
-	if c.WebAuthnOrigin != "https://tunnels.example.com" {
-		t.Fatalf("webauthn_origin derived = %q, want https://tunnels.example.com", c.WebAuthnOrigin)
-	}
-}
-
-// TestWebAuthnDerivationFromHTTPListen asserts that without auth_domain, the
-// rp_id and origin derive from http_listen (host:port).
-func TestWebAuthnDerivationFromHTTPListen(t *testing.T) {
-	t.Setenv("BURROW_HTTP_LISTEN", "127.0.0.1:9090")
-	c, err := LoadServer(nil)
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if c.WebAuthnRPID != "127.0.0.1" {
-		t.Fatalf("webauthn_rp_id derived = %q, want 127.0.0.1", c.WebAuthnRPID)
-	}
-	if c.WebAuthnOrigin != "http://127.0.0.1:9090" {
-		t.Fatalf("webauthn_origin derived = %q, want http://127.0.0.1:9090", c.WebAuthnOrigin)
-	}
-}
-
-// TestWebAuthnRPIDRejectsScheme asserts that webauthn_rp_id with "://"
-// (operator misconfiguration) fails validation. The WebAuthn spec requires
-// a bare hostname for RP ID.
-func TestWebAuthnRPIDRejectsScheme(t *testing.T) {
-	_, err := LoadServer(map[string]any{"webauthn_rp_id": "https://foo.example.com"})
-	if err == nil {
-		t.Fatal("expected error for webauthn_rp_id with scheme, got nil")
-	}
-	if !strings.Contains(err.Error(), "scheme") && !strings.Contains(err.Error(), "://") {
-		t.Fatalf("error should mention scheme or ://, got: %v", err)
-	}
-}
-
-// TestWebAuthnOriginRequiresScheme asserts that webauthn_origin without an
-// http(s):// prefix fails validation.
-func TestWebAuthnOriginRequiresScheme(t *testing.T) {
-	_, err := LoadServer(map[string]any{"webauthn_origin": "example.com"})
-	if err == nil {
-		t.Fatal("expected error for webauthn_origin without scheme, got nil")
-	}
-	if !strings.Contains(err.Error(), "webauthn_origin") {
-		t.Fatalf("error should mention webauthn_origin, got: %v", err)
-	}
-}
-
-// TestWebAuthnOriginRejectsTrailingSlash asserts that webauthn_origin with a
-// trailing slash fails validation.
-func TestWebAuthnOriginRejectsTrailingSlash(t *testing.T) {
-	_, err := LoadServer(map[string]any{"webauthn_origin": "https://example.com/"})
-	if err == nil {
-		t.Fatal("expected error for webauthn_origin with trailing slash, got nil")
-	}
-	if !strings.Contains(err.Error(), "webauthn_origin") {
-		t.Fatalf("error should mention webauthn_origin, got: %v", err)
-	}
-}
-
-// TestWebAuthnOriginRejectsPath asserts that webauthn_origin with a path
-// component fails validation.
-func TestWebAuthnOriginRejectsPath(t *testing.T) {
-	_, err := LoadServer(map[string]any{"webauthn_origin": "https://example.com/login"})
-	if err == nil {
-		t.Fatal("expected error for webauthn_origin with path, got nil")
-	}
-	if !strings.Contains(err.Error(), "webauthn_origin") {
-		t.Fatalf("error should mention webauthn_origin, got: %v", err)
 	}
 }
 

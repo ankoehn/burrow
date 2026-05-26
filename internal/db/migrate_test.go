@@ -108,8 +108,6 @@ func TestMigrate0004Through0010Schema(t *testing.T) {
 		{`UPDATE roles SET builtin=1 WHERE name='admin'`, ""}, // 0005: column exists
 		{`INSERT INTO audit_events(id,ts,actor_id,action,result,prev_hash,hash)
 			VALUES('a1',CURRENT_TIMESTAMP,'u','x','ok','0','f')`, ""},
-		{`INSERT INTO webauthn_credentials(id,user_id,label,public_key,sign_count,created_at)
-			VALUES('w1','u1','laptop',x'00',0,CURRENT_TIMESTAMP)`, ""},
 		{`INSERT INTO webhooks(id,name,url,secret_hash,events,paused,created_at)
 			VALUES('h1','dev','https://x','abc','["x"]',0,CURRENT_TIMESTAMP)`, ""},
 		{`INSERT INTO webhook_deliveries(id,webhook_id,event,ts,status_code,attempt,latency_ms)
@@ -153,15 +151,9 @@ func TestMigrate0004Through0010Schema(t *testing.T) {
 		t.Fatalf("service_ai_config not cascaded: %d", n)
 	}
 
-	// cascade probe: deleting user cascades webauthn_credentials + automation_tokens.
+	// cascade probe: deleting user cascades automation_tokens.
 	if _, err := d.ExecContext(ctx, `DELETE FROM users WHERE id='u1'`); err != nil {
 		t.Fatal(err)
-	}
-	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM webauthn_credentials`).Scan(&n); err != nil {
-		t.Fatalf("count webauthn_credentials: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("webauthn_credentials not cascaded: %d", n)
 	}
 	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM automation_tokens`).Scan(&n); err != nil {
 		t.Fatalf("count automation_tokens: %v", err)
@@ -243,12 +235,12 @@ func TestMigrateDriverFilter(t *testing.T) {
 		}
 	}
 
-	// Expect exactly 19 SQLite files and 19 Postgres files.
-	if len(sqliteFiles) != 19 {
-		t.Errorf("want 19 sqlite migration files, got %d: %v", len(sqliteFiles), sqliteFiles)
+	// Expect exactly 18 SQLite files and 18 Postgres files.
+	if len(sqliteFiles) != 18 {
+		t.Errorf("want 18 sqlite migration files, got %d: %v", len(sqliteFiles), sqliteFiles)
 	}
-	if len(postgresFiles) != 19 {
-		t.Errorf("want 19 postgres migration files, got %d: %v", len(postgresFiles), postgresFiles)
+	if len(postgresFiles) != 18 {
+		t.Errorf("want 18 postgres migration files, got %d: %v", len(postgresFiles), postgresFiles)
 	}
 
 	// Each SQLite file must have a matching postgres twin.

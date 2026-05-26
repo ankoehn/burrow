@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb, type CacheSettingsPayload } from "@/mocks/db";
-import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, WebAuthnCredential, CustomDomain, CreateCustomDomainInput, RetentionSettings } from "@/lib/contract";
+import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, CustomDomain, CreateCustomDomainInput, RetentionSettings } from "@/lib/contract";
 
 const VALID_PROVIDERS = new Set<string>(["ollama", "vllm", "openai-compat", "openai", "anthropic", "other"]);
 
@@ -736,49 +736,6 @@ export const handlers = [
     const size_bytes = new TextEncoder().encode(rendered).length;
     return json({ rendered, size_bytes });
   }),
-
-  // ---- v0.4.0 WebAuthn / passkeys (spec Part K) ----
-  // begin returns canned PublicKeyCredentialCreation/RequestOptions JSON; the
-  // browser-side helpers decode the base64url challenge.
-  http.post("/api/v1/auth/webauthn/register/begin", ({ request }) =>
-    gate(request) ?? json({
-      publicKey: {
-        rp: { id: "burrow.local", name: "Burrow" },
-        user: { id: "dXNlcjE", name: db.me.email, displayName: db.me.email },
-        challenge: "Y2hhbGxlbmdl",
-        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-        timeout: 60_000,
-      },
-    })),
-  http.post("/api/v1/auth/webauthn/register/finish", async ({ request }) => {
-    const g = gate(request); if (g) return g;
-    const cred: WebAuthnCredential = {
-      id: `wc_${Math.random().toString(36).slice(2, 8)}`,
-      label: "New passkey",
-      created_at: new Date().toISOString(),
-      last_used: null,
-    };
-    db.webauthnCredentials.push(cred);
-    return noContent();
-  }),
-  http.get("/api/v1/auth/webauthn/credentials", ({ request }) =>
-    gate(request) ?? json(db.webauthnCredentials)),
-  http.delete("/api/v1/auth/webauthn/credentials/:id", ({ request, params }) => {
-    const g = gate(request); if (g) return g;
-    const i = db.webauthnCredentials.findIndex((c) => c.id === params.id);
-    if (i < 0) return err(404, "credential not found");
-    db.webauthnCredentials.splice(i, 1);
-    return noContent();
-  }),
-  http.post("/api/v1/auth/webauthn/login/begin", () =>
-    json({
-      publicKey: {
-        challenge: "Y2hhbGxlbmdl",
-        rpId: "burrow.local",
-        timeout: 60_000,
-      },
-    })),
-  http.post("/api/v1/auth/webauthn/login/finish", () => noContent()),
 
   // ---- v0.4.0 provisioning keys (§4.28 — pulled forward) ----
   http.get("/api/v1/provisioning/keys", ({ request }) =>

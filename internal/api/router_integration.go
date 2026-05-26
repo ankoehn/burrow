@@ -69,7 +69,6 @@ func testResetHandler(d Deps) http.HandlerFunc {
 			"budget_alerts",
 			"budgets",
 			"cost_pricing",
-			"webauthn_credentials",
 			"automation_tokens",
 			"client_tokens",
 			"sessions",
