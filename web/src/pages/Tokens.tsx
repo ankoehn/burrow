@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp, formatRelativeTime } from "@/lib/format";
-import { Button, Input, Dialog } from "@/components/ds";
+import { Button, FormField, FormFieldGroup, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -26,7 +26,7 @@ export default function Tokens() {
     onError: () => toast.error("Failed to revoke token"),
   });
   return (
-    <div className="tokens-page form-narrow" style={{ position: "relative" }}>
+    <div className="tokens-page" style={{ position: "relative" }}>
       <div className="page-head">
         <div>
           <h1>Client tokens</h1>
@@ -37,11 +37,14 @@ export default function Tokens() {
         className="tokens-form"
         onSubmit={(e) => { e.preventDefault(); if (name) create.mutate(); }}
       >
-        <div className="field">
-          <label htmlFor="token-name">Token name</label>
-          <Input id="token-name" placeholder="e.g. laptop" value={name} onChange={(e) => setName(e.target.value)} />
+        <FormFieldGroup>
+          <FormField label="Token name" htmlFor="token-name" w="md">
+            <Input id="token-name" placeholder="e.g. laptop" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+        </FormFieldGroup>
+        <div style={{ marginTop: "var(--space-md)" }}>
+          <Button type="submit" variant="primary" disabled={!name || create.isPending}>Create</Button>
         </div>
-        <Button type="submit" variant="primary" disabled={!name || create.isPending}>Create</Button>
       </form>
 
       <div className="table-wrap">
