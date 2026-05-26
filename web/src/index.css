@@ -1554,3 +1554,159 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
   gap: 16px;
   flex-wrap: wrap;
 }
+
+/* ──────────────────────────────────────────────────────────────
+   DS stabilization (2026-05-26): shared spacing + input-width
+   tokens consumed by FormField, FormFieldGroup, MetricStrip,
+   PageHeader, and AccessModeCard. Existing --ring color token
+   (defined at :root + .dark) is reused for focus outlines.
+   ────────────────────────────────────────────────────────────── */
+:root {
+  --space-2xs: 2px;
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  12px;
+  --space-lg:  16px;
+  --space-xl:  24px;
+
+  --input-w-sm:   200px;
+  --input-w-md:   360px;
+  --input-w-lg:   560px;
+}
+
+/* MetricStrip — responsive grid of stat tiles. Referenced from
+   CostBudgets / AiEndpoints / AiEndpointDetail since v0.4 but the
+   class rule was never authored, so tiles fell back to block layout
+   (vertical stack). minmax(180px, 1fr) wraps gracefully below ~750px. */
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-md);
+  margin-block: var(--space-md) var(--space-lg);
+}
+
+/* MetricTile — one stat cell inside a MetricStrip. Subtle bordered
+   card so tiles read as a row of equally-weighted metrics, not raw
+   text. Padding follows the spacing scale. */
+.metric-tile {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+.metric-tile .label {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.metric-tile .value {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 500;
+}
+.metric-tile .sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* PageHeader — replaces 22+ hand-rolled .page-head blocks. Single
+   source of truth for title/subtitle/actions row. */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-block-end: var(--space-lg);
+}
+.page-header .left { flex: 1; min-width: 0; }
+.page-header .left h1 { margin: 0; }
+.page-header .left p {
+  color: var(--muted-foreground);
+  margin: var(--space-xs) 0 0;
+}
+.page-header .actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* FormField + FormFieldGroup — consistent vertical rhythm for form
+   inputs in both pages and dialogs (cures the modal-density complaint:
+   Create-service, Add-budget, Add-webhook, Create-user, Configure-access
+   all shared the "labels flush against the field above" problem). */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.form-field > label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.form-field > .help {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.form-field > .error {
+  font-size: 12px;
+  color: var(--destructive);
+}
+.form-field.w-sm   .input,
+.form-field.w-sm   .select-trigger { max-width: var(--input-w-sm); }
+.form-field.w-md   .input,
+.form-field.w-md   .select-trigger { max-width: var(--input-w-md); }
+.form-field.w-lg   .input,
+.form-field.w-lg   .select-trigger { max-width: var(--input-w-lg); }
+.form-field.w-full .input,
+.form-field.w-full .select-trigger { max-width: none; }
+
+.form-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* AccessModeCard — selectable bar/card used in Tunnels Configure,
+   Services Configure, and Service detail Access tab. Today these
+   are open-coded with the same markup three times — merging them
+   caps the card width and lets us add the missing alignment fix in
+   one place. */
+.access-mode-card {
+  display: block;
+  width: 100%;
+  max-width: var(--input-w-lg);
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  cursor: pointer;
+  transition: border-color var(--t-micro), background var(--t-micro);
+}
+.access-mode-card[aria-checked="true"] {
+  border-color: var(--ring);
+  background: color-mix(in oklch, var(--primary) 5%, transparent);
+}
+.dark .access-mode-card[aria-checked="true"] {
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+.access-mode-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.access-mode-card .title {
+  font-weight: 500;
+  margin: 0 0 var(--space-2xs);
+}
+.access-mode-card .desc {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin: 0;
+}
