@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useState, type Ref } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input } from "@/components/ds";
+import { Button, FormFieldGroup, Input } from "@/components/ds";
 import { ACCESS_MODES, type AccessMode } from "@/lib/contract";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { AccessPolicyEditor } from "@/components/AccessPolicyEditor";
@@ -99,69 +99,71 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelR
 
   return (
     <div className="access-panel">
-      <div role="radiogroup" aria-label="Access mode" className="mode-list">
-        {ACCESS_MODES.map((m) => {
-          const meta = META[m];
-          return (
-            <div
-              key={m}
-              role="radio"
-              aria-label={meta.title}
-              aria-checked={selected === m}
-              tabIndex={0}
-              className="mode-card"
-              onClick={() => setSelected(m)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
-            >
-              <strong>{meta.title}</strong>
-              <p className="muted">{meta.help}</p>
+      <FormFieldGroup>
+        <div role="radiogroup" aria-label="Access mode" className="mode-list">
+          {ACCESS_MODES.map((m) => {
+            const meta = META[m];
+            return (
+              <div
+                key={m}
+                role="radio"
+                aria-label={meta.title}
+                aria-checked={selected === m}
+                tabIndex={0}
+                className="mode-card"
+                onClick={() => setSelected(m)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
+              >
+                <strong>{meta.title}</strong>
+                <p className="muted">{meta.help}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {selected === "api_key" && (
+          <div className="mode-detail">
+            <div className="field">
+              <label htmlFor={`api-key-header-${serviceId}`}>API key header</label>
+              <Input
+                id={`api-key-header-${serviceId}`}
+                className="mono"
+                value={apiKeyHeader}
+                onChange={(e) => setApiKeyHeader(e.target.value)}
+              />
             </div>
-          );
-        })}
-      </div>
-
-      {selected === "api_key" && (
-        <div className="mode-detail">
-          <div className="field">
-            <label htmlFor={`api-key-header-${serviceId}`}>API key header</label>
-            <Input
-              id={`api-key-header-${serviceId}`}
-              className="mono"
-              value={apiKeyHeader}
-              onChange={(e) => setApiKeyHeader(e.target.value)}
-            />
+            <ApiKeysPanel serviceId={serviceId} />
           </div>
-          <ApiKeysPanel serviceId={serviceId} />
-        </div>
-      )}
+        )}
 
-      {selected === "burrow_login" && (
-        <div className="mode-detail">
-          <AccessPolicyEditor serviceId={serviceId} />
-        </div>
-      )}
+        {selected === "burrow_login" && (
+          <div className="mode-detail">
+            <AccessPolicyEditor serviceId={serviceId} />
+          </div>
+        )}
 
-      {selected === "mtls" && (
-        <div className="mode-detail">
-          <MtlsPanel value={caPem} onChange={setCaPem} />
-        </div>
-      )}
+        {selected === "mtls" && (
+          <div className="mode-detail">
+            <MtlsPanel value={caPem} onChange={setCaPem} />
+          </div>
+        )}
 
-      {err && <p role="alert" className="notice-inline">{err}</p>}
+        {err && <p role="alert" className="notice-inline">{err}</p>}
 
-      {/* P1-7: hide the inline button when the panel is hosted inside a
-          Dialog. The dialog footer carries Cancel + Save changes instead.
-          Pages that embed the panel inline (ClientDetail, ServiceDetail
-          access tab) still rely on the inline button. */}
-      {!panelRef && (
-        <div className="actions">
-          <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
-      )}
+        {/* P1-7: hide the inline button when the panel is hosted inside a
+            Dialog. The dialog footer carries Cancel + Save changes instead.
+            Pages that embed the panel inline (ClientDetail, ServiceDetail
+            access tab) still rely on the inline button. */}
+        {!panelRef && (
+          <div className="actions">
+            <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        )}
 
-      <IPGeoPanel serviceId={serviceId} />
+        <IPGeoPanel serviceId={serviceId} />
+      </FormFieldGroup>
       <Toaster />
     </div>
   );
