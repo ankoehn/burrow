@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Sparkles } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Badge, Button, DropdownMenu, ErrorNotice, MetricStrip, MetricTile, PageHeader, SkeletonRows } from "@/components/ds";
+import { Badge, Button, DropdownMenu, EmptyState, ErrorNotice, MetricStrip, MetricTile, PageHeader, SkeletonRows } from "@/components/ds";
 import type { AiEndpoint, CostSummary } from "@/lib/contract";
 
 function fmtInt(n: number): string {
@@ -70,12 +70,12 @@ export default function AiEndpoints() {
     return (
       <div className="ai-endpoints-page">
         <PageHeader title="AI endpoints" />
-        <div className="state-card">
-          <p>
-            The AI gateway isn&apos;t available on this relay. Ask your operator to
-            enable it, or run a build that includes the AI gateway.
-          </p>
-        </div>
+        <EmptyState
+          icon={<Sparkles size={18} />}
+          title="AI gateway isn't available on this relay"
+        >
+          Ask your operator to enable it, or run a build that includes the AI gateway.
+        </EmptyState>
       </div>
     );
   }
