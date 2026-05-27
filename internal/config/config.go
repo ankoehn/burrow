@@ -144,6 +144,17 @@ type ServerConfig struct {
 	// trigger rate-limit responses with fewer attempts.
 	// Env: BURROW_LOGIN_RATE_LIMIT_PER_IP.
 	LoginRateLimitPerIP int `koanf:"login_rate_limit_per_ip"`
+
+	// CertValidationRootsFile, when non-empty, is the path to a PEM file
+	// containing one or more CA certificates to use as the trust roots when
+	// validating custom-domain TLS certificates submitted via the API
+	// (POST /admin/custom-domains/*/cert). Empty (the default) means the
+	// system root pool is used. This field is intended for e2e / staging
+	// environments that use a private CA not trusted by the OS store.
+	// Env: BURROW_CERT_VALIDATION_ROOTS_FILE (also _FILE variant — the _FILE
+	// form reads a file CONTAINING the path, consistent with the generic
+	// _FILE pattern; however in the common case the env var IS the path).
+	CertValidationRootsFile string `koanf:"cert_validation_roots_file"`
 }
 
 // ClientConfig configures burrow.
@@ -355,6 +366,8 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"database_url": "", "experimental_postgres_backend": false,
 		// login_rate_limit_per_ip: 0 means use api.LoginRateLimitPerIP constant.
 		"login_rate_limit_per_ip": 0,
+		// cert_validation_roots_file: empty = use system root pool.
+		"cert_validation_roots_file": "",
 	}, "."), nil)
 	_ = k.Load(burrowEnvProvider(), nil)
 	if err := applyFileSecrets(k); err != nil {

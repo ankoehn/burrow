@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -398,6 +399,29 @@ func main() {
 			}
 			restoreTracker := api.NewRestoreTracker()
 
+			// BURROW_CERT_VALIDATION_ROOTS_FILE: load a custom CA pool for
+			// custom-domain cert-chain validation. Fail-soft: a missing or
+			// unparseable file is logged as a warning and the system root
+			// pool is used instead (nil CertValidationRoots in api.Deps).
+			var certValidationRoots *x509.CertPool
+			if cfg.CertValidationRootsFile != "" {
+				pemBytes, readErr := os.ReadFile(cfg.CertValidationRootsFile)
+				if readErr != nil {
+					log.Warn("BURROW_CERT_VALIDATION_ROOTS_FILE: cannot read file; using system roots",
+						"file", cfg.CertValidationRootsFile, "err", readErr)
+				} else {
+					pool := x509.NewCertPool()
+					if !pool.AppendCertsFromPEM(pemBytes) {
+						log.Warn("BURROW_CERT_VALIDATION_ROOTS_FILE: no valid PEM certificates found; using system roots",
+							"file", cfg.CertValidationRootsFile)
+					} else {
+						certValidationRoots = pool
+						log.Info("BURROW_CERT_VALIDATION_ROOTS_FILE: custom CA pool loaded",
+							"file", cfg.CertValidationRootsFile)
+					}
+				}
+			}
+
 			// v0.4.0 Task 25: compose every Task 3–23 engine into a single
 			// stack. The constructor honours cfg.PricingPath, auto-generates
 			// the audit signing key on first boot, and ships a no-op geo
@@ -547,6 +571,7 @@ func main() {
 					CredentialServices: db.Wrap(database),
 					CustomDomains:      db.Wrap(database),
 					CustomDomainCache:  v05.CustomDomainStore,
+					CertValidationRoots: certValidationRoots,
 					ConnLogDB:          v05.ConnLogDB,
 				}),
 				ReadHeaderTimeout: 10 * time.Second,
