@@ -69,12 +69,10 @@ describe("AI endpoints page (§4.19)", () => {
   it("renders the verbatim empty state when there are no AI endpoints", async () => {
     db.services = db.services.filter((s) => s.access_mode !== "api_key");
     mount();
+    expect(await screen.findByRole("heading", { name: "No AI endpoints yet" })).toBeInTheDocument();
     expect(
       await screen.findByText(
-        (_, el) =>
-          el?.tagName === "P" &&
-          el.textContent ===
-            "No AI endpoints yet. Create a service with API-key access mode and OpenAI-compatible upstream.",
+        "Create a service with API-key access mode and OpenAI-compatible upstream.",
       ),
     ).toBeInTheDocument();
   });

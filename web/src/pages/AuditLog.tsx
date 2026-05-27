@@ -94,7 +94,7 @@ export default function AuditLog() {
         </p>
       )}
 
-      <div className="row gap-2" style={{ margin: "12px 0" }}>
+      <div className="toolbar-row">
         <Input
           type="search"
           role="searchbox"

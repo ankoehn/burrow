@@ -121,12 +121,12 @@ export default function AiEndpoints() {
           <SkeletonRows n={3} />
         </div>
       ) : list.length === 0 ? (
-        <div className="state-card">
-          <p>
-            No AI endpoints yet. Create a service with API-key access mode and
-            OpenAI-compatible upstream.
-          </p>
-        </div>
+        <EmptyState
+          icon={<Sparkles size={18} />}
+          title="No AI endpoints yet"
+        >
+          Create a service with API-key access mode and OpenAI-compatible upstream.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="data" aria-label="AI endpoints">

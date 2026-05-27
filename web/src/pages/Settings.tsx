@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Input, Select, FormField, FormFieldGroup, PageHeader } from "@/components/ds";
+import { Button, Checkbox, Input, Select, FormField, FormFieldGroup, PageHeader } from "@/components/ds";
 import type { SettingsMap } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -94,22 +94,16 @@ export default function Settings() {
       {/* ---- v0.5.2 Privacy section (Q12 toggle for connection-log top-source-IPs) ---- */}
       <section className="account-section" aria-labelledby="sec-privacy">
         <div className="section-head"><div className="left"><h2 id="sec-privacy">Privacy</h2></div></div>
-        <div className="field">
-          <label
-            htmlFor="rollup-include-top-ips"
-            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-          >
-            <input
+        <div className="form-field">
+          <label htmlFor="rollup-include-top-ips" className="checkbox-row">
+            <Checkbox
               id="rollup-include-top-ips"
-              type="checkbox"
-              aria-label="Include top source IPs in daily connection-log rollups"
               checked={topIPsEnabled}
-              disabled={togglePrivacy.isPending}
-              onChange={(e) => togglePrivacy.mutate(e.target.checked)}
+              onChange={(v) => { if (!togglePrivacy.isPending) togglePrivacy.mutate(v); }}
             />
             <span>Include top source IPs in daily connection-log rollups</span>
           </label>
-          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+          <p className="help">
             When enabled, the daily rollup includes the top 10 source IPs per
             service. Turn off for stricter privacy. Default-on.
           </p>
@@ -145,7 +139,7 @@ export default function Settings() {
           </div>
         </form>
 
-        <div className="section-head" style={{ marginTop: 16 }}><div className="left"><h2>Test connection</h2></div></div>
+        <div className="section-head" style={{ marginTop: "var(--space-xl)" }}><div className="left"><h2>Test connection</h2></div></div>
         {!showTest ? (
           <Button variant="secondary" size="sm" onClick={() => setShowTest(true)}>Send test email</Button>
         ) : (

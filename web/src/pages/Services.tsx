@@ -120,7 +120,7 @@ export default function Services() {
         </div>
       ) : (
         <>
-          <div className="row gap-2" style={{ margin: "8px 0" }}>
+          <div className="toolbar-row">
             <Input
               type="search"
               aria-label="Filter services"

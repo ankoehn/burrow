@@ -38,7 +38,7 @@ export default function Tokens() {
             <Input id="token-name" placeholder="e.g. laptop" value={name} onChange={(e) => setName(e.target.value)} />
           </FormField>
         </FormFieldGroup>
-        <div style={{ marginTop: "var(--space-md)" }}>
+        <div className="actions">
           <Button type="submit" variant="primary" disabled={!name || create.isPending}>Create</Button>
         </div>
       </form>

@@ -34,7 +34,7 @@ function Accordion({ id, title, subtitle, children, defaultOpen = false }: {
         <span>{title}</span>
         {/* P2-8 — subtitle gives an at-a-glance hint of "configured vs not"
             without forcing the user to expand each section. */}
-        {subtitle && <span className="muted small" style={{ marginLeft: 8 }}>· {subtitle}</span>}
+        {subtitle && <span className="muted small">· {subtitle}</span>}
       </button>
       {open && (
         <div id={`${id}-body`} role="region" className="accordion-body">

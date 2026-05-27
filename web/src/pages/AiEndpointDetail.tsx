@@ -362,15 +362,13 @@ export default function AiEndpointDetail() {
             />
           </div>
           {routing.strategy === "multi_provider" && (
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <p
-                data-testid="multi-provider-banner"
-                className="muted"
-                style={{ margin: 0, padding: "0.5rem 0.75rem", border: "1px solid var(--border, #e5e7eb)", borderRadius: 6, fontSize: "0.875rem" }}
-              >
-                Cross-provider failover is allowed only when <code>Idempotency-Key</code> is set and zero bytes have streamed. See routing docs.
-              </p>
-            </div>
+            <p
+              data-testid="multi-provider-banner"
+              className="notice-inline info"
+              style={{ gridColumn: "1 / -1" }}
+            >
+              Cross-provider failover is allowed only when <code>Idempotency-Key</code> is set and zero bytes have streamed. See routing docs.
+            </p>
           )}
           <div className="field">
             <label className="row gap-2" htmlFor={`${headingId}-sticky`}>
@@ -383,18 +381,17 @@ export default function AiEndpointDetail() {
               <span>Sticky session</span>
             </label>
           </div>
-          <div className="field">
-            <label htmlFor={`${headingId}-fpct`}>Circuit-breaker failure %</label>
-            <input
+          <FormField label="Circuit-breaker failure %" htmlFor={`${headingId}-fpct`} w="sm">
+            <Input
               id={`${headingId}-fpct`}
               type="number"
-              className="input mono"
+              className="mono"
               min={0}
               max={100}
               value={routing.circuit_breaker.failure_pct}
               onChange={(e) => setCircuitBreaker({ failure_pct: Number(e.target.value) })}
             />
-          </div>
+          </FormField>
         </div>
         <div className="actions">
           <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>

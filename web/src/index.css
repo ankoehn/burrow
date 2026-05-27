@@ -1896,3 +1896,116 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
 .inspector-search .input {
   max-width: var(--input-w-md);
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Utility classes — used throughout pages but previously missing
+   from the stylesheet. Grouped here so they're easy to find.
+   ────────────────────────────────────────────────────────────── */
+
+/* .small — de-emphasised body text; matches .t-small scale */
+.small { font-size: 12px; }
+
+/* .truncate — single-line text truncation with ellipsis */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* .tag — inline contextual badge (e.g. "YOU", "THIS DEVICE") */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+}
+
+/* .icon-btn — small icon-only button; alias of .btn.btn-icon.btn-sm */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background var(--t-micro), color var(--t-micro);
+  flex-shrink: 0;
+}
+.icon-btn:hover { background: var(--hover); color: var(--foreground); }
+.icon-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.icon-btn:disabled, .icon-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+/* .cmd-block — monospace pre block for CLI command display */
+.cmd-block {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--foreground);
+  margin: 0;
+}
+
+/* .link — inline text styled as a clickable link (button variant) */
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link:hover { text-decoration-thickness: 2px; }
+.link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   .toolbar — shared toolbar row for search/filter above tables.
+   Replaces the repeated  style={{ margin: "12px 0" }}  inline
+   on search rows in Clients, Tunnels, Services, AuditLog, Users.
+   ────────────────────────────────────────────────────────────── */
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-block: var(--space-sm) var(--space-md);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   .account-page .actions — button-cluster row inside account-
+   page forms.  Removes the need for  style={{ marginTop: ... }}
+   on the Change-password submit button, Tokens create button, etc.
+   ────────────────────────────────────────────────────────────── */
+.account-page .actions,
+.tokens-page   .actions,
+.automation-page .actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}

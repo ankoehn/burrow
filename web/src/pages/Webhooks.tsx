@@ -50,12 +50,9 @@ function EventsPicker({
   }
 
   return (
-    <div className="events-picker" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className="form-field-group events-picker">
       {WEBHOOK_EVENTS.map((ev) => (
-        <label
-          key={ev}
-          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.875rem" }}
-        >
+        <label key={ev} className="checkbox-row small">
           <Checkbox
             id={`ev-${ev}`}
             checked={selected.includes(ev)}

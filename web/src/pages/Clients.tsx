@@ -38,7 +38,7 @@ export default function Clients() {
         subtitle="Machines running burrow connected to this relay."
         actions={<Link to="/clients/connect"><Button variant="primary" size="sm">Connect a client</Button></Link>}
       />
-      <div className="row gap-2" style={{ margin: "12px 0" }}>
+      <div className="toolbar-row">
         <Input type="search" role="searchbox" aria-label="Search clients" placeholder="search by client or token…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {isLoading ? (

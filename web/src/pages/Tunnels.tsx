@@ -121,7 +121,7 @@ export default function Tunnels() {
   return (
     <div className="tunnels-page" style={{ position: "relative" }}>
       <PageHeader title="Tunnels" />
-      <div className="row gap-2" style={{ margin: "12px 0" }}>
+      <div className="toolbar-row">
         <Input
           type="search"
           aria-label="Filter tunnels"

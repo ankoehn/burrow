@@ -135,7 +135,7 @@ export default function CostBudgets() {
 
       <section className="card">
         <h2>Budgets</h2>
-        <div className="row gap-2" style={{ marginBottom: 8 }}>
+        <div className="toolbar-row">
           <Button
             variant="primary"
             size="sm"

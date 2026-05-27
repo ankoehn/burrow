@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, EmptyState, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
+import { Button, Dialog, EmptyState, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import type { AutomationToken, CreatedAutomationToken } from "@/lib/contract";
 
 const EXPIRY_OPTIONS = [
@@ -103,14 +103,14 @@ export default function AutomationTokens() {
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="at-name">Name</label>
-          <Input id="at-name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="at-expiry">Expiry</label>
-          <Select id="at-expiry" value={expiry} onChange={setExpiry} options={EXPIRY_OPTIONS} />
-        </div>
+        <FormFieldGroup>
+          <FormField label="Name" htmlFor="at-name" w="full">
+            <Input id="at-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField label="Expiry" htmlFor="at-expiry" w="md">
+            <Select id="at-expiry" value={expiry} onChange={setExpiry} options={EXPIRY_OPTIONS} />
+          </FormField>
+        </FormFieldGroup>
         <p className="muted">
           The token will inherit your current permissions; the server enforces this too.
         </p>

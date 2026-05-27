@@ -179,7 +179,7 @@ export default function Account() {
           {serverError && (
             <p role="alert" className="field-error">{serverError}</p>
           )}
-          <div className="actions" style={{ marginTop: "var(--space-md)" }}>
+          <div className="actions">
             <Button type="submit" variant="primary" disabled={changePw.isPending}>
               {changePw.isPending ? "Saving…" : "Change password"}
             </Button>

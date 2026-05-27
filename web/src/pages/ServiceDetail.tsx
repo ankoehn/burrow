@@ -60,7 +60,7 @@ export default function ServiceDetail() {
       <PageHeader title={`Service · ${svc.name}`} />
 
       {/* Meta strip */}
-      <div className="meta-strip" style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}>
+      <div className="meta-strip">
         {svc.hostname && (
           <span className="mono" style={{ fontSize: 13 }}>{svc.hostname}</span>
         )}
