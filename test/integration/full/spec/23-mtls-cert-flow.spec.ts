@@ -11,6 +11,7 @@ import * as fs from "node:fs/promises";
 import { AUTH_STORAGE_PATH } from "../fixtures/auth";
 import { HTTPS_INGRESS } from "../fixtures/env";
 import { CLIENT_CERT_PATH, CLIENT_KEY_PATH, CA_CERT_PATH } from "../fixtures/cert";
+import { adminHeaders } from "../fixtures/api";
 
 test.use({ storageState: AUTH_STORAGE_PATH });
 
@@ -18,14 +19,19 @@ test("23-mtls-cert-flow: create service, set mTLS, cert handshake", async ({ pag
   const name = `mtls-spec-${Date.now()}`;
 
   // 1. Create a new HTTP service via the admin API.
+  // POST /api/v1/services expects { service_id, title?, access_mode? }.
+  // The response is { id, created_at }; subdomain is empty until a client
+  // connects — use `name` (the service_id) as the subdomain for routing.
   const createResp = await request.post("/api/v1/services", {
-    data: { name, type: "http", subdomain: name },
+    headers: adminHeaders(),
+    data: { service_id: name, title: name },
   });
   if (createResp.status() === 404) {
     test.skip(true, "POST /services not available in this build");
   }
   expect(createResp.status()).toBe(201);
-  const svc = (await createResp.json()) as { id: string; subdomain: string };
+  const svc = (await createResp.json()) as { id: string };
+  const subdomain = name; // service_id doubles as subdomain in the test stack
 
   // 2. Open the service detail page, switch to mTLS, upload CA.
   await page.goto(`/services/${svc.id}`);
@@ -42,7 +48,7 @@ test("23-mtls-cert-flow: create service, set mTLS, cert handshake", async ({ pag
 
   // 3. The new service has NO live client tunnel, so /healthz on its host
   //    will 502, but the mTLS gate fires FIRST. Without cert → 401.
-  const host = `${svc.subdomain}.test.local:8443`;
+  const host = `${subdomain}.test.local:8443`;
   const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
     headers: { host },
     ignoreHTTPSErrors: true,
@@ -64,5 +70,5 @@ test("23-mtls-cert-flow: create service, set mTLS, cert handshake", async ({ pag
   await certCtx.dispose();
 
   // 5. Cleanup: delete the test service.
-  await request.delete(`/api/v1/services/${svc.id}`);
+  await request.delete(`/api/v1/services/${svc.id}`, { headers: adminHeaders() });
 });
