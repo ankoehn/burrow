@@ -648,6 +648,10 @@ func main() {
 					proxy.WithAIChain(v04.AIChain),
 					proxy.WithConnLogSink(proxyConnLogAdapter{sink: connLogSink}),
 					proxy.WithCustomDomainLookup(customDomainLookup),
+					// Wire the audit logger so the proxy can emit
+					// audit.ActionAIUpstreamError rows on upstream failures
+					// for AI-gateway services (spec 27 / audit log contract).
+					proxy.WithAuditLogger(v04.AuditLogger),
 				}
 				if ingressPort != "" {
 					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))

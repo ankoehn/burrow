@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ankoehn/burrow/internal/audit"
 	"github.com/ankoehn/burrow/pkg/clientip"
 )
 
@@ -110,6 +111,12 @@ type Proxy struct {
 	// Production default: 0 (no timeout). Tests use 2 s via WithProxyIdleTimeout.
 	// The zero value preserves all pre-P2.3 behaviour byte-for-byte.
 	idleTimeout time.Duration
+
+	// auditLogger is the optional audit.Logger used to emit
+	// audit.ActionAIUpstreamError rows when an AI-gateway upstream returns
+	// a 5xx or fails entirely. Nil means audit emission is disabled (tests
+	// and pre-v0.4 builds). Wired via WithAuditLogger in cmd/server/main.go.
+	auditLogger *audit.Logger
 }
 
 // ConnLogSink is the interface the proxy uses to record a per-request
@@ -182,6 +189,14 @@ func WithConnLogSink(sink ConnLogSink) Option {
 // Tests set 2 s so the idle-timeout seam test completes quickly.
 func WithProxyIdleTimeout(d time.Duration) Option {
 	return func(p *Proxy) { p.idleTimeout = d }
+}
+
+// WithAuditLogger registers the audit.Logger used to record
+// audit.ActionAIUpstreamError events when an AI-gateway upstream fails
+// (5xx response or connection error). When nil (the default), no audit
+// row is written — pre-v0.4 builds and tests are unaffected.
+func WithAuditLogger(l *audit.Logger) Option {
+	return func(p *Proxy) { p.auditLogger = l }
 }
 
 // New constructs a Proxy.
@@ -451,6 +466,8 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 				logStatus = StatusClosedIdle
 			} else {
 				logStatus = StatusClosedError
+				// Emit audit row for AI-gateway upstream connection failures.
+				p.emitAIUpstreamErrorAudit(r.Context(), res.ServiceID, res.APIKeyHeader, upstreamHost, http.StatusBadGateway)
 			}
 			if errors.Is(err, ErrNotFound) {
 				p.notFound(w)
@@ -469,6 +486,8 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 		// closed_error and closed_idle are never downgraded (precedence rule).
 		if logStatus == StatusClosedClean && ww.statusCode >= 500 {
 			logStatus = StatusClosedError
+			// Emit audit row for AI-gateway upstream 5xx responses.
+			p.emitAIUpstreamErrorAudit(ctx, res.ServiceID, res.APIKeyHeader, upstreamHost, ww.statusCode)
 		}
 		return
 	}
@@ -476,6 +495,8 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 	// Post-ServeHTTP 5xx promotion (same rule as above).
 	if logStatus == StatusClosedClean && ww.statusCode >= 500 {
 		logStatus = StatusClosedError
+		// Emit audit row for AI-gateway upstream 5xx responses (non-chain path).
+		p.emitAIUpstreamErrorAudit(ctx, res.ServiceID, res.APIKeyHeader, upstreamHost, ww.statusCode)
 	}
 }
 
@@ -617,6 +638,8 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 				logStatus = StatusClosedIdle
 			} else {
 				logStatus = StatusClosedError
+				// Emit audit row for AI-gateway upstream connection failures.
+				p.emitAIUpstreamErrorAudit(r.Context(), res.ServiceID, res.APIKeyHeader, upstreamHost, http.StatusBadGateway)
 			}
 			if errors.Is(err, ErrNotFound) {
 				p.notFound(w)
@@ -641,6 +664,8 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 		// closed_error and closed_idle are never downgraded (precedence rule).
 		if logStatus == StatusClosedClean && ww.statusCode >= 500 {
 			logStatus = StatusClosedError
+			// Emit audit row for AI-gateway upstream 5xx responses.
+			p.emitAIUpstreamErrorAudit(ctx, res.ServiceID, res.APIKeyHeader, upstreamHost, ww.statusCode)
 		}
 		return
 	}
@@ -649,7 +674,37 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 	// Post-ServeHTTP 5xx promotion (same rule as above).
 	if logStatus == StatusClosedClean && ww.statusCode >= 500 {
 		logStatus = StatusClosedError
+		// Emit audit row for AI-gateway upstream 5xx responses (non-chain path).
+		p.emitAIUpstreamErrorAudit(ctx, res.ServiceID, res.APIKeyHeader, upstreamHost, ww.statusCode)
 	}
+}
+
+// emitAIUpstreamErrorAudit writes an audit.ActionAIUpstreamError row when
+// all of the following hold:
+//   - p.auditLogger is non-nil (wired in production via WithAuditLogger),
+//   - serviceID is non-empty (defensive: skip if resolution was incomplete),
+//   - apiKeyHeader is non-empty (indicates an AI-gateway service; plain
+//     tunnels without an API-key header are not AI-gateway traffic).
+//
+// Called from ErrorHandler (connection-level failure → status=502) and from
+// the post-dispatch 5xx promotion path (upstream replied ≥500). The call is
+// non-blocking for the hot path: audit.Logger.Append acquires a short-lived
+// mutex for aggregation checks and then serialises a single DB transaction;
+// the proxy has already written its response to the client before this runs
+// (it is called after rp.ServeHTTP / aiChain.Dispatch returns).
+func (p *Proxy) emitAIUpstreamErrorAudit(ctx context.Context, serviceID, apiKeyHeader, upstream string, statusCode int) {
+	if p.auditLogger == nil || serviceID == "" || apiKeyHeader == "" {
+		return
+	}
+	_ = p.auditLogger.Append(ctx, audit.Event{
+		Action:    audit.ActionAIUpstreamError,
+		SubjectID: serviceID,
+		Result:    "error",
+		Payload: audit.MustJSON(map[string]any{
+			"status":   statusCode,
+			"upstream": upstream,
+		}),
+	})
 }
 
 // notFound writes the canonical 404 for this package: text/plain "tunnel not
