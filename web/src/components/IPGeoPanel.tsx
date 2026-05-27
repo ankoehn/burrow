@@ -21,7 +21,7 @@ export function IPGeoPanel({ serviceId }: { serviceId: string }) {
   const qc = useQueryClient();
   const cfg = useQuery({
     queryKey: ["service", serviceId, "ipgeo"],
-    queryFn: () => apiFetch<IpGeoConfig>(`/services/${serviceId}/ipgeo`),
+    queryFn: () => apiFetch<IpGeoConfig>(`/services/${serviceId}/ip-geo`),
     retry: false,
   });
   const status = useQuery({
@@ -37,7 +37,7 @@ export function IPGeoPanel({ serviceId }: { serviceId: string }) {
 
   const save = useMutation({
     mutationFn: (next: IpGeoConfig) =>
-      apiFetch<void>(`/services/${serviceId}/ipgeo`, { method: "PUT", body: JSON.stringify(next) }),
+      apiFetch<void>(`/services/${serviceId}/ip-geo`, { method: "PUT", body: JSON.stringify(next) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["service", serviceId, "ipgeo"] }),
     onError: (e: unknown) =>
       setError(e instanceof ApiError ? e.message : "Couldn't save IP/geo settings."),

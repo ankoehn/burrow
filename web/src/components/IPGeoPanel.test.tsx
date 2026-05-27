@@ -30,7 +30,7 @@ describe("IPGeoPanel", () => {
     await waitFor(() => {
       expect(
         fetchSpy.mock.calls.some(([url, init]) =>
-          String(url).endsWith("/api/v1/services/svc_ai001/ipgeo")
+          String(url).endsWith("/api/v1/services/svc_ai001/ip-geo")
           && (init as RequestInit | undefined)?.method === "PUT",
         ),
       ).toBe(true);

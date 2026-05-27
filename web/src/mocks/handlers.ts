@@ -479,7 +479,7 @@ export const handlers = [
     gate(request, { admin: true }) ?? noContent()),
 
   // ---- v0.4.0 per-service IP/geo (spec Part J) ----
-  http.get("/api/v1/services/:id/ipgeo", ({ request, params }) => {
+  http.get("/api/v1/services/:id/ip-geo", ({ request, params }) => {
     const g = gate(request); if (g) return g;
     const svc = db.services.find((s) => s.id === params.id);
     if (!svc) return err(404, "service not found");
@@ -488,7 +488,7 @@ export const handlers = [
       cfg?.ip_geo ?? { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
     );
   }),
-  http.put("/api/v1/services/:id/ipgeo", async ({ request, params }) => {
+  http.put("/api/v1/services/:id/ip-geo", async ({ request, params }) => {
     const g = gate(request); if (g) return g;
     const svc = db.services.find((s) => s.id === params.id);
     if (!svc) return err(404, "service not found");
