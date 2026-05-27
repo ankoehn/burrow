@@ -1,7 +1,7 @@
 // test-only — never deploy this shape.
 // MUST match test/integration/full/compose.full.yml. Change one, change both.
 
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 export const ADMIN_EMAIL = "admin@e2e.local";
 export const ADMIN_PASSWORD = "e2e-pass";
@@ -37,12 +37,18 @@ export const RESET_URL = `${DASHBOARD_URL}/api/v1/internal/test-reset`;
 let _aiSubdomain: string | undefined;
 export function aiSubdomain(): string {
   if (_aiSubdomain) return _aiSubdomain;
-  const out = execSync(
-    `docker logs burrow-e2e-full-relay-1 2>&1 | grep "http tunnel registered" | tail -1`,
+  // Use spawnSync to avoid shell-pipe issues on Windows (cmd.exe lacks grep/tail).
+  // Pull docker logs and filter in Node rather than relying on POSIX shell tools.
+  const logs = spawnSync(
+    "docker",
+    ["logs", "burrow-e2e-full-relay-1"],
     { encoding: "utf8" },
-  ).trim();
+  );
+  const combined = (logs.stdout ?? "") + (logs.stderr ?? "");
+  const lines = combined.split("\n").filter((l) => l.includes("http tunnel registered"));
+  const out = lines[lines.length - 1] ?? "";
   const m = out.match(/subdomain=([a-z0-9]+)/);
-  if (!m) throw new Error(`aiSubdomain: relay log has no "http tunnel registered" line yet: ${out}`);
+  if (!m) throw new Error(`aiSubdomain: relay log has no "http tunnel registered" line yet`);
   _aiSubdomain = m[1];
   return _aiSubdomain;
 }

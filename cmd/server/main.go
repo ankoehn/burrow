@@ -625,6 +625,28 @@ func main() {
 				if ingressPort != "" {
 					proxyOpts = append(proxyOpts, proxy.WithIngressPort(ingressPort))
 				}
+				// When TLS is enabled, build the base config first so it can be
+				// passed to the proxy via WithTLSBase. The proxy's
+				// GetConfigForClient hook uses the base config as a template when
+				// cloning per-vhost configs for mTLS services.
+				var proxyTLSCfg *tls.Config
+				if proxyTLSEnabled {
+					proxyTLSCfg = &tls.Config{
+						MinVersion:     tls.VersionTLS12,
+						GetCertificate: customdomain.CertCallback(v05.CustomDomainStore, nil),
+						// Request (but don't require) a client cert on every TLS
+						// connection. For mTLS services GetConfigForClient overrides
+						// this with RequireAndVerifyClientCert + per-service ClientCAs
+						// when the SNI label matches a registered subdomain. Using
+						// RequestClientCert (no TLS-layer verification) allows a client
+						// to present a cert even when SNI doesn't resolve to the service
+						// subdomain (e.g. connecting via localhost:8443 with a Host
+						// header override). The application-layer checkMTLS performs the
+						// real cert-chain verification against the service's CA PEM.
+						ClientAuth: tls.RequestClientCert,
+					}
+					proxyOpts = append(proxyOpts, proxy.WithTLSBase(proxyTLSCfg))
+				}
 				proxyHandler := proxy.New(
 					proxyDialerAdapter{st: st, srv: srv},
 					accessChecker,
@@ -638,15 +660,12 @@ func main() {
 					ReadHeaderTimeout: 10 * time.Second,
 				}
 				if proxyTLSEnabled {
-					// v0.5.0 Task 17: wire the custom-domain GetCertificate
-					// callback so SNI-matched per-domain certs are served
-					// alongside the operator wildcard cert. On a miss the
-					// wildcard is used (nil wildcard falls through to
-					// Certificates[0] in the stdlib).
-					proxySrv.TLSConfig = &tls.Config{
-						MinVersion:     tls.VersionTLS12,
-						GetCertificate: customdomain.CertCallback(v05.CustomDomainStore, nil),
-					}
+					// Wire GetConfigForClient so mTLS services get a per-vhost
+					// TLS config with ClientCAs + RequireAndVerifyClientCert at
+					// TLS-handshake time. Non-mTLS vhosts continue to use the
+					// base config (no client cert required).
+					proxyTLSCfg.GetConfigForClient = proxyHandler.GetConfigForClient
+					proxySrv.TLSConfig = proxyTLSCfg
 				}
 			}
 
