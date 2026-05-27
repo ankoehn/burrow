@@ -37,8 +37,9 @@ test("25-quota-rate-limit: 429 + audit row", async ({ page, request }) => {
   const host = aiHost();
   const statuses: number[] = [];
   for (let i = 0; i < 7; i++) {
-    const r = await request.get(`${HTTPS_INGRESS}/healthz`, {
-      headers: { host },
+    const r = await request.post(`${HTTPS_INGRESS}/v1/chat/completions`, {
+      headers: { host, "content-type": "application/json" },
+      data: { model: "mock", stream: false, messages: [{ role: "user", content: "test" }] },
       ignoreHTTPSErrors: true,
     });
     statuses.push(r.status());
