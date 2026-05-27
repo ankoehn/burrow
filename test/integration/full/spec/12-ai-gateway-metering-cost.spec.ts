@@ -23,5 +23,5 @@ test("12-ai-gateway-metering-cost: chat-completions metered + cost page renders"
   await page.goto("/cost");
   await expect(page.getByRole("heading", { name: /Cost.*budgets/i })).toBeVisible();
   // Metric tiles are present (24h / 7d / 30d windows).
-  await expect(page.locator('[aria-label*="spend metric"]').first()).toBeVisible();
+  await expect(page.locator('[aria-label*="Spend by window"]').first()).toBeVisible();
 });

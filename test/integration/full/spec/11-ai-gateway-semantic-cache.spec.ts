@@ -21,7 +21,7 @@ test("11-ai-gateway-semantic-cache: surface present + enable round-trips (or ski
   // checks the surface is reachable. Functional cache-hit testing requires
   // the semantic_cache build tag, which is out of scope for this gate.
   const anyContent = await page
-    .locator("[data-state=active] :is(button, input, p)")
+    .locator('[role="tabpanel"] :is(button, input, p)')
     .first()
     .isVisible({ timeout: 5_000 })
     .catch(() => false);
