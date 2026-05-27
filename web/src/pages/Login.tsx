@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { Button, FormField, FormFieldGroup, Input } from "@/components/ds";
 
 function BurrowMark({ size = 26 }: { size?: number }) {
@@ -38,8 +38,12 @@ export default function Login() {
       await apiFetch("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
       await qc.invalidateQueries({ queryKey: ["me"] });
       nav("/", { replace: true });
-    } catch {
-      setErr("Invalid email or password");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 429) {
+        setErr("Too many login attempts. Please wait a minute and try again.");
+      } else {
+        setErr("Invalid email or password");
+      }
     }
   }
   return (
