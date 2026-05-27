@@ -25,6 +25,11 @@ test("22-clients: Connect-a-client wizard mints a token", async ({ page }) => {
   await page.getByLabel("Client name").fill(`spec-22-${Date.now()}`);
   await page.getByRole("button", { name: /generate token/i }).click();
 
+  // Click Reveal to unmask the token (default is masked as bur_••••••••).
+  await page.getByRole("button", { name: /reveal token/i }).click();
+
   // Reveal dialog should expose a bur_ prefixed plaintext at least once.
-  await expect(page.getByText(/bur_[A-Za-z0-9_-]{20,}/)).toBeVisible({ timeout: 10_000 });
+  // Find the code element with the token (not the command block).
+  const tokenCode = page.locator('code.mono', { hasText: /^bur_[A-Za-z0-9_-]{20,}$/ });
+  await expect(tokenCode).toBeVisible({ timeout: 10_000 });
 });
