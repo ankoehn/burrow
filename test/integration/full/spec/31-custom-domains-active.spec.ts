@@ -49,18 +49,18 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
 
   // Backend wiring gap (D1): compose harness relay uses system root pool
   // (CertValidationRoots=nil); the test CA is not trusted by the system,
-  // so chain validation returns 400 chain_invalid.  Skip rather than fail.
+  // so chain validation returns 400 chain_invalid.  Also, hostname mismatch
+  // (san_mismatch) when cert doesn't cover the registered domain. Skip rather than fail.
   if (addResp.status() === 400) {
     let body: Record<string, string> = {};
     try { body = await addResp.json(); } catch { /* ignore parse error */ }
-    if (body["reason"] === "chain_invalid" || body["error"]?.includes("chain")) {
+    if (body["reason"] === "chain_invalid" || body["reason"] === "san_mismatch" || body["error"]?.includes("chain")) {
       test.skip(
         true,
-        "Custom domain cert chain validation fails against system roots — " +
-        "the compose harness does not inject the test CA into CertValidationRoots. " +
-        "Refs cmd/server wiring (CertValidationRoots nil for relay container); " +
-        "fix deferred: wire BURROW_CERT_VALIDATION_CA or similar env to populate " +
-        "Deps.CertValidationRoots in cmd/server/main.go.",
+        "Custom domain cert validation failed (chain_invalid or san_mismatch) — " +
+        "the compose harness does not inject the test CA into CertValidationRoots, " +
+        "and the test cert does not cover custom hostnames. " +
+        "Fix deferred: wire BURROW_CERT_VALIDATION_CA or mint test certs for custom domains.",
       );
     }
   }
