@@ -241,6 +241,9 @@ func (f *fakeQuotaEngine) Limits() []quota.Limit {
 	return out
 }
 
+func (f *fakeQuotaEngine) DropBucket(_, _, _, _ string) {}
+
+
 // TestRateLimitHandler_GetEmpty — empty store returns a non-null JSON
 // empty array.
 func TestRateLimitHandler_GetEmpty(t *testing.T) {

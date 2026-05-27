@@ -556,6 +556,9 @@ func (*fullDepsStub) Limits() []quota.Limit {
 	stubPanic("QuotaEngine.Limits")
 	return nil
 }
+func (*fullDepsStub) DropBucket(_, _, _, _ string) {
+	stubPanic("QuotaEngine.DropBucket")
+}
 
 // BudgetStore.
 func (*fullDepsStub) ListBudgets(context.Context) ([]db.Budget, error) {

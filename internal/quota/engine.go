@@ -254,6 +254,18 @@ func (e *Engine) Reload(ctx context.Context) error {
 	return nil
 }
 
+// DropBucket removes the in-memory token bucket for a specific rule shape
+// (scope, subject, dimension, window) without touching the DB or the limits
+// map. This is called from the DELETE handler as a belt-and-suspenders
+// safeguard: Reload() already removes stale buckets, but if Reload() fails
+// (transient DB error) the saturated bucket would survive and keep denying
+// requests even though the rule row is gone. Calling DropBucket directly
+// guarantees the bucket is evicted regardless of Reload()'s success.
+func (e *Engine) DropBucket(scope, subject, dimension, window string) {
+	key := bucketKey{scope: scope, subject: subject, dimension: dimension, window: window}
+	e.buckets.Delete(key)
+}
+
 // Limits returns a snapshot of every configured limit. The returned slice is
 // safe to mutate by the caller.
 func (e *Engine) Limits() []Limit {

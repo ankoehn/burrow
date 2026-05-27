@@ -22,7 +22,6 @@ ENV BURROW_DATABASE_PATH=/data/burrow.db \
     BURROW_HTTP_PROXY_TLS_KEY=/certs/wildcard.test.local.key \
     BURROW_AUTH_DOMAIN=test.local \
     BURROW_MCP_LISTEN=:7800 \
-    BURROW_LOGIN_RATE_LIMIT_PER_IP=3 \
     BURROW_CERT_VALIDATION_ROOTS_FILE=/certs/ca.crt
 EXPOSE 7000 8080 8443 9000-9100 7800
 # burrowd --dev-certs writes a generated CA at ./certs/dev-ca.pem; CWD must

@@ -34,6 +34,10 @@ type QuotaEngine interface {
 	Reload(ctx context.Context) error
 	UsageFor(ctx context.Context, who quota.Subjects) []quota.Usage
 	Limits() []quota.Limit
+	// DropBucket evicts the token bucket for a specific rule shape from the
+	// in-memory store. Called by DeleteRateLimit as a belt-and-suspenders
+	// guard against Reload failures leaving a saturated bucket alive.
+	DropBucket(scope, subject, dimension, window string)
 }
 
 // rateLimitResp is the wire shape for one configured rate-limit. Mirrors
@@ -322,6 +326,10 @@ func (d Deps) DeleteRateLimit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "rate-limit store unavailable")
 		return
 	}
+	// Fetch the rule before deleting so we can evict its bucket unconditionally
+	// below. GetRateLimit failure is non-fatal — we proceed with delete and
+	// fall back to Reload-only invalidation.
+	existing, fetchErr := d.RateLimitDB.GetRateLimit(r.Context(), id)
 	if err := d.RateLimitDB.DeleteRateLimit(r.Context(), id); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "rate limit not found")
@@ -331,6 +339,16 @@ func (d Deps) DeleteRateLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.RateLimits != nil {
+		// Belt-and-suspenders: drop the bucket directly so a saturated bucket
+		// cannot survive a Reload failure. If GetRateLimit succeeded we have the
+		// exact shape; if it failed we skip DropBucket and rely on Reload alone.
+		if fetchErr == nil {
+			win := existing.Window
+			if win == "" {
+				win = quota.WindowMinute
+			}
+			d.RateLimits.DropBucket(existing.Scope, existing.Subject, existing.Dimension, win)
+		}
 		if err := d.RateLimits.Reload(r.Context()); err != nil {
 			d.Log.Error("quota: reload after DELETE failed", "err", err.Error())
 		}
