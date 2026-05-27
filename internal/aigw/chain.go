@@ -66,6 +66,7 @@ import (
 	"github.com/ankoehn/burrow/internal/credinject"
 	"github.com/ankoehn/burrow/internal/guardrails"
 	"github.com/ankoehn/burrow/internal/inspector"
+	"github.com/ankoehn/burrow/internal/quota"
 	"github.com/ankoehn/burrow/internal/redact"
 	"github.com/ankoehn/burrow/internal/route"
 )
@@ -382,9 +383,27 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	// ---------------------------------------------------------------
 
 	// ---------------------------------------------------------------
-	// Step 3: ratelimit — STUB. Task 11 swaps in the real impl.
-	// Same shape as ipgeo: a func(http.Handler) http.Handler.
+	// Step 3: ratelimit — check quota before any proxying. The RateLimit
+	// middleware is a func(http.Handler) http.Handler; we inject the
+	// quota.Subjects into the request context so the middleware can call
+	// engine.Charge without an import cycle. On denial the middleware writes
+	// its own 429 response and does NOT call next; we detect that via a
+	// "passed" flag and short-circuit run().
 	// ---------------------------------------------------------------
+	if c.RateLimit != nil {
+		r = r.WithContext(quota.WithSubjects(r.Context(), quota.Subjects{
+			ServiceID: svc.ID,
+			APIKeyID:  svc.APIKeyID,
+		}))
+		passed := false
+		c.RateLimit(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			passed = true
+		})).ServeHTTP(w, r)
+		if !passed {
+			// Middleware denied the request and has already written a response.
+			return
+		}
+	}
 
 	// ---------------------------------------------------------------
 	// Step 4: redact — rewrites the body before cache + metering.

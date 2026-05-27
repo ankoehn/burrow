@@ -170,6 +170,13 @@ func buildV04Stack(
 	// pointers are populated and the chain runs the corresponding middleware.
 	aiChain.Loader = chainConfigLoader{db: wrapped, log: log}
 
+	// Wire quota enforcement into the chain's rate-limit hook (Task 11 /
+	// spec Part D). The previously-stubbed Chain.RateLimit field is assigned
+	// here so every AI-proxied request is charged one RPM unit before steps
+	// 4-9 run. On denial Charge returns Allow=false; the middleware writes 429
+	// and emits a ratelimit.enforced audit row without calling next.
+	aiChain.RateLimit = buildQuotaMiddleware(quotaEngine, auditLogger)
+
 	// --- metrics recorder --------------------------------------------------
 	metricsRec := metrics.New()
 
