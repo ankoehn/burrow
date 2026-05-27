@@ -34,4 +34,4 @@ services:
     # Dockerfile.relay accepts GO_BUILD_TAGS (defaults to 'integration').
     build:
       args:
-        GO_BUILD_TAGS: "integration,postgres"
+        GO_BUILD_TAGS: "integration,postgres,semantic_cache"

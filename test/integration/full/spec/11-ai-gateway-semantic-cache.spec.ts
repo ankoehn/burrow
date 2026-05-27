@@ -6,10 +6,13 @@ test.use({ storageState: AUTH_STORAGE_PATH });
 
 test("11-ai-gateway-semantic-cache: surface present + enable round-trips (or skip)", async ({ page }) => {
   await page.goto("/cache");
+  // Wait for the page to fully render before probing for the tab — without
+  // this, the 2s `isVisible` race can fire before React hydrates the Tabs.
+  await expect(page.getByRole("heading", { name: /Prompt cache/i })).toBeVisible();
   // Open the Semantic tab. If the SPA doesn't show this tab when the backend
   // is built without -tags=semantic_cache, skip.
   const tab = page.getByRole("tab", { name: "Semantic" });
-  const visible = await tab.isVisible({ timeout: 2_000 }).catch(() => false);
+  const visible = await tab.isVisible({ timeout: 10_000 }).catch(() => false);
   if (!visible) {
     test.skip(true, "Semantic cache tab not present — relay built without -tags=semantic_cache");
   }
