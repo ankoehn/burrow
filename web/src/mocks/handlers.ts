@@ -287,7 +287,7 @@ export const handlers = [
     const svc = db.services.find((s) => s.id === params.id);
     if (!svc) return err(404, "service not found");
     if (!canConfigure(svc)) return err(403, "forbidden");
-    const b = await body<{ access_mode?: string; api_key_header?: string; ca_pem?: string }>(request);
+    const b = await body<{ access_mode?: string; api_key_header?: string; mtls_ca_pem?: string }>(request);
     if (!b?.access_mode) return err(400, "access_mode is required");
     if (!["open", "api_key", "burrow_login", "mtls"].includes(b.access_mode))
       return err(400, "access_mode must be 'open', 'api_key', 'burrow_login', or 'mtls'");

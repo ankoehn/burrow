@@ -186,7 +186,7 @@ export interface IpGeoConfig {
 export interface MtlsConfig {
   enabled: boolean;
   ca_fingerprint_sha256: string;
-  ca_pem?: string;
+  mtls_ca_pem?: string;
 }
 export interface ServiceAIConfig {
   cache: CacheSettings;

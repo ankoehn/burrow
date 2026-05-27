@@ -90,8 +90,8 @@ describe("AccessModePanel (v0.3.0)", () => {
       expect(put).toBeTruthy();
       const body = JSON.parse(String((put![1] as RequestInit).body));
       expect(body.access_mode).toBe("mtls");
-      expect(typeof body.ca_pem).toBe("string");
-      expect(body.ca_pem).toContain("BEGIN CERTIFICATE");
+      expect(typeof body.mtls_ca_pem).toBe("string");
+      expect(body.mtls_ca_pem).toContain("BEGIN CERTIFICATE");
     });
     expect((await screen.findAllByText(/access settings saved/i)).length).toBeGreaterThan(0);
   });

@@ -55,7 +55,7 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelR
 
   function buildBody(): Record<string, unknown> {
     if (selected === "api_key") return { access_mode: selected, api_key_header: apiKeyHeader };
-    if (selected === "mtls") return { access_mode: selected, ca_pem: caPem };
+    if (selected === "mtls") return { access_mode: selected, mtls_ca_pem: caPem };
     return { access_mode: selected };
   }
 
