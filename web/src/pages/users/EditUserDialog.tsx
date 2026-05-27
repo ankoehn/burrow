@@ -50,7 +50,7 @@ export function EditUserDialog({ user, selfId, onClose }: { user: UserAdmin | nu
         </div>
         <div className="field">
           <label>Status</label>
-          <div className="row gap-2" style={{ alignItems: "center" }}>
+          <div className="row row-center gap-2">
             <Switch
               aria-label="User status"
               checked={status === "active"}
@@ -62,10 +62,10 @@ export function EditUserDialog({ user, selfId, onClose }: { user: UserAdmin | nu
             <Badge kind={status === "active" ? "status-connected" : "status-suspended-muted"}>{status === "active" ? "Active" : "Suspended"}</Badge>
           </div>
         </div>
-        <div className="danger-zone row gap-2" style={{ alignItems: "center", marginTop: 12 }}>
+        <div className="danger-zone row row-center gap-2">
           <span>Danger zone — removes the user, their tokens, and tunnel ACLs.</span>
           <Button
-            variant="destructive" size="sm" style={{ marginLeft: "auto" }}
+            variant="destructive" size="sm" className="ml-auto"
             disabled={isSelf || del.isPending}
             title={isSelf ? "You can't suspend or delete your own account." : undefined}
             onClick={() => del.mutate()}

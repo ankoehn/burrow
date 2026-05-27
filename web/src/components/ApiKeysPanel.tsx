@@ -52,7 +52,7 @@ export function ApiKeysPanel({ serviceId }: { serviceId: string }) {
 
   return (
     <div className="api-keys-panel">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <div className="panel-head">
         <h3>API keys</h3>
         <Button variant="primary" size="sm" onClick={() => setCreating(true)}>Create key</Button>
       </div>
@@ -139,7 +139,7 @@ export function ApiKeysPanel({ serviceId }: { serviceId: string }) {
           <div className="top">
             <span className="icon"><Check size={14} strokeWidth={2.5} /></span>
             <strong>Key minted.</strong>
-            <span style={{ color: "var(--muted-foreground)", marginLeft: 4 }}>
+            <span className="muted small">
               Store it now — you won't see it again.
             </span>
           </div>

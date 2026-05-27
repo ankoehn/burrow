@@ -143,7 +143,7 @@ export default function Retention() {
             })}
           </FormFieldGroup>
 
-          <div className="actions" style={{ marginTop: 16 }}>
+          <div className="actions">
             <Button
               type="submit"
               variant="primary"

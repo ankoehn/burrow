@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, ErrorNotice, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
+import { Button, Badge, Dialog, EmptyState, ErrorNotice, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { Service, AccessMode } from "@/lib/contract";
 import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
@@ -97,7 +97,7 @@ export default function Services() {
   });
 
   return (
-    <div className="services-page" style={{ position: "relative" }}>
+    <div className="services-page">
       <PageHeader
         title="Services"
         subtitle="Durable services exposed through this relay, with their access configuration."
@@ -111,13 +111,13 @@ export default function Services() {
           Couldn't load services: {error instanceof ApiError ? error.message : "Unknown error"}
         </ErrorNotice>
       ) : isLoading ? (
-        <div className="table-wrap" style={{ padding: 16 }}>
+        <div className="table-wrap skel-pad">
           <SkeletonRows n={4} />
         </div>
       ) : !data || data.length === 0 ? (
-        <div className="state-card">
-          <p>No services yet. Run <code>burrow connect</code> with <code>--type http</code>.</p>
-        </div>
+        <EmptyState title="No services yet">
+          Run <code>burrow connect</code> with <code>--type http</code> to expose a service.
+        </EmptyState>
       ) : (
         <>
           <div className="toolbar-row">
@@ -165,7 +165,7 @@ export default function Services() {
                   <td><Badge kind={`type-${s.type}`} nodot>{s.type}</Badge></td>
                   <td>
                     {s.type === "http" && s.hostname ? (
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span className="row row-center gap-2">
                         <span className="mono">{s.hostname}</span>
                         <button
                           type="button"

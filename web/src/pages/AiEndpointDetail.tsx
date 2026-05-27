@@ -298,7 +298,7 @@ export default function AiEndpointDetail() {
         subtitle="Routing, traffic, and recent traffic for this gateway endpoint."
         actions={
           <div className="row gap-2">
-            <label className="row gap-2" style={{ alignItems: "center" }}>
+            <label className="row row-center gap-2">
               <span>Pause endpoint</span>
               <Switch
                 aria-label="Pause endpoint"
@@ -401,8 +401,8 @@ export default function AiEndpointDetail() {
       </section>
 
       <section aria-labelledby={`${headingId}-backends`} className="card">
-        <div className="row" style={{ alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
-          <h2 id={`${headingId}-backends`} style={{ margin: 0 }}>Backends</h2>
+        <div className="panel-head">
+          <h2 id={`${headingId}-backends`}>Backends</h2>
           <Button
             variant="primary"
             size="sm"
@@ -432,17 +432,7 @@ export default function AiEndpointDetail() {
                   <td className="mono">{b.concrete_model}</td>
                   <td className="mono">{b.weight}</td>
                   <td>
-                    <span
-                      className="chip"
-                      style={{
-                        display: "inline-block",
-                        padding: "1px 6px",
-                        borderRadius: 4,
-                        fontSize: "0.75rem",
-                        background: "var(--surface-2, #f3f4f6)",
-                        fontFamily: "monospace",
-                      }}
-                    >
+                    <span className="chip">
                       {getProviderForBackend(b.service_id)}
                     </span>
                   </td>
@@ -471,7 +461,7 @@ export default function AiEndpointDetail() {
               ))}
               {(routing.backends ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1rem 0" }}>
+                  <td colSpan={5} className="muted empty-cell">
                     No backends configured. Add an alias to get started.
                   </td>
                 </tr>
@@ -503,7 +493,7 @@ export default function AiEndpointDetail() {
                   tabIndex={0}
                   onClick={() => nav(`/inspector/${id}/${r.id}`)}
                   onKeyDown={(e) => { if (e.key === "Enter") nav(`/inspector/${id}/${r.id}`); }}
-                  style={{ cursor: "pointer" }}
+                  className="clickable"
                 >
                   <td className="mono small">{r.ts}</td>
                   <td className="mono">{r.method}</td>

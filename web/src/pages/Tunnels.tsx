@@ -119,7 +119,7 @@ export default function Tunnels() {
     };
   }, [qc]);
   return (
-    <div className="tunnels-page" style={{ position: "relative" }}>
+    <div className="tunnels-page">
       <PageHeader title="Tunnels" />
       <div className="toolbar-row">
         <Input
@@ -131,7 +131,7 @@ export default function Tunnels() {
         />
       </div>
       {isLoading ? (
-        <div className="table-wrap" style={{ padding: 16 }}>
+        <div className="table-wrap skel-pad">
           <SkeletonRows n={4} />
         </div>
       ) : !data || data.length === 0 ? (
@@ -212,7 +212,7 @@ export default function Tunnels() {
                     {t.type === "http"
                       ? <span className="muted">—</span>
                       : (
-                        <span className="row gap-2" style={{ alignItems: "center" }}>
+                        <span className="row row-center gap-2">
                           <span className="mono">:{t.remote_port}</span>
                           <button
                             type="button"
@@ -232,7 +232,7 @@ export default function Tunnels() {
                   <td className="col-local">{t.local_addr}</td>
                   <td>
                     {t.type === "http" && t.hostname ? (
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span className="row row-center gap-2">
                         <span className="mono">{t.hostname}</span>
                         <button
                           type="button"
@@ -248,7 +248,7 @@ export default function Tunnels() {
                     )}
                   </td>
                   <td>
-                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                    <span className="row row-center gap-2">
                       <Badge kind={`access-${t.access_mode ?? "open"}`} nodot>
                         {ACCESS_LABEL[t.access_mode ?? "open"]}
                       </Badge>

@@ -11,7 +11,7 @@ function Row({ e }: { e: AuditEvent }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <tr style={{ cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
+      <tr className="clickable" onClick={() => setOpen((o) => !o)}>
         <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
         {(() => {
           const t = formatTimestampWithTooltip(e.ts);

@@ -95,7 +95,7 @@ export default function BackupRestore() {
                     <td className="mono small">{formatBytes(b.size_bytes)}</td>
                     <td>{b.version}</td>
                     <td>
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span className="row row-center gap-2">
                         <code className="mono small">{truncate(b.db_sha256)}</code>
                         <button type="button" className="icon-btn" aria-label={`Copy sha for ${b.id}`} onClick={() => { copy(b.db_sha256); toast.success("Copied."); }}>
                           <Copy size={13} />
@@ -120,7 +120,7 @@ export default function BackupRestore() {
       <section className="card">
         <h2>Restore from backup</h2>
         <p className="muted">Upload a previously-downloaded backup archive to replace the current Burrow state.</p>
-        <div className="row gap-2" style={{ alignItems: "center" }}>
+        <div className="row row-center gap-2">
           <input
             ref={fileRef}
             id="restore-file"
@@ -139,7 +139,7 @@ export default function BackupRestore() {
               borderWidth: 0,
             }}
           />
-          <label htmlFor="restore-file" className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+          <label htmlFor="restore-file" className="btn btn-secondary btn-sm">
             Choose backup archive…
           </label>
           <span className="mono small muted" aria-live="polite">

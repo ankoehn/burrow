@@ -4,7 +4,7 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { useAuth } from "@/auth/useAuth";
-import { Button, Input, Select, Badge, Dialog, PageHeader, SkeletonRows } from "@/components/ds";
+import { Button, EmptyState, Input, Select, Badge, Dialog, PageHeader, SkeletonRows } from "@/components/ds";
 import type { UserAdmin, UsersPage, UserRole } from "@/lib/contract";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -62,7 +62,7 @@ export default function Users() {
   const total = data?.total ?? 0;
 
   return (
-    <div className="users-page" style={{ position: "relative" }}>
+    <div className="users-page">
       <PageHeader
         title="Users"
         subtitle="People who can sign in to this Burrow relay."
@@ -87,13 +87,13 @@ export default function Users() {
           value={roleFilter}
           onChange={(v) => setRoleFilter(v as "" | UserRole)}
         />
-        <span className="muted" style={{ marginLeft: "auto" }}>{total} total</span>
+        <span className="muted ml-auto">{total} total</span>
       </div>
 
       {isLoading ? (
         <div className="table-wrap"><SkeletonRows n={5} /></div>
       ) : rows.length === 0 ? (
-        <div className="state-card"><p>No users found.</p></div>
+        <EmptyState title="No users found" />
       ) : (
         <div className="table-wrap">
           <table className="data" aria-label="Users">
@@ -122,9 +122,9 @@ export default function Users() {
             </tbody>
           </table>
           {total > PAGE && (
-            <div className="row gap-2" style={{ marginTop: 12, alignItems: "center" }}>
+            <div className="row row-center gap-2 pagination-row">
               <span className="muted">Showing {offset + 1}–{Math.min(offset + PAGE, total)} of {total}</span>
-              <div style={{ marginLeft: "auto" }} className="row gap-2">
+              <div className="row row-center gap-2 ml-auto">
                 <Button variant="secondary" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Prev</Button>
                 <Button variant="secondary" size="sm" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
               </div>

@@ -51,7 +51,7 @@ export function MtlsPanel({ value, onChange }: MtlsPanelProps) {
           accept=".pem,.crt,.cer,application/x-pem-file,application/x-x509-ca-cert"
           aria-label="Upload CA bundle"
           onChange={(e) => { void onFile(e); }}
-          style={{ marginBottom: 6 }}
+          className="small"
         />
         <textarea
           id={id}
@@ -62,12 +62,12 @@ export function MtlsPanel({ value, onChange }: MtlsPanelProps) {
           onChange={(e) => onChange(e.target.value)}
           placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
         />
-        <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+        <p className="muted small">
           Paste a PEM-encoded CA bundle, or upload a <code>.pem</code> /
           {" "}<code>.crt</code> file.
         </p>
       </div>
-      <div className="row gap-2" style={{ alignItems: "center" }}>
+      <div className="row row-center gap-2">
         <Button variant="secondary" size="sm" disabled={busy || !value} onClick={() => { void compute(); }}>
           {busy ? "Computing…" : "Compute fingerprint"}
         </Button>

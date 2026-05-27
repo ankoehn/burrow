@@ -52,7 +52,7 @@ function ExactPanel({
 }) {
   return (
     <div className="exact-cache">
-      <div className="row gap-2" style={{ alignItems: "center" }}>
+      <div className="row row-center gap-2">
         <Switch
           aria-label="Enable exact cache"
           checked={draft.enabled}
@@ -225,7 +225,7 @@ function SemanticPanel() {
         </FormField>
       )}
 
-      <div className="row gap-2" style={{ alignItems: "center" }}>
+      <div className="row row-center gap-2">
         <Switch
           aria-label="Enable semantic cache"
           checked={draft?.enabled ?? false}
@@ -286,7 +286,7 @@ function SemanticPanel() {
               options={FALLBACK_POLICY_OPTIONS}
             />
           </FormField>
-          <div className="row gap-2" style={{ alignItems: "center" }}>
+          <div className="row row-center gap-2">
             <Switch
               aria-label="Promote on miss"
               checked={draft.promote_on_miss}

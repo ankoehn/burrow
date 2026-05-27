@@ -123,7 +123,7 @@ export default function AutomationTokens() {
         footer={<Button variant="primary" onClick={() => setCreated(null)}>I've saved it</Button>}
       >
         <p>Save this token now — you won't see it again.</p>
-        <div className="row gap-2" style={{ alignItems: "center" }}>
+        <div className="row row-center gap-2">
           <code className="mono small">{created?.plaintext}</code>
           <button type="button" className="icon-btn" aria-label="Copy automation token" onClick={() => { if (created) { copy(created.plaintext); toast.success("Copied."); } }}>
             <Copy size={13} />

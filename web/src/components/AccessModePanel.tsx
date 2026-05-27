@@ -150,7 +150,7 @@ export function AccessModePanel({ serviceId, serviceName, mode, clientId, panelR
             Pages that embed the panel inline (ClientDetail, ServiceDetail
             access tab) still rely on the inline button. */}
         {!panelRef && (
-          <div className="actions" style={{ marginTop: "var(--space-lg)" }}>
+          <div className="panel-actions">
             <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
               {save.isPending ? "Saving…" : "Save changes"}
             </Button>

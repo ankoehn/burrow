@@ -86,12 +86,12 @@ export default function Login() {
             </FormField>
           </FormFieldGroup>
 
-          <div style={{ marginTop: "var(--space-lg)" }}>
-            <Button type="submit" variant="primary" style={{ width: "100%" }}>Sign in</Button>
+          <div className="signin-actions">
+            <Button type="submit" variant="primary" className="signin-submit">Sign in</Button>
           </div>
 
           {err && (
-            <div className="signin-error" role="alert" aria-live="polite" style={{ marginTop: "var(--space-md)" }}>
+            <div className="signin-error" role="alert" aria-live="polite">
               <AlertTriangle size={14} className="icon" />
               <span>{err}</span>
             </div>

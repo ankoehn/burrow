@@ -148,7 +148,7 @@ export default function RequestInspector() {
                     <tr
                       key={r.id}
                       onClick={() => { setSelected(r.id); nav(`/inspector/${serviceId}/${r.id}`); }}
-                      style={{ cursor: "pointer" }}
+                      className="clickable"
                       aria-selected={selected === r.id}
                     >
                       <td className="mono small">{r.ts}</td>
@@ -167,7 +167,7 @@ export default function RequestInspector() {
             <p className="muted">Select a request to inspect.</p>
           ) : (
             <>
-              <div className="row gap-2" style={{ marginBottom: 8 }}>
+              <div className="detail-toolbar">
                 <Button
                   variant="secondary"
                   size="sm"

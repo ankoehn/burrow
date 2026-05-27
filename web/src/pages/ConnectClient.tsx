@@ -69,7 +69,7 @@ export default function ConnectClient() {
             />
           </FormField>
         </FormFieldGroup>
-        <div style={{ marginTop: "var(--space-md)" }}>
+        <div className="actions">
           <Button
             variant="primary"
             size="sm"
@@ -93,7 +93,7 @@ export default function ConnectClient() {
             </div>
             <div className="field">
               <label>Client token</label>
-              <span className="row gap-2" style={{ alignItems: "center" }}>
+              <span className="row row-center gap-2">
                 <code className="mono">{reveal ? tok.token : "bur_••••••••"}</code>
                 <Button variant="ghost" size="sm" aria-label={reveal ? "Hide token" : "Reveal token"} onClick={() => setReveal((r) => !r)}>
                   {reveal ? "Hide" : "Reveal"}
@@ -112,8 +112,8 @@ export default function ConnectClient() {
 
           <section className="account-section" aria-labelledby="ob-3">
             <div className="section-head"><div className="left"><h2 id="ob-3">Install &amp; run</h2></div></div>
-            <div className="row gap-2" style={{ alignItems: "flex-start" }}>
-              <pre className="cmd-block" style={{ flex: 1 }}><code>{cmd}</code></pre>
+            <div className="row gap-2">
+              <pre className="cmd-block flex-1"><code>{cmd}</code></pre>
               <button
                 type="button"
                 className="icon-btn"

@@ -70,7 +70,7 @@ export function CertPemEditor({
         <textarea
           id="cert-pem-cert"
           aria-label="Certificate (PEM)"
-          className="mono"
+          className="input mono resizable"
           rows={6}
           value={value.cert_pem}
           onChange={(e) => onChange({ ...value, cert_pem: e.target.value })}
@@ -83,7 +83,7 @@ export function CertPemEditor({
         <textarea
           id="cert-pem-key"
           aria-label="Private key (PEM)"
-          className="mono"
+          className="input mono resizable"
           rows={6}
           value={value.key_pem}
           onChange={(e) => onChange({ ...value, key_pem: e.target.value })}
@@ -91,19 +91,19 @@ export function CertPemEditor({
         />
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+      <div className="cert-actions">
         <Button variant="secondary" size="sm" type="button" onClick={() => void handleValidate()}>
           Validate
         </Button>
-        <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+        <p className="muted small">
           Client-side checks are advisory. The server runs SAN/chain/key validation before saving.
         </p>
       </div>
 
       {validation && (
-        <div className="cert-validation-status" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className="cert-validation-status">
           {validation.certOk ? (
-            <span className="mono" style={{ fontSize: 12, color: "var(--success)" }}>
+            <span className="mono ok">
               Certificate block detected.
               {validation.fingerprint && (
                 <> SHA-256: <span className="mono">{validation.fingerprint}</span></>
@@ -113,19 +113,13 @@ export function CertPemEditor({
               )}
             </span>
           ) : (
-            <span style={{ fontSize: 12, color: "var(--destructive)" }}>
-              {validation.certError}
-            </span>
+            <span className="err">{validation.certError}</span>
           )}
 
           {validation.keyOk ? (
-            <span style={{ fontSize: 12, color: "var(--success)" }}>
-              Private key block detected.
-            </span>
+            <span className="ok">Private key block detected.</span>
           ) : (
-            <span style={{ fontSize: 12, color: "var(--destructive)" }}>
-              {validation.keyError}
-            </span>
+            <span className="err">{validation.keyError}</span>
           )}
         </div>
       )}

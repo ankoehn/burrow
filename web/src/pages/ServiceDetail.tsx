@@ -62,7 +62,7 @@ export default function ServiceDetail() {
       {/* Meta strip */}
       <div className="meta-strip">
         {svc.hostname && (
-          <span className="mono" style={{ fontSize: 13 }}>{svc.hostname}</span>
+          <span className="mono small">{svc.hostname}</span>
         )}
         <Badge kind={`access-${svc.access_mode}`} nodot>
           {ACCESS_LABEL[svc.access_mode]}

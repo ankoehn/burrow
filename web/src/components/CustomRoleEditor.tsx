@@ -151,7 +151,7 @@ export function CustomRoleEditor({ open, roleName, onClose }: CustomRoleEditorPr
                   <label htmlFor="role-desc">Description</label>
                   <Input id="role-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
                 </div>
-                <div className="row gap-2" style={{ alignItems: "center" }}>
+                <div className="row row-center gap-2">
                   <Switch
                     aria-label="Default for new users"
                     checked={defaultForNewUsers}
@@ -171,7 +171,7 @@ export function CustomRoleEditor({ open, roleName, onClose }: CustomRoleEditorPr
                   <div key={group} className="perm-group">
                     <h4>{group}</h4>
                     {items.map((p) => (
-                      <div key={p.key} className="row gap-2" style={{ alignItems: "center" }}>
+                      <div key={p.key} className="row row-center gap-2">
                         <Switch
                           aria-label={p.key}
                           checked={granted.has(p.key)}

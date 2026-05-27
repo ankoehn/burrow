@@ -26,7 +26,7 @@ export default function Tokens() {
     onError: () => toast.error("Failed to revoke token"),
   });
   return (
-    <div className="tokens-page" style={{ position: "relative" }}>
+    <div className="tokens-page">
       <PageHeader title="Client tokens" />
 
       <form
@@ -93,12 +93,12 @@ export default function Tokens() {
           <div className="top">
             <span className="icon"><Check size={14} strokeWidth={2.5} /></span>
             <strong>Token minted.</strong>
-            <span style={{ color: "var(--muted-foreground)", marginLeft: 4 }}>
+            <span className="muted small">
               Store it before closing this dialog.
             </span>
           </div>
           <div className="key-row">
-            <span className="v">{plaintext}</span>
+            <span className="v mono">{plaintext}</span>
           </div>
         </div>
       </Dialog>

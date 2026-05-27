@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
-import { Badge, Button, Input, Dialog } from "@/components/ds";
+import { Badge, Button, ErrorNotice, FormFieldGroup, Input, Dialog } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { CertPemEditor } from "@/components/CertPemEditor";
@@ -134,7 +134,7 @@ export function CustomDomainsPanel({ serviceId }: { serviceId: string }) {
 
   return (
     <div className="custom-domains-panel">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <div className="panel-head">
         <h3>Custom domains</h3>
         <Button variant="primary" size="sm" onClick={openAdd}>
           Add domain
@@ -155,14 +155,14 @@ export function CustomDomainsPanel({ serviceId }: { serviceId: string }) {
           <tbody>
             {domains.map((d) => (
               <tr key={d.id}>
-                <td className="mono" style={{ fontSize: 13 }}>{d.hostname}</td>
+                <td className="mono small">{d.hostname}</td>
                 <td>
                   <Badge kind={statusBadgeKind(d.status)}>
                     {STATUS_LABEL[d.status]}
                   </Badge>
                 </td>
                 <td>{formatTimestamp(d.not_after)}</td>
-                <td className="mono" style={{ fontSize: 12 }}>{truncateFp(d.cert_sha256)}</td>
+                <td className="mono small">{truncateFp(d.cert_sha256)}</td>
                 <td className="col-actions">
                   <Button
                     variant="secondary"
@@ -203,7 +203,7 @@ export function CustomDomainsPanel({ serviceId }: { serviceId: string }) {
           </>
         }
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <FormFieldGroup>
           <div className="field">
             <label htmlFor="domain-hostname">Hostname</label>
             <Input
@@ -217,11 +217,9 @@ export function CustomDomainsPanel({ serviceId }: { serviceId: string }) {
           </div>
           <CertPemEditor value={pem} onChange={setPem} />
           {rejectMsg && (
-            <div role="alert" style={{ color: "var(--destructive)", fontSize: 13 }}>
-              {rejectMsg}
-            </div>
+            <ErrorNotice>{rejectMsg}</ErrorNotice>
           )}
-        </div>
+        </FormFieldGroup>
       </Dialog>
 
       {/* Delete confirmation dialog */}

@@ -139,11 +139,11 @@ export default function Settings() {
           </div>
         </form>
 
-        <div className="section-head" style={{ marginTop: "var(--space-xl)" }}><div className="left"><h2>Test connection</h2></div></div>
+        <div className="section-head"><div className="left"><h2>Test connection</h2></div></div>
         {!showTest ? (
           <Button variant="secondary" size="sm" onClick={() => setShowTest(true)}>Send test email</Button>
         ) : (
-          <div className="row gap-2" style={{ alignItems: "flex-end" }}>
+          <div className="row row-end gap-2">
             <div className="field">
               <label htmlFor="smtp-test-to">Test recipient</label>
               <Input id="smtp-test-to" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@example.com" />

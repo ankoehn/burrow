@@ -947,7 +947,8 @@ button.sort-header:focus-visible {
   border-top: 1px solid var(--border);
   padding: 10px 10px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -1852,6 +1853,11 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
   background: var(--card);
   min-height: 200px;
 }
+.detail-pane .detail-toolbar {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
 
 /* 8. Guardrails accordion body h3 — section labels inside accordion */
 .accordion-body h3 {
@@ -1877,6 +1883,7 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
 /* 9. CostBudgets pct-bar inside MetricTile */
 .pct-bar {
   width: 100%;
+  height: 4px;
   border-radius: 2px;
   background: var(--muted);
   margin-top: var(--space-xs);
@@ -2008,4 +2015,210 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
   align-items: center;
   gap: var(--space-sm);
   margin-top: var(--space-md);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Row alignment utilities — eliminate the repeated
+   style={{ alignItems:"center" }} / style={{ alignItems:"flex-end" }}
+   on .row divs throughout the codebase (R2-F04, R2-F22).
+   ────────────────────────────────────────────────────────────── */
+.row-center { align-items: center; }
+.row-end    { align-items: flex-end; }
+
+/* .ml-auto — pushes an item to the far right inside a flex row */
+.ml-auto { margin-left: auto; }
+
+/* Pagination row that sits inside .table-wrap — needs a bit of breathing room */
+.pagination-row {
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+/* .skel-pad — table-wrap with internal padding for SkeletonRows loader */
+.skel-pad { padding: var(--space-lg); }
+
+/* ──────────────────────────────────────────────────────────────
+   Panel sub-header — replaces hand-rolled
+   <div className="row" style={{justifyContent:"space-between",
+   alignItems:"center"}}> inside ApiKeysPanel, CustomDomainsPanel,
+   AiEndpointDetail etc. (R2-F09, R2-F29).
+   Uses .section-head naming consistent with Account page pattern.
+   ────────────────────────────────────────────────────────────── */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+.panel-head h2,
+.panel-head h3 { margin: 0; }
+
+/* ──────────────────────────────────────────────────────────────
+   Scoped .actions for panels that live inside .service-detail-page
+   and generic sub-panels (UpstreamCredentials, MtlsPanel etc.)
+   (R2-F12).
+   ────────────────────────────────────────────────────────────── */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Filter row — ConnectionLogs filter toolbar (R2-F05).
+   ────────────────────────────────────────────────────────────── */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-block: var(--space-sm) var(--space-md);
+}
+/* Second .filter-row in the same toolbar block — suppress the block-start gap */
+.filter-row + .filter-row {
+  margin-block-start: 0;
+}
+/* A label+select/input pair in a filter bar */
+.filter-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+.filter-label .input,
+.filter-label select.input {
+  font-size: 13px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Load-more row — centered pagination / load-more button row
+   (R2-F07).
+   ────────────────────────────────────────────────────────────── */
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  margin-block: var(--space-sm) var(--space-md);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Preview block — WebhookTemplateEditor rendered JSON output
+   (R2-F11).
+   ────────────────────────────────────────────────────────────── */
+.preview-block {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: var(--space-sm) var(--space-md);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-top: var(--space-xs);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Details disclosure — DatabaseBackend "How is this configured?"
+   (R2-F08). Minimal cursor + spacing fix.
+   ────────────────────────────────────────────────────────────── */
+.details-disclosure {
+  margin-top: var(--space-lg);
+}
+.details-disclosure summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.details-disclosure p {
+  margin-top: var(--space-sm);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Definition row — key/value pairs in DatabaseBackend and similar
+   info-only sections (R2-F08).
+   ────────────────────────────────────────────────────────────── */
+dl.def-list {
+  margin: var(--space-md) 0;
+  padding: 0;
+}
+.def-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 13px;
+}
+.def-row .def-key,
+.def-row dt.def-key {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  font-weight: 400;
+  margin: 0;
+}
+.def-row .def-val,
+.def-row dd.def-val {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  margin: 0;
+}
+
+/* Clickable row utility — replaces inline style={{ cursor: "pointer" }} on <tr> */
+tr.clickable { cursor: pointer; }
+
+/* Resizable textarea — replaces inline style={{ resize: "vertical", height: "auto" }} */
+.resizable { resize: vertical; height: auto; }
+
+/* Flex-grow utility */
+.flex-1 { flex: 1; }
+
+/* Text alignment */
+.text-center { text-align: center; }
+
+/* Padded empty-state table cell */
+td.empty-cell { text-align: center; padding: 1rem 0; }
+
+/* Chip — small inline badge (provider label in AI backend table) */
+.chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: var(--surface-2, color-mix(in oklch, var(--muted) 60%, var(--card)));
+  font-family: var(--font-mono);
+}
+
+/* CertPemEditor — certificate + key PEM paste panel */
+.cert-pem-editor .cert-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+.cert-validation-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-sm);
+  font-size: 12px;
+}
+.cert-validation-status .ok  { color: var(--success, oklch(0.60 0.17 145)); }
+.cert-validation-status .err { color: var(--destructive); }
+
+/* OpenAPI viewer page — full-height iframe wrapper */
+.openapi-viewer-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.openapi-viewer-page iframe {
+  flex: 1;
+  min-height: 600px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
 }

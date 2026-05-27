@@ -188,7 +188,7 @@ export default function Guardrails() {
           return `${total} rule${total === 1 ? "" : "s"}`;
         })()}
       >
-        <div className="row gap-2" style={{ alignItems: "center" }}>
+        <div className="row row-center gap-2">
           <Switch
             aria-label="Enable redaction"
             checked={redactDraft.enabled}
@@ -237,7 +237,7 @@ export default function Guardrails() {
         title="Prompt-injection guardrails"
         subtitle={guardDraft.enabled ? `${(patterns.data ?? []).length} pattern${(patterns.data ?? []).length === 1 ? "" : "s"}` : "Disabled"}
       >
-        <div className="row gap-2" style={{ alignItems: "center" }}>
+        <div className="row row-center gap-2">
           <Switch
             aria-label="Enable injection guardrails"
             checked={guardDraft.enabled}

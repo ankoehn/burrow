@@ -225,7 +225,7 @@ export default function Webhooks() {
                   <tr key={w.id}>
                     <td>{w.name}</td>
                     <td>
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span className="row row-center gap-2">
                         <span className="mono small truncate">{w.url}</span>
                         <button
                           type="button"
@@ -335,7 +335,7 @@ export default function Webhooks() {
           <EventsPicker selected={editEvents} onChange={setEditEvents} />
         </div>
         {editWebhook && (
-          <div className="field" style={{ marginTop: 12 }}>
+          <div className="field">
             <label>Payload template</label>
             <WebhookTemplateEditor
               webhookId={editWebhook.id}
@@ -360,7 +360,7 @@ export default function Webhooks() {
         }
       >
         <p>Save this signing secret now — you won't see it again.</p>
-        <div className="row gap-2" style={{ alignItems: "center" }}>
+        <div className="row row-center gap-2">
           <code className="mono small">{createdSecret?.signing_secret}</code>
           <button
             type="button"

@@ -147,7 +147,7 @@ export function UpstreamCredentialsPanel({
               options={slotOptions}
             />
           </div>
-          <p className="muted" style={{ gridColumn: "1 / -1", marginTop: 0, marginBottom: 8 }}>
+          <p className="muted" style={{ gridColumn: "1 / -1" }}>
             Slot values live in environment variables on this server, never in the database.
           </p>
           <div className="field">
@@ -178,7 +178,7 @@ export function UpstreamCredentialsPanel({
       )}
 
       {initialized && (
-        <div className="actions" style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <div className="panel-actions">
           <Button
             variant="primary"
             size="sm"

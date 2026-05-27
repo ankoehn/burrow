@@ -208,22 +208,21 @@ export function WebhookTemplateEditor({
           ref={textareaRef}
           id="wte-tpl"
           aria-label="Payload template"
-          className="mono"
+          className="input mono resizable"
           rows={8}
           value={value.payload_template}
           onChange={(e) =>
             onChange({ ...value, payload_template: e.target.value })
           }
-          style={{ width: "100%", fontFamily: "var(--font-mono, monospace)", resize: "vertical" }}
         />
-        <p className="muted small" style={{ marginTop: 4 }}>
+        <p className="muted small">
           Templates run in a sandbox — no file, network, or environment
           access. See docs for the function allowlist.
         </p>
       </div>
 
       {/* Preview button + output */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div className="row row-center gap-2">
         <Button
           variant="secondary"
           size="sm"
@@ -235,26 +234,15 @@ export function WebhookTemplateEditor({
       </div>
 
       {previewErr && (
-        <div role="alert" className="notice-inline error" style={{ marginTop: 8 }}>
+        <div role="alert" className="notice-inline">
           {previewErr}
         </div>
       )}
 
       {preview && (
-        <div style={{ marginTop: 8 }}>
+        <div>
           <p className="muted small">{preview.size_bytes} bytes</p>
-          <pre
-            className="mono small"
-            style={{
-              background: "var(--muted)",
-              padding: 8,
-              borderRadius: 4,
-              overflowX: "auto",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {preview.rendered}
-          </pre>
+          <pre className="preview-block">{preview.rendered}</pre>
         </div>
       )}
     </div>

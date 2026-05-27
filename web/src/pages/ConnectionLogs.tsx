@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
-import { Button, Badge, PageHeader, SkeletonRows } from "@/components/ds";
+import { Button, Badge, EmptyState, PageHeader, SkeletonRows } from "@/components/ds";
 import type { ConnectionLog, ConnectionLogRollup, ConnectionLogKind, Service } from "@/lib/contract";
 
 // Translate date-range preset to since/until ISO strings.
@@ -144,16 +144,15 @@ export default function ConnectionLogs() {
       />
 
       {/* Filter toolbar — row 1: Kind / Service / Range selects + search */}
-      <div className="row gap-2" style={{ marginTop: 12, marginBottom: "var(--space-sm)", alignItems: "center" }}>
+      <div className="filter-row">
         {/* Kind filter — native <select> for testability */}
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span className="muted small">Kind</span>
+        <label className="filter-label">
+          <span>Kind</span>
           <select
             aria-label="Kind"
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as ConnectionLogKind | "")}
             className="input"
-            style={{ fontSize: "0.8rem" }}
           >
             <option value="">All</option>
             <option value="control">Control</option>
@@ -163,14 +162,13 @@ export default function ConnectionLogs() {
         </label>
 
         {/* Service filter */}
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span className="muted small">Service</span>
+        <label className="filter-label">
+          <span>Service</span>
           <select
             aria-label="Service"
             value={serviceFilter}
             onChange={(e) => setServiceFilter(e.target.value)}
             className="input"
-            style={{ fontSize: "0.8rem" }}
           >
             <option value="">All</option>
             {(servicesQuery.data ?? []).map((s) => (
@@ -180,14 +178,13 @@ export default function ConnectionLogs() {
         </label>
 
         {/* Date range preset */}
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span className="muted small">Range</span>
+        <label className="filter-label">
+          <span>Range</span>
           <select
             aria-label="Date range"
             value={datePreset}
             onChange={(e) => setDatePreset(e.target.value)}
             className="input"
-            style={{ fontSize: "0.8rem" }}
           >
             <option value="1h">Last hour</option>
             <option value="24h">Last 24h</option>
@@ -204,22 +201,21 @@ export default function ConnectionLogs() {
           placeholder="search IP / kind / service"
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
-          className="input"
-          style={{ fontSize: "0.8rem", flex: 1 }}
+          className="input flex-1"
         />
       </div>
 
       {/* Filter toolbar — row 2: Rollups checkbox on its own line */}
-      <div className="row gap-2" style={{ marginBottom: "var(--space-md)", alignItems: "center" }}>
+      <div className="filter-row">
         {/* Rollups toggle — native checkbox for testability */}
-        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+        <label className="checkbox-row small">
           <input
             type="checkbox"
             aria-label="Rollups"
             checked={rollups}
             onChange={(e) => setRollups(e.target.checked)}
           />
-          <span className="small">Rollups</span>
+          <span>Rollups</span>
         </label>
       </div>
 
@@ -229,7 +225,7 @@ export default function ConnectionLogs() {
       ) : rollups ? (
         /* Rollups table */
         rollupRows.length === 0 ? (
-          <p className="muted">No connection logs yet. Connections are recorded on session close.</p>
+          <EmptyState title="No rollups yet">Connections are recorded on session close.</EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="data" aria-label="Connection logs">
@@ -288,7 +284,7 @@ export default function ConnectionLogs() {
       ) : (
         /* Logs table */
         logs.length === 0 ? (
-          <p className="muted">No connection logs yet. Connections are recorded on session close.</p>
+          <EmptyState title="No connection logs yet">Connections are recorded on session close.</EmptyState>
         ) : (
           <>
             <div className="table-wrap">
@@ -325,7 +321,7 @@ export default function ConnectionLogs() {
                 </tbody>
               </table>
             </div>
-            <div style={{ margin: "12px 0", textAlign: "center" }}>
+            <div className="load-more-row">
               <Button
                 variant="secondary"
                 size="sm"

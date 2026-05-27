@@ -21,35 +21,31 @@ export default function DatabaseBackend() {
           <>
             {/* Alpha banner — amber, verbatim text */}
             {status.postgres_alpha && (
-              <div
-                className="notice-inline"
-                style={{ borderColor: "var(--warning)", marginBottom: 16 }}
-                role="status"
-              >
+              <div className="notice-inline warn" role="status">
                 Postgres backend is alpha — see release notes.
               </div>
             )}
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <span className="muted" style={{ marginRight: 8 }}>Driver:</span>
-              <code className="mono">{status.driver}</code>
-            </div>
-
-            {status.driver === "postgres" && status.url_redacted && (
-              <div className="field" style={{ marginBottom: 16 }}>
-                <span className="muted" style={{ marginRight: 8 }}>Connection URL (redacted):</span>
-                <code className="mono">{status.url_redacted}</code>
+            <dl className="def-list">
+              <div className="def-row">
+                <dt className="def-key">Driver</dt>
+                <dd className="def-val"><code className="mono">{status.driver}</code></dd>
               </div>
-            )}
+
+              {status.driver === "postgres" && status.url_redacted && (
+                <div className="def-row">
+                  <dt className="def-key">Connection URL (redacted)</dt>
+                  <dd className="def-val"><code className="mono">{status.url_redacted}</code></dd>
+                </div>
+              )}
+            </dl>
           </>
         )}
 
         {/* "How is this configured?" disclosure — static, always visible */}
-        <details style={{ marginTop: 16 }}>
-          <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>
-            How is this configured?
-          </summary>
-          <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+        <details className="details-disclosure">
+          <summary>How is this configured?</summary>
+          <p>
             Set <code>BURROW_DATABASE_URL</code> + <code>experimental.postgres_backend: true</code>. See docs.
           </p>
         </details>

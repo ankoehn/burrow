@@ -62,7 +62,7 @@ export function Layout() {
   const navItem = ({ isActive }: { isActive: boolean }) => cx("nav-item", isActive && "is-active");
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
   return (
-    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", position: "relative", background: "var(--background)", color: "var(--foreground)" }}>
+    <div className="app-shell">
       <a className="skip-link" href="#main">Skip to content</a>
       <nav className="sidebar" aria-label="Main">
         <div className="sidebar-brand">
@@ -168,12 +168,9 @@ export function Layout() {
           </div>
         </div>
 
-        <div
-          className="sidebar-footer"
-          style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}
-        >
-          <div className="row gap-2" style={{ alignItems: "center" }}>
-            <div className="user-chip" style={{ cursor: "default" }}>
+        <div className="sidebar-footer">
+          <div className="row row-center gap-2">
+            <div className="user-chip">
               <span className="avatar">{avatarInitial}</span>
               <span className="user-meta">
                 {user?.email && <span className="user-email">{user.email}</span>}

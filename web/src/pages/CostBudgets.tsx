@@ -45,7 +45,6 @@ function SpendTile({ w, summary }: { w: Window; summary: CostSummary | undefined
     >
       <div
         className={`pct-bar ${pctClass(summary?.pct_of_budget ?? null)}`}
-        style={{ height: 4 }}
       />
     </MetricTile>
   );

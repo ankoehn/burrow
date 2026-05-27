@@ -117,7 +117,7 @@ export default function AiEndpoints() {
           {endpoints.error instanceof ApiError ? endpoints.error.message : "Unknown error"}
         </ErrorNotice>
       ) : endpoints.isLoading ? (
-        <div className="table-wrap" style={{ padding: 16 }}>
+        <div className="table-wrap skel-pad">
           <SkeletonRows n={3} />
         </div>
       ) : list.length === 0 ? (
