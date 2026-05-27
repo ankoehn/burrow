@@ -35,7 +35,7 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
   const certPem = await fs.readFile(path.join(CERTS_DIR, "wildcard.test.local.crt"), "utf8");
   const keyPem  = await fs.readFile(path.join(CERTS_DIR, "wildcard.test.local.key"), "utf8");
 
-  const hostname = `api${Date.now()}.test.local`;
+  const hostname = `api${Date.now()}.example.com`;
 
   // 1. Add via API (CSRF required for admin mutations).
   const addResp = await request.post(`/api/v1/services/${ai.id}/domains`, {
