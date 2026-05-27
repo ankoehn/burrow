@@ -37,9 +37,14 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   // 1. Verify UI: IPGeoPanel renders on the service page.
   // ------------------------------------------------------------------
   await page.goto(`/services/${ai.id}`);
+  // Wait for the page heading to confirm the SPA has finished its initial
+  // render + service-detail API call. Without this gate, the 5s isVisible
+  // timeout fires during cold-start JS bundle evaluation before any React
+  // content appears. Same pattern as spec 08 (toBeVisible default = 15s).
+  await expect(page.getByRole("heading", { name: /Service.*\bai\b/i })).toBeVisible();
 
   const addCidr = page.getByRole("button", { name: /Add CIDR/i }).first();
-  if (!(await addCidr.isVisible({ timeout: 5_000 }).catch(() => false))) {
+  if (!(await addCidr.isVisible({ timeout: 10_000 }).catch(() => false))) {
     // Clean up (nothing was set) and skip.
     await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
       headers: adminHeaders(),
