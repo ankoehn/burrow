@@ -43,51 +43,53 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
     test.skip(true, `ai-config PUT returned ${cfgResp.status()} — failover routing not configurable in this build`);
   }
 
-  // 3. Stop mockoai.
-  const stopResult = spawnSync(
-    "docker",
-    ["compose", "-f", COMPOSE_FILE, "stop", "mockoai"],
-    { stdio: "pipe", cwd: REPO_ROOT },
-  );
-  if (stopResult.status !== 0) {
-    test.skip(true, "Docker not reachable from Playwright runner — backend coverage via TestE2EFailover_CircuitBreakerTrip");
-  }
-
-  // 4. Fire requests; expect either 200 (failover) or 5xx (no secondary configured).
-  const host = aiHost();
-  const statuses: number[] = [];
-  for (let i = 0; i < 5; i++) {
-    const r = await request.get(`${HTTPS_INGRESS}/healthz`, {
-      headers: { host },
-      ignoreHTTPSErrors: true,
-    });
-    statuses.push(r.status());
-  }
-
-  // Audit log should show upstream errors.
-  await page.goto("/audit");
-  await expect(
-    page.getByRole("table").locator("tr").filter({ hasText: /ai\.upstream_error|upstream/ }).first()
-  ).toBeVisible({ timeout: 10_000 });
-
-  // 5. Restart mockoai for subsequent specs.
-  spawnSync(
-    "docker",
-    ["compose", "-f", COMPOSE_FILE, "start", "mockoai"],
-    { stdio: "pipe", cwd: REPO_ROOT },
-  );
-  // Wait for healthy.
-  for (let i = 0; i < 30; i++) {
-    const check = spawnSync(
+  // 3. Stop mockoai and run test assertions — always restart in finally block.
+  try {
+    const stopResult = spawnSync(
       "docker",
-      ["exec", "burrow-e2e-full-mockoai-1", "wget", "-q", "-O", "-", "http://localhost:8081/healthz"],
-      { stdio: "pipe" },
+      ["compose", "-f", COMPOSE_FILE, "stop", "mockoai"],
+      { stdio: "pipe", cwd: REPO_ROOT },
     );
-    if (check.status === 0) break;
-    // Brief pause between health checks — use a sync-safe busy wait via spawnSync.
-    spawnSync("docker", ["exec", "burrow-e2e-full-mockoai-1", "true"], { stdio: "pipe" });
-    // Node sleep: busy-wait for ~1 s without shell dependency.
-    const t = Date.now();
-    while (Date.now() - t < 1000) { /* spin */ }
+    if (stopResult.status !== 0) {
+      test.skip(true, "Docker not reachable from Playwright runner — backend coverage via TestE2EFailover_CircuitBreakerTrip");
+    }
+
+    // 4. Fire requests; expect either 200 (failover) or 5xx (no secondary configured).
+    const host = aiHost();
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await request.get(`${HTTPS_INGRESS}/healthz`, {
+        headers: { host },
+        ignoreHTTPSErrors: true,
+      });
+      statuses.push(r.status());
+    }
+
+    // Audit log should show upstream errors.
+    await page.goto("/audit");
+    await expect(
+      page.getByRole("table").locator("tr").filter({ hasText: /ai\.upstream_error|upstream/ }).first()
+    ).toBeVisible({ timeout: 10_000 });
+  } finally {
+    // 5. Always restart mockoai for subsequent specs, even if assertion fails.
+    spawnSync(
+      "docker",
+      ["compose", "-f", COMPOSE_FILE, "start", "mockoai"],
+      { stdio: "pipe", cwd: REPO_ROOT },
+    );
+    // Wait for healthy.
+    for (let i = 0; i < 30; i++) {
+      const check = spawnSync(
+        "docker",
+        ["exec", "burrow-e2e-full-mockoai-1", "wget", "-q", "-O", "-", "http://localhost:8081/healthz"],
+        { stdio: "pipe" },
+      );
+      if (check.status === 0) break;
+      // Brief pause between health checks — use a sync-safe busy wait via spawnSync.
+      spawnSync("docker", ["exec", "burrow-e2e-full-mockoai-1", "true"], { stdio: "pipe" });
+      // Node sleep: busy-wait for ~1 s without shell dependency.
+      const t = Date.now();
+      while (Date.now() - t < 1000) { /* spin */ }
+    }
   }
 });
