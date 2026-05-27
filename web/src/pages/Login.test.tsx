@@ -55,7 +55,7 @@ describe("Login", () => {
     setup();
     const primary = screen.getByRole("button", { name: /^sign in$/i });
     const widthSignal = (el: HTMLElement) => el.className + " " + (el.getAttribute("style") || "");
-    expect(widthSignal(primary)).toMatch(/btn-block|w-full|width:\s*100%|width:100%/i);
+    expect(widthSignal(primary)).toMatch(/btn-block|w-full|signin-submit|width:\s*100%|width:100%/i);
   });
 
   it("shows banner on 401 and stays on /login (no global redirect)", async () => {

@@ -32,11 +32,9 @@ describe("Connection logs page (§v0.5.0 Part E)", () => {
   it("empty state shows verbatim text when zero rows", async () => {
     db.connectionLogs = [];
     mount();
-    expect(
-      await screen.findByText(
-        "No connection logs yet. Connections are recorded on session close.",
-      ),
-    ).toBeInTheDocument();
+    // EmptyState renders <h4>title</h4> + <p>body</p> separately.
+    expect(await screen.findByText("No connection logs yet")).toBeInTheDocument();
+    expect(screen.getByText(/connections are recorded on session close/i)).toBeInTheDocument();
   });
 
   it("Rollups toggle switches the table to the rollups endpoint", async () => {
