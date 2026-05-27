@@ -181,6 +181,10 @@ func NewRouter(d Deps) http.Handler {
 			// v0.3.0: service-scoped routes (owner-gated via store authz).
 			r.Get("/services", d.ListServices)
 			r.Get("/services/{serviceID}", d.GetService)
+			// v0.5.x: AI endpoints — derived view over api_key-mode services
+			// with zeroed metering (real aggregation deferred; TODO in handler).
+			r.Get("/ai/endpoints", d.GetAIEndpoints)
+			r.Get("/ai/endpoints/{serviceID}/metrics", d.GetAIEndpointMetrics)
 			r.Put("/services/{serviceID}/access-mode", d.SetServiceAccessMode)
 			r.Get("/services/{serviceID}/api-keys", d.ListAPIKeys)
 			r.Post("/services/{serviceID}/api-keys", d.CreateAPIKey)

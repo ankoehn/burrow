@@ -105,6 +105,38 @@ components:
         Value mirrors the burrow_csrf cookie.
 
   schemas:
+    AiEndpoint:
+      type: object
+      description: >
+        Derived view of one api_key-mode service with identity and metering
+        fields.  Metering fields are zeroed pending usage_events aggregation.
+      properties:
+        service_id: { type: string }
+        name: { type: string }
+        model_alias: { type: string }
+        concrete_model: { type: string }
+        backend_type: { type: string, enum: [ollama, vllm, openai-compat, other] }
+        api_key_count: { type: integer }
+        requests_24h: { type: integer }
+        cache_hits_24h: { type: integer }
+        latency_p95_ms: { type: integer }
+        status: { type: string, enum: [Connected, Degraded, Offline] }
+        client_session_id: { type: string }
+    EndpointMetrics:
+      type: object
+      description: >
+        Metering aggregates for one AI endpoint over the trailing 24 h.  All
+        numeric fields are zeroed pending usage_events aggregation.
+      properties:
+        requests_24h: { type: integer }
+        tokens_in_24h: { type: integer }
+        tokens_out_24h: { type: integer }
+        cost_usd_24h: { type: number, format: double }
+        cache_hit_ratio_24h: { type: number, format: double }
+        requests_per_minute:
+          type: array
+          items: { type: integer }
+          description: 60-element array — one bucket per minute over the trailing hour.
     Error:
       type: object
       required: [error]
@@ -2293,6 +2325,60 @@ paths:
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # AI endpoints (v0.5.x — minimal backend, zeroed metering)
+  # ────────────────────────────────────────────────────────────────────────
+  /api/v1/ai/endpoints:
+    get:
+      tags: [services]
+      summary: List AI endpoints (api_key-mode services with identity + zeroed metrics)
+      description: |
+        Returns one entry per service whose access_mode is "api_key".  Identity
+        fields (name, model_alias, concrete_model, backend_type, api_key_count,
+        status, client_session_id) are populated from live data.  Metering
+        fields (requests_24h, cache_hits_24h, latency_p95_ms) are zeroed
+        pending usage_events aggregation.
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Array of AI endpoint views.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AiEndpoint'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/ai/endpoints/{serviceID}/metrics:
+    get:
+      tags: [services]
+      summary: Per-endpoint metrics (zeroed pending usage_events aggregation)
+      description: |
+        Returns metering aggregates for one AI endpoint.  All numeric fields
+        are zeroed in the current implementation; real aggregation from
+        usage_events is deferred.  Returns 404 when the service does not exist
+        or is not accessible to the caller.
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: serviceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Metering aggregates for the endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointMetrics'
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ────────────────────────────────────────────────────────────────────────
