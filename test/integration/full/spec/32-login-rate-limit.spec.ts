@@ -2,21 +2,13 @@
 //
 // Spec 32 — Login rate-limit UI mirror.
 // 11 bad creds from the UI → 11th attempt surfaces the rate-limit
-// banner. Plan-acknowledged Open Question: the live stack uses
-// production-default 10 attempts/min, so this spec accepts the ~6
-// minute wait or skips, citing TestSec_LoginRateLimit as canonical.
-//
-// SKIP RATIONALE: The rate-limit override is only available via Go
-// struct field LoginRateLimitPerIPOverride — there is no env var that
-// cmd/server/main.go reads, so compose.full.yml cannot plumb a lower
-// limit. Running 11 attempts against the production default of 10/min
-// would exceed the Playwright default timeout. Backend coverage is
-// authoritative via TestSec_LoginRateLimit (cmd/server/e2e_security_test.go).
+// banner. The relay container sets BURROW_LOGIN_RATE_LIMIT_PER_IP=3
+// (Dockerfile.relay), so the 4th attempt triggers a 429 and the UI
+// shows the too-many-attempts banner well within the 90 s spec timeout.
 
 import { test, expect } from "@playwright/test";
 
 test("32-login-rate-limit: 11 bad creds show too-many-attempts banner", async ({ page }) => {
-  test.skip(true, "Login rate-limit override not plumbed in harness — TestSec_LoginRateLimit covers backend");
   test.slow(); // up to 11 attempts; rate-limit window is 60s
   await page.goto("/login");
 

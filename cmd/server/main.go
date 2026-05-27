@@ -479,6 +479,8 @@ func main() {
 					Users: st, Tunnels: tunnelListerAdapter{s: srv, access: st}, Events: bus,
 					Log: log, SecureCookies: effectiveSecureCookies, HTTPSEnabled: httpsEnabled,
 					SPA: spaHandler, TrustedProxies: cfg.TrustedProxies,
+					// Wire env override: 0 means use the api.LoginRateLimitPerIP constant.
+					LoginRateLimitPerIPOverride: cfg.LoginRateLimitPerIP,
 					Roles: st, Sessions: st, Settings: st,
 					Clients: clientsAdapter{srv: srv, st: st}, AccessModes: st,
 					DB: database,

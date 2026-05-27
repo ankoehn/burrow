@@ -137,6 +137,13 @@ type ServerConfig struct {
 	// codebase; the flat key matches the BURROW_EXPERIMENTAL_POSTGRES_BACKEND
 	// env-var after the standard prefix-strip + lowercase transform).
 	ExperimentalPostgres bool `koanf:"experimental_postgres_backend"`
+
+	// LoginRateLimitPerIP overrides api.LoginRateLimitPerIP (default 10) for
+	// the per-IP login rate limiter. Zero (the default) means use the
+	// compiled-in constant. Set to a small value in test environments to
+	// trigger rate-limit responses with fewer attempts.
+	// Env: BURROW_LOGIN_RATE_LIMIT_PER_IP.
+	LoginRateLimitPerIP int `koanf:"login_rate_limit_per_ip"`
 }
 
 // ClientConfig configures burrow.
@@ -346,6 +353,8 @@ func LoadServer(overrides map[string]any) (*ServerConfig, error) {
 		"backup_dir": "",
 		// v0.5.0 (Task 15): Postgres backend defaults — both off by default.
 		"database_url": "", "experimental_postgres_backend": false,
+		// login_rate_limit_per_ip: 0 means use api.LoginRateLimitPerIP constant.
+		"login_rate_limit_per_ip": 0,
 	}, "."), nil)
 	_ = k.Load(burrowEnvProvider(), nil)
 	if err := applyFileSecrets(k); err != nil {
