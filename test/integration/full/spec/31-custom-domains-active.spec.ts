@@ -2,15 +2,11 @@
 //
 // Spec 31 — Custom domain cert pair + status active + cert serves.
 //
-// API drift vs plan (recorded, not escalated):
-//   D1  The compose harness relay is built with CertValidationRoots=nil
-//       (system trust roots).  The wildcard cert at certs/wildcard.test.local.crt
-//       is signed by the local test CA (certs/ca.crt) which is NOT in the
-//       system trust store, so POST /domains returns 400 chain_invalid.
-//       Wiring the test CA into Deps.CertValidationRoots via an env var or
-//       cmd/server flag is a backend change deferred to a follow-up task.
-//       This spec detects the 400+chain_invalid response and skips with an
-//       explanatory annotation rather than failing.
+// Uses wildcard.example.com.crt / .key (signed by the test CA, SANs cover
+// *.example.com and example.com) so the SAN check in validateCertAndKey
+// passes for any api<ts>.example.com hostname.  The compose harness already
+// loads BURROW_CERT_VALIDATION_ROOTS_FILE=ca.crt so chain validation also
+// passes — this spec should run without skipping on the mock profile.
 
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs/promises";
@@ -32,8 +28,8 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
   const ai = services.find((s) => s.name === "ai");
   if (!ai) throw new Error("ai service not found");
 
-  const certPem = await fs.readFile(path.join(CERTS_DIR, "wildcard.test.local.crt"), "utf8");
-  const keyPem  = await fs.readFile(path.join(CERTS_DIR, "wildcard.test.local.key"), "utf8");
+  const certPem = await fs.readFile(path.join(CERTS_DIR, "wildcard.example.com.crt"), "utf8");
+  const keyPem  = await fs.readFile(path.join(CERTS_DIR, "wildcard.example.com.key"), "utf8");
 
   const hostname = `api${Date.now()}.example.com`;
 
@@ -47,20 +43,18 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
     test.skip(true, "Custom domains not wired in this build");
   }
 
-  // Backend wiring gap (D1): compose harness relay uses system root pool
-  // (CertValidationRoots=nil); the test CA is not trusted by the system,
-  // so chain validation returns 400 chain_invalid.  Also, hostname mismatch
-  // (san_mismatch) when cert doesn't cover the registered domain. Skip rather than fail.
+  // If the backend returns 400 chain_invalid the relay container's trust pool
+  // does not include the test CA.  That is a harness wiring issue unrelated to
+  // this spec's SAN fix; skip with a clear explanation rather than failing.
   if (addResp.status() === 400) {
     let body: Record<string, string> = {};
     try { body = await addResp.json(); } catch { /* ignore parse error */ }
-    if (body["reason"] === "chain_invalid" || body["reason"] === "san_mismatch" || body["error"]?.includes("chain")) {
+    if (body["reason"] === "chain_invalid" || body["error"]?.includes("chain")) {
       test.skip(
         true,
-        "Custom domain cert validation failed (chain_invalid or san_mismatch) — " +
-        "the compose harness does not inject the test CA into CertValidationRoots, " +
-        "and the test cert does not cover custom hostnames. " +
-        "Fix deferred: wire BURROW_CERT_VALIDATION_CA or mint test certs for custom domains.",
+        "Custom domain cert chain validation failed (chain_invalid) — " +
+        "the compose harness relay does not have BURROW_CERT_VALIDATION_ROOTS_FILE " +
+        "pointing to the test CA. Fix: ensure the relay container env is set.",
       );
     }
   }
