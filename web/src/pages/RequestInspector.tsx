@@ -124,7 +124,7 @@ export default function RequestInspector() {
         subtitle="Tail and replay traffic on this AI endpoint."
       />
 
-      <div className="row gap-2" style={{ alignItems: "center", margin: "12px 0" }}>
+      <div className="inspector-search">
         <Input
           type="search"
           role="searchbox"

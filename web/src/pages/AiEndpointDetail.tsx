@@ -5,7 +5,7 @@ import { MoreHorizontal } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Dialog, DropdownMenu, ErrorNotice, Input, MetricStrip, MetricTile, PageHeader, Select, SkeletonRows, Switch } from "@/components/ds";
+import { Button, Dialog, DropdownMenu, ErrorNotice, FormField, FormFieldGroup, Input, MetricStrip, MetricTile, PageHeader, Select, SkeletonRows, Switch } from "@/components/ds";
 import type {
   AiEndpoint, ModelAliasV5, Provider, Service, ServiceAIConfig,
 } from "@/lib/contract";
@@ -224,7 +224,7 @@ export default function AiEndpointDetail() {
   if (svc.error || cfg.error || metrics.error) {
     const e = svc.error ?? cfg.error ?? metrics.error;
     return (
-      <div>
+      <div className="ai-endpoint-detail-page">
         <PageHeader
           title="AI endpoint"
           subtitle="Per-endpoint metering, cache, redaction, and inspector."
@@ -404,8 +404,8 @@ export default function AiEndpointDetail() {
       </section>
 
       <section aria-labelledby={`${headingId}-backends`} className="card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-          <h2 id={`${headingId}-backends`}>Backends</h2>
+        <div className="row" style={{ alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+          <h2 id={`${headingId}-backends`} style={{ margin: 0 }}>Backends</h2>
           <Button
             variant="primary"
             size="sm"
@@ -528,7 +528,7 @@ export default function AiEndpointDetail() {
         title="Add alias"
         description="Create a new model alias binding for this endpoint."
         footer={
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+          <>
             <Button variant="secondary" size="sm" onClick={() => setAliasDialogOpen(false)}>
               Cancel
             </Button>
@@ -540,48 +540,43 @@ export default function AiEndpointDetail() {
             >
               {createAlias.isPending ? "Creating…" : "Create alias"}
             </Button>
-          </div>
+          </>
         }
       >
-        <div className="form-grid" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <div className="field">
-            <label htmlFor="alias-field-alias">Alias</label>
+        <FormFieldGroup>
+          <FormField label="Alias" htmlFor="alias-field-alias" w="md">
             <Input
               id="alias-field-alias"
               value={aliasForm.alias}
               onChange={(e) => setAliasForm((f) => ({ ...f, alias: e.target.value }))}
               placeholder="e.g. fast"
             />
-          </div>
-          <div className="field">
-            <label htmlFor="alias-field-model">Concrete model</label>
+          </FormField>
+          <FormField label="Concrete model" htmlFor="alias-field-model" w="md">
             <Input
               id="alias-field-model"
               value={aliasForm.concrete_model}
               onChange={(e) => setAliasForm((f) => ({ ...f, concrete_model: e.target.value }))}
               placeholder="e.g. llama3.1:8b"
             />
-          </div>
-          <div className="field">
-            <label htmlFor="alias-field-service">Service</label>
+          </FormField>
+          <FormField label="Service" htmlFor="alias-field-service" w="md">
             <Select
               id="alias-field-service"
               value={aliasForm.service_id}
               onChange={(v) => setAliasForm((f) => ({ ...f, service_id: v }))}
               options={serviceOptions.length > 0 ? serviceOptions : [{ value: id, label: id }]}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="alias-field-provider">Provider</label>
+          </FormField>
+          <FormField label="Provider" htmlFor="alias-field-provider" w="md">
             <Select
               id="alias-field-provider"
               value={aliasForm.provider}
               onChange={(v) => setAliasForm((f) => ({ ...f, provider: v as Provider }))}
               options={PROVIDER_OPTIONS}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="alias-field-priority">Priority</label>
+          </FormField>
+          <FormField label="Priority" htmlFor="alias-field-priority" w="sm">
             <Input
               id="alias-field-priority"
               type="number"
@@ -590,8 +585,8 @@ export default function AiEndpointDetail() {
               value={String(aliasForm.priority)}
               onChange={(e) => setAliasForm((f) => ({ ...f, priority: Number(e.target.value) }))}
             />
-          </div>
-        </div>
+          </FormField>
+        </FormFieldGroup>
       </Dialog>
 
       <Toaster />

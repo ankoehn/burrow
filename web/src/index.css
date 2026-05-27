@@ -1715,3 +1715,184 @@ a.link-inline:hover { text-decoration-thickness: 2px; }
   position: sticky;
   top: 0;
 }
+
+/* ──────────────────────────────────────────────────────────────
+   AI Gateway page layout primitives
+   Shared by AiEndpoints, AiEndpointDetail, CostBudgets,
+   PromptCache, Guardrails, RequestInspector.
+
+   Root causes fixed here:
+   1. .form-grid — was referenced in 4 pages but never defined.
+      Now a single-column responsive grid capped at 420px, matching
+      the .pw-form convention.
+   2. .actions (standalone) — bare .actions divs inside page
+      sections had no display/margin rule. Scoped to page wrappers
+      so it doesn't collide with .notice-inline .actions.
+   3. .page-section + .page-section — automatic vertical rhythm
+      between top-level sections (replaces ad-hoc margin-top: 16px
+      on individual .card elements).
+   4. .meta-strip / .sparkline-wrap — AiEndpointDetail layout
+      helpers that were used in JSX but had no CSS.
+   5. .stat-row / .semantic-stats — PromptCache SemanticStatsPanel
+      rows had no layout rule.
+   6. .exact-cache / .semantic-cache — PromptCache tab panels were
+      bare divs with no spacing.
+   7. .inspector-grid / .detail-pane — RequestInspector two-column
+      layout was broken (no display/grid rules).
+   8. .accordion-body h3 — bare h3 inside Guardrails accordion had
+      no margin, causing text to crash into the element above it.
+   9. .pct-bar — CostBudgets budget spend bar inside MetricTile.
+   ────────────────────────────────────────────────────────────── */
+
+/* 1. form-grid: single-col form layout for page-level forms */
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 420px);
+  gap: var(--space-md);
+}
+
+/* 2. standalone .actions row — spaced button cluster at bottom of
+   a section/panel. Add margin-top so the buttons breathe from the
+   last field above them. */
+.ai-endpoints-page  .actions,
+.ai-endpoint-detail-page .actions,
+.cost-page          .actions,
+.prompt-cache-page  .actions,
+.guardrails-page    .actions,
+.inspector-page     .actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+/* 3. vertical rhythm between consecutive top-level sections */
+.page-section + .page-section {
+  margin-top: var(--space-xl);
+}
+
+/* card default margin-top already at 16px; bump AI pages to xl */
+.ai-endpoints-page  > .card,
+.ai-endpoint-detail-page > .card,
+.cost-page          > .card,
+.prompt-cache-page  > .card,
+.guardrails-page    > .card,
+.inspector-page     > .card {
+  margin-top: var(--space-xl);
+}
+
+/* 4. AiEndpointDetail meta-strip (resolved alias + base URL row) */
+.meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-sm) 0 var(--space-md);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin-bottom: var(--space-md);
+}
+
+/* 4b. AiEndpointDetail sparkline container */
+.sparkline-wrap {
+  margin: var(--space-md) 0;
+  color: var(--primary);
+  opacity: 0.7;
+}
+
+/* 5. PromptCache → SemanticStatsPanel stat rows */
+.semantic-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-xs) var(--space-xl);
+  align-items: baseline;
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+  font-size: 13px;
+}
+.stat-row {
+  display: contents; /* children participate in parent grid */
+}
+.stat-row span:first-child {
+  color: var(--muted-foreground);
+}
+.stat-row span:last-child {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* 6. PromptCache tab-panel containers */
+.exact-cache,
+.semantic-cache {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding-top: var(--space-md);
+}
+
+/* 7. RequestInspector two-column grid */
+.inspector-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .inspector-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.detail-pane {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--card);
+  min-height: 200px;
+}
+
+/* 8. Guardrails accordion body h3 — section labels inside accordion */
+.accordion-body h3 {
+  margin: var(--space-lg) 0 var(--space-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.accordion-body h3:first-child {
+  margin-top: var(--space-sm);
+}
+/* Guardrails field inside accordion body (presidio URL) */
+.accordion-body .field {
+  max-width: var(--input-w-md);
+}
+/* Switch+label row inside accordion */
+.accordion-body .row {
+  margin-bottom: var(--space-sm);
+}
+
+/* 9. CostBudgets pct-bar inside MetricTile */
+.pct-bar {
+  width: 100%;
+  border-radius: 2px;
+  background: var(--muted);
+  margin-top: var(--space-xs);
+  overflow: hidden;
+}
+.pct-bar.ok     { background: color-mix(in oklch, var(--success, oklch(0.60 0.17 145)) 30%, var(--muted)); }
+.pct-bar.warn   { background: color-mix(in oklch, oklch(0.72 0.18 85) 50%, var(--muted)); }
+.pct-bar.danger { background: color-mix(in oklch, var(--destructive) 50%, var(--muted)); }
+
+/* RequestInspector search row — replace inline style margin */
+.inspector-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+.inspector-search .input {
+  max-width: var(--input-w-md);
+}

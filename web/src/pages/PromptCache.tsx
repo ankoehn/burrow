@@ -215,15 +215,14 @@ function SemanticPanel() {
       {statsQuery.data && <SemanticStatsPanel stats={statsQuery.data} />}
 
       {serviceOptions.length > 0 && (
-        <div className="field" style={{ maxWidth: 280, marginBottom: 12 }}>
-          <label htmlFor="semantic-service-picker">Service</label>
+        <FormField label="Service" htmlFor="semantic-service-picker" w="md">
           <Select
             id="semantic-service-picker"
             value={selectedServiceId}
             onChange={handleServiceChange}
             options={serviceOptions}
           />
-        </div>
+        </FormField>
       )}
 
       <div className="row gap-2" style={{ alignItems: "center" }}>
@@ -236,9 +235,8 @@ function SemanticPanel() {
       </div>
 
       {draft?.enabled && (
-        <div className="form-grid" style={{ marginTop: 16 }}>
-          <div className="field">
-            <label htmlFor="sem-min-similarity">Min similarity</label>
+        <FormFieldGroup>
+          <FormField label="Min similarity" htmlFor="sem-min-similarity" w="sm">
             <Input
               id="sem-min-similarity"
               type="number"
@@ -251,9 +249,8 @@ function SemanticPanel() {
                 setSemanticDraft({ ...draft, min_similarity: Number(e.target.value) })
               }
             />
-          </div>
-          <div className="field">
-            <label htmlFor="sem-embedding-mode">Embedding mode</label>
+          </FormField>
+          <FormField label="Embedding mode" htmlFor="sem-embedding-mode" w="md">
             <Select
               id="sem-embedding-mode"
               value={draft.embedding_mode}
@@ -262,27 +259,24 @@ function SemanticPanel() {
               }
               options={EMBEDDING_MODE_OPTIONS}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="sem-embedding-url">Embedding URL</label>
+          </FormField>
+          <FormField label="Embedding URL" htmlFor="sem-embedding-url" w="md">
             <Input
               id="sem-embedding-url"
               className="mono"
               value={draft.embedding_url}
               onChange={(e) => setSemanticDraft({ ...draft, embedding_url: e.target.value })}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="sem-embedding-model">Embedding model</label>
+          </FormField>
+          <FormField label="Embedding model" htmlFor="sem-embedding-model" w="md">
             <Input
               id="sem-embedding-model"
               className="mono"
               value={draft.embedding_model}
               onChange={(e) => setSemanticDraft({ ...draft, embedding_model: e.target.value })}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="sem-fallback-policy">Fallback policy</label>
+          </FormField>
+          <FormField label="Fallback policy" htmlFor="sem-fallback-policy" w="md">
             <Select
               id="sem-fallback-policy"
               value={draft.fallback_policy}
@@ -291,19 +285,16 @@ function SemanticPanel() {
               }
               options={FALLBACK_POLICY_OPTIONS}
             />
+          </FormField>
+          <div className="row gap-2" style={{ alignItems: "center" }}>
+            <Switch
+              aria-label="Promote on miss"
+              checked={draft.promote_on_miss}
+              onChange={(v) => setSemanticDraft({ ...draft, promote_on_miss: v })}
+            />
+            <span>Promote on miss</span>
           </div>
-          <div className="field">
-            <div className="row gap-2" style={{ alignItems: "center" }}>
-              <Switch
-                aria-label="Promote on miss"
-                checked={draft.promote_on_miss}
-                onChange={(v) => setSemanticDraft({ ...draft, promote_on_miss: v })}
-              />
-              <label>Promote on miss</label>
-            </div>
-          </div>
-          <div className="field">
-            <label htmlFor="sem-max-index-entries">Max index entries</label>
+          <FormField label="Max index entries" htmlFor="sem-max-index-entries" w="sm">
             <Input
               id="sem-max-index-entries"
               type="number"
@@ -314,17 +305,17 @@ function SemanticPanel() {
                 setSemanticDraft({ ...draft, max_index_entries: Number(e.target.value) })
               }
             />
-          </div>
-        </div>
+          </FormField>
+        </FormFieldGroup>
       )}
 
       {simOutOfRange && (
-        <p role="alert" className="alert-danger" style={{ marginTop: 8 }}>
+        <p role="alert" className="notice-inline error">
           Similarity must be between 0 and 1.
         </p>
       )}
 
-      <div className="actions" style={{ marginTop: 16 }}>
+      <div className="actions">
         <Button
           variant="primary"
           size="sm"

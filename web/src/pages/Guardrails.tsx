@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  Button, Input, PageHeader, Select, SkeletonRows, Switch,
+  Button, FormField, Input, PageHeader, Select, SkeletonRows, Switch,
 } from "@/components/ds";
 import type {
   GuardrailSettings, RedactionRule, RedactionSettings,
@@ -216,8 +216,7 @@ export default function Guardrails() {
           Runs Microsoft Presidio (Apache-2.0) as a sidecar process Burrow shells out to. Off by
           default — you install Presidio yourself.
         </p>
-        <div className="field">
-          <label htmlFor="presidio-url">Presidio URL</label>
+        <FormField label="Presidio URL" htmlFor="presidio-url" w="md">
           <Input
             id="presidio-url"
             className="mono"
@@ -225,7 +224,7 @@ export default function Guardrails() {
             value={presidioUrl}
             onChange={(e) => setPresidioUrl(e.target.value)}
           />
-        </div>
+        </FormField>
         <div className="actions">
           <Button variant="secondary" size="sm" onClick={() => testPresidio.mutate(presidioUrl)}>
             Test connection
@@ -246,15 +245,14 @@ export default function Guardrails() {
           />
           <span>Inspect prompts for injection patterns</span>
         </div>
-        <div className="field">
-          <label htmlFor="injection-action">On detection</label>
+        <FormField label="On detection" htmlFor="injection-action" w="md">
           <Select
             id="injection-action"
             value={guardDraft.action}
             onChange={(v) => setGuardDraft({ ...guardDraft, action: v as GuardrailSettings["action"] })}
             options={ACTION_OPTIONS}
           />
-        </div>
+        </FormField>
         <PatternList patterns={patterns.data ?? []} />
         <div className="actions">
           <Button variant="primary" size="sm" disabled={saveGuard.isPending} onClick={() => saveGuard.mutate(guardDraft)}>
