@@ -7,9 +7,14 @@
 
 import { test, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
+import path from "node:path";
 import { AUTH_STORAGE_PATH } from "../fixtures/auth";
 import { adminHeaders } from "../fixtures/api";
-import { HTTPS_INGRESS, aiHost } from "../fixtures/env";
+import { COMPOSE_FILE, HTTPS_INGRESS, aiHost } from "../fixtures/env";
+
+// process.cwd() === test/integration/full when Playwright runs; step back 3
+// levels to reach the repo root where the compose file path is anchored.
+const REPO_ROOT = path.resolve(process.cwd(), "..", "..", "..");
 
 test.use({ storageState: AUTH_STORAGE_PATH });
 test.slow(); // container restart adds latency
@@ -41,8 +46,8 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
   // 3. Stop mockoai.
   const stopResult = spawnSync(
     "docker",
-    ["compose", "-f", "test/integration/full/compose.full.yml", "stop", "mockoai"],
-    { stdio: "pipe" },
+    ["compose", "-f", COMPOSE_FILE, "stop", "mockoai"],
+    { stdio: "pipe", cwd: REPO_ROOT },
   );
   if (stopResult.status !== 0) {
     test.skip(true, "Docker not reachable from Playwright runner — backend coverage via TestE2EFailover_CircuitBreakerTrip");
@@ -68,8 +73,8 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
   // 5. Restart mockoai for subsequent specs.
   spawnSync(
     "docker",
-    ["compose", "-f", "test/integration/full/compose.full.yml", "start", "mockoai"],
-    { stdio: "pipe" },
+    ["compose", "-f", COMPOSE_FILE, "start", "mockoai"],
+    { stdio: "pipe", cwd: REPO_ROOT },
   );
   // Wait for healthy.
   for (let i = 0; i < 30; i++) {
