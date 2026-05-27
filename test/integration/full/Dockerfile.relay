@@ -4,7 +4,7 @@
 # adds cert mount + integration build tag + GO_BUILD_TAGS arg so the
 # compose Postgres override (T17) can swap "integration,postgres" in.
 FROM golang:1.26-alpine AS build
-ARG GO_BUILD_TAGS=integration
+ARG GO_BUILD_TAGS=integration,semantic_cache
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -tags=${GO_BUILD_TAGS} -trimpath -ldflags="-s -w" -o /out/burrowd ./cmd/server
