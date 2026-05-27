@@ -21,30 +21,18 @@ package main
 //       with a ~1500-byte body returns 429 {"error":"quota_exceeded",
 //       "reset_at":"<RFC3339 UTC midnight>"}.
 //
-// WIRING GAP DOCUMENTED — surfaced by these tests and reproduced in
-// the agent's final report:
+// WIRING STATUS — the bypass bug was fixed in fix(aigw): apply RateLimit
+// in ServeHTTP before IsAIPassThrough guard.
 //
-//   internal/aigw/chain.go declares c.RateLimit as
+//   Chain.ServeHTTP now applies c.RateLimit BEFORE the IsAIPassThrough
+//   check, so quota enforcement fires for ALL proxied traffic regardless
+//   of whether a service_ai_config row exists.
 //
-//     RateLimit func(http.Handler) http.Handler
-//
-//   but Chain.run() never invokes it (see chain.go:371 — "STUB. Task 11
-//   swaps in the real impl"). Even when bootE2EStack wired an enforcer,
-//   the chain would not call it. Equally, the proxy hot path
-//   (internal/proxy/proxy.go) has no quota.Engine dependency at all.
-//
-//   Net effect: rate_limits rows inserted via the API are honoured by
-//   the rate-limits handlers themselves (the /api/v1/rate-limits/usage
-//   endpoint computes Usage), but they are NEVER enforced on proxied
-//   traffic in v0.4.0. The v0.4.0 spec Part D promises proxy-hot-path
-//   enforcement; this is a production drift the integration agent will
-//   need to fold into BACKLOG.
-//
-// Because the chain doesn't consult quota.Engine, each test below
-// configures the rate-limit row, fires the requests through the real
-// proxy, and asserts the EXPECTED behaviour. When the production
-// wiring lands, the tests pass; today they skip cleanly with a clear
-// gap-documenting message so the integration agent has a TODO marker.
+//   Each test below seeds a service_ai_config row with inspector disabled
+//   so the chain path runs (the old workaround for the bypass bug). The
+//   skip logic is retained: if bootE2EStack is not wired with a real
+//   quota.Engine the tests self-skip with a clear message rather than
+//   failing spuriously in short mode.
 
 import (
 	"bytes"
@@ -92,15 +80,15 @@ func seedRateLimit(t *testing.T, s *e2eStack, rl db.RateLimit) {
 	}
 }
 
-// quotaSkipMsg is the shared skip message for tests that surface the
-// chain's missing quota enforcement.
-const quotaSkipMsg = "WIRING GAP: internal/aigw/chain.go does not consult quota.Engine on the " +
-	"proxy hot path (chain.go:371 — RateLimit field is documented as STUB; " +
-	"Chain.run() never invokes it). bootE2EStack therefore has no rate-limit " +
-	"enforcement to assert against. To close this gap: wire quota.Engine.Charge " +
-	"into Chain.run() after redaction (before cache lookup), mapping " +
-	"Subjects.APIKeyID from the resolved svc.APIKeyID and Subjects.ServiceID " +
-	"from svc.ID. Until then this test acts as a BACKLOG marker."
+// quotaSkipMsg is emitted when bootE2EStack's Chain has no RateLimit
+// middleware wired (quota.Engine not injected), so rate-limit rows seeded
+// in DB are not consulted at all. Chain.ServeHTTP now calls RateLimit
+// before the IsAIPassThrough guard (bypass bug fixed), but the enforcer
+// must still be injected at startup for the enforcement to be active.
+const quotaSkipMsg = "quota.Engine not wired into bootE2EStack Chain.RateLimit: " +
+	"rate-limit rows are present in DB but the chain's RateLimit field is nil so " +
+	"enforcement is skipped. Wire quota.Engine.Charge into the e2e stack's Chain " +
+	"to activate enforcement and remove this skip."
 
 // TestE2EQuota_RateLimit429 — Task 6, single-bucket rpm denial.
 func TestE2EQuota_RateLimit429(t *testing.T) {

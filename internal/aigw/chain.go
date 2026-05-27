@@ -244,6 +244,27 @@ func IsAIPassThrough(c ServiceAIConfig) bool {
 // expected to check IsAIPassThrough before dispatching, but we re-check
 // here so misuse is safe.
 func (c *Chain) ServeHTTP(w http.ResponseWriter, r *http.Request, svc Service, proxyHandler http.Handler) {
+	// ---------------------------------------------------------------
+	// Step 0 (pre-chain): rate-limit — applied to ALL proxied traffic,
+	// regardless of whether the service has AI config. Moving this here
+	// (before the IsAIPassThrough guard) ensures that services without a
+	// service_ai_config row still have quota enforced. The duplicate block
+	// inside run() has been removed.
+	// ---------------------------------------------------------------
+	if c.RateLimit != nil {
+		r = r.WithContext(quota.WithSubjects(r.Context(), quota.Subjects{
+			ServiceID: svc.ID,
+			APIKeyID:  svc.APIKeyID,
+		}))
+		passed := false
+		c.RateLimit(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			passed = true
+		})).ServeHTTP(w, r)
+		if !passed {
+			return
+		}
+	}
+
 	if IsAIPassThrough(svc.AIConfig) {
 		proxyHandler.ServeHTTP(w, r)
 		return
@@ -383,30 +404,9 @@ func (c *Chain) run(w http.ResponseWriter, r *http.Request, svc Service, proxyHa
 	// ---------------------------------------------------------------
 
 	// ---------------------------------------------------------------
-	// Step 3: ratelimit — check quota before any proxying. The RateLimit
-	// middleware is a func(http.Handler) http.Handler; we inject the
-	// quota.Subjects into the request context so the middleware can call
-	// engine.Charge without an import cycle. On denial the middleware writes
-	// its own 429 response and does NOT call next; we detect that via a
-	// "passed" flag and short-circuit run().
-	// ---------------------------------------------------------------
-	if c.RateLimit != nil {
-		r = r.WithContext(quota.WithSubjects(r.Context(), quota.Subjects{
-			ServiceID: svc.ID,
-			APIKeyID:  svc.APIKeyID,
-		}))
-		passed := false
-		c.RateLimit(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-			passed = true
-		})).ServeHTTP(w, r)
-		if !passed {
-			// Middleware denied the request and has already written a response.
-			return
-		}
-	}
-
-	// ---------------------------------------------------------------
-	// Step 4: redact — rewrites the body before cache + metering.
+	// Step 3: redact — rewrites the body before cache + metering.
+	// (Rate-limit was Step 3 previously; it is now applied in ServeHTTP
+	// before the IsAIPassThrough guard so quota covers all proxied traffic.)
 	// ---------------------------------------------------------------
 	var (
 		redactedBody []byte = body
