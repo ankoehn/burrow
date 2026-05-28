@@ -85,61 +85,67 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   await page.waitForTimeout(500);
 
   // ------------------------------------------------------------------
+  // 3-7. Block → assert 403 → clear → assert 200.
+  //      The cleanup PUT is in a finally block so the 0.0.0.0/0 policy is
+  //      ALWAYS disabled even if an assertion throws, preventing the ai
+  //      service from being blocked for subsequent specs (cascade risk).
+  // ------------------------------------------------------------------
+  const host = aiHost();
+
   // 3. Write the block CIDR via direct API (authoritative path).
   //    0.0.0.0/0 blocks every IPv4 address, guaranteeing a 403 regardless
   //    of which Docker-bridge IP the relay sees as the request source.
   //    The UI URL mismatch means we use the correct /ip-geo URL directly.
-  // ------------------------------------------------------------------
   const putResp = await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
     headers: adminHeaders(),
     data: { enabled: true, allow_cidrs: [], block_cidrs: ["0.0.0.0/0"], allow_countries: [], block_countries: [] },
   });
   expect(putResp.status()).toBe(204);
 
-  // ------------------------------------------------------------------
-  // 4. Verify the block CIDR is persisted.
-  // ------------------------------------------------------------------
-  const geoCfg = await request.get(`/api/v1/services/${ai.id}/ip-geo`, {
-    headers: adminHeaders(),
-  });
-  expect(geoCfg.status()).toBe(200);
-  const geo = (await geoCfg.json()) as { block_cidrs: string[] };
-  expect(geo.block_cidrs).toContain("0.0.0.0/0");
+  try {
+    // 4. Verify the block CIDR is persisted.
+    const geoCfg = await request.get(`/api/v1/services/${ai.id}/ip-geo`, {
+      headers: adminHeaders(),
+    });
+    expect(geoCfg.status()).toBe(200);
+    const geo = (await geoCfg.json()) as { block_cidrs: string[] };
+    expect(geo.block_cidrs).toContain("0.0.0.0/0");
 
-  // ------------------------------------------------------------------
-  // 5. Proxy enforcement check (REAL assertion — no skip).
-  //    The relay enforces ip-geo in internal/proxy/proxy.go before the
-  //    access-mode check. With 0.0.0.0/0 blocked the request must 403.
-  // ------------------------------------------------------------------
-  const host = aiHost();
-  const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
-    headers: { host },
-    ignoreHTTPSErrors: true,
-  });
-  expect(denied.status()).toBe(403);
+    // 5. Proxy enforcement check (REAL assertion — no skip).
+    //    The relay enforces ip-geo in internal/proxy/proxy.go before the
+    //    access-mode check. With 0.0.0.0/0 blocked the request must 403.
+    const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
+      headers: { host },
+      ignoreHTTPSErrors: true,
+    });
+    expect(denied.status()).toBe(403);
 
-  // ------------------------------------------------------------------
-  // 6. Clean up — PUT empty list so subsequent specs see a clean state.
-  // ------------------------------------------------------------------
-  const cleanup = await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
-    headers: adminHeaders(),
-    data: { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
-  });
-  expect(cleanup.status()).toBe(204);
+    // 6. Clean up — PUT empty list so subsequent specs see a clean state.
+    //    Also executed unconditionally in finally below.
+    const cleanup = await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
+      headers: adminHeaders(),
+      data: { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
+    });
+    expect(cleanup.status()).toBe(204);
 
-  // ------------------------------------------------------------------
-  // 7. Confirm proxy passes after clearing the block policy.
-  // ------------------------------------------------------------------
-  const afterCfg = await request.get(`/api/v1/services/${ai.id}/ip-geo`, {
-    headers: adminHeaders(),
-  });
-  expect(afterCfg.status()).toBe(200);
-  const after = (await afterCfg.json()) as { block_cidrs: string[] };
-  expect(after.block_cidrs).toHaveLength(0);
+    // 7. Confirm proxy passes after clearing the block policy.
+    const afterCfg = await request.get(`/api/v1/services/${ai.id}/ip-geo`, {
+      headers: adminHeaders(),
+    });
+    expect(afterCfg.status()).toBe(200);
+    const after = (await afterCfg.json()) as { block_cidrs: string[] };
+    expect(after.block_cidrs).toHaveLength(0);
 
-  const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
-    headers: { host },
-    ignoreHTTPSErrors: true,
-  });
-  expect(ok.status()).toBe(200);
+    const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
+      headers: { host },
+      ignoreHTTPSErrors: true,
+    });
+    expect(ok.status()).toBe(200);
+  } finally {
+    // Always restore: disable ip-geo + clear all lists regardless of test outcome.
+    await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
+      headers: adminHeaders(),
+      data: { enabled: false, allow_cidrs: [], block_cidrs: [], allow_countries: [], block_countries: [] },
+    });
+  }
 });
