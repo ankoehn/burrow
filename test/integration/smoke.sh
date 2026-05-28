@@ -6,7 +6,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE_FILE="test/integration/compose.e2e.yml"
+COMPOSE_FILE="test/harness/compose.base.yml"
 cd "$REPO_ROOT"
 
 pass=0

@@ -7,14 +7,14 @@
 #   quota 429 → ip-geo 403 → audit → restart & reconnect
 #
 # Usage:
-#   bash test/integration/full/smoke-user.sh           # bring stack up + tear down on exit
-#   bash test/integration/full/smoke-user.sh --no-up   # use already-running stack, skip teardown
+#   bash test/manual/smoke-user.sh           # bring stack up + tear down on exit
+#   bash test/manual/smoke-user.sh --no-up   # use already-running stack, skip teardown
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
-COMPOSE="test/integration/full/compose.full.yml"
+COMPOSE="test/harness/compose.full.yml"
 
 # ---------------------------------------------------------------------------
 # Flags
