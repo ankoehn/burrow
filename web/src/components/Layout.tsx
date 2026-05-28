@@ -62,7 +62,7 @@ export function Layout() {
   const navItem = ({ isActive }: { isActive: boolean }) => cx("nav-item", isActive && "is-active");
   const avatarInitial = (user?.email?.[0] ?? "U").toUpperCase();
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", position: "relative", background: "var(--background)", color: "var(--foreground)" }}>
       <a className="skip-link" href="#main">Skip to content</a>
       <nav className="sidebar" aria-label="Main">
         <div className="sidebar-brand">
