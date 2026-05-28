@@ -51,6 +51,7 @@ import (
 	"github.com/ankoehn/burrow/internal/proxy"
 	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 	"github.com/ankoehn/burrow/internal/quota"
+	"github.com/ankoehn/burrow/internal/redact"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 )
@@ -197,6 +198,10 @@ type bootE2ECfg struct {
 	// seedRateLimit (which calls quotaEngine.Reload after each insert so the
 	// in-memory snapshot is current before requests are fired).
 	quotaEnabled bool
+	// redactEnabled, when true, builds a real redact.Engine (built-in rules
+	// plus any custom rules) passed as NewChain's redactEngine arg.
+	redactEnabled bool
+	redactRules   []redact.Rule
 }
 
 // withConnLogSink returns a bootE2EStack option that registers a proxy
@@ -258,6 +263,12 @@ func withCustomDomainCertStore(store *customdomain.Store) bootE2EStackOption {
 // use seedRateLimit to insert the actual rule rows.
 func withE2EQuota(_ ...quota.Limit) bootE2EStackOption {
 	return func(c *bootE2ECfg) { c.quotaEnabled = true }
+}
+
+// withE2ERedaction builds a real redact.Engine and installs it as the AI
+// chain's redaction engine, so redaction runs on the real proxy data path.
+func withE2ERedaction(custom ...redact.Rule) bootE2EStackOption {
+	return func(c *bootE2ECfg) { c.redactEnabled = true; c.redactRules = custom }
 }
 
 // withProxyIdleTimeout returns a bootE2EStack option that sets a per-request
@@ -419,7 +430,15 @@ func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 	// never query usage_events are unaffected.
 	meterSink := aimeter.NewSQLSink(db.Wrap(d))
 	meterSink.Log = s.log
-	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, nil, nil, nil, nil, meterSink, s.log)
+	var redactEngine *redact.Engine
+	if cfg.redactEnabled {
+		var err error
+		redactEngine, err = redact.NewEngine(cfg.redactRules)
+		if err != nil {
+			t.Fatalf("redact.NewEngine: %v", err)
+		}
+	}
+	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, redactEngine, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	if cfg.quotaEnabled {
 		// Build a real quota.Engine backed by the test DB (mirrors

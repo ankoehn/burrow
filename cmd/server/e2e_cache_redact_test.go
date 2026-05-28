@@ -83,7 +83,7 @@ func TestE2ECacheRedact_RedactedBodyToUpstream(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skip e2e in -short")
 	}
-	s := bootE2EStack(t)
+	s := bootE2EStack(t, withE2ERedaction())
 
 	// Counting upstream that records the LAST body it received. The
 	// chain forwards the (possibly redacted) request bytes; we assert
@@ -162,20 +162,7 @@ func TestE2ECacheRedact_RedactedBodyToUpstream(t *testing.T) {
 	originalEmailInUpstream := strings.Contains(string(upstreamReq), "test@example.com")
 	maskMarkerInUpstream := strings.Contains(string(upstreamReq), "[redacted: email]")
 
-	if originalEmailInUpstream && !maskMarkerInUpstream {
-		// Current behavior under the e2e helper's nil-Redact wiring:
-		// the chain falls through with the ORIGINAL body. Skip with a
-		// clear gap message so this test acts as the integration
-		// agent's wiring-reconciliation TODO marker.
-		t.Skip("WIRING GAP: bootE2EStack constructs aigw.NewChain with Redact=nil " +
-			"(cmd/server/e2e_helpers_test.go:295). Chain.run() (chain.go:383) " +
-			"skips redaction when c.Redact==nil, so the upstream observed the " +
-			"original email. To close this gap: wire " +
-			"redact.NewEngine(nil) into the chain Redact field in bootE2EStack.")
-	}
-
-	// Path A: Redact engine IS wired → assert the chain's redaction-
-	// pre-storage invariant.
+	// Assert the chain's redaction-pre-storage invariant.
 	if !maskMarkerInUpstream {
 		t.Fatalf("upstream body must contain mask marker '[redacted: email]'; got %q", upstreamReq)
 	}
