@@ -159,17 +159,19 @@ func (a proxyDialerAdapter) Lookup(ctx context.Context, sub string) (*proxy.Reso
 		return nil, fmt.Errorf("proxy lookup: ip-geo config: %w", err)
 	}
 	r := &proxy.Resolved{
-		ServiceID:        svc.ID,
-		AccessMode:       svc.AccessMode,
-		APIKeyHeader:     svc.APIKeyHeader,
-		LocalHost:        tn.LocalAddr,
-		TunnelID:         tn.ID,
-		UserID:           userID,
-		ClientSessionID:  sessionID,
-		IPAllowCIDRs:     ipgeo.AllowCIDRs,
-		IPBlockCIDRs:     ipgeo.BlockCIDRs,
-		IPAllowCountries: ipgeo.AllowCountries,
-		IPBlockCountries: ipgeo.BlockCountries,
+		ServiceID:       svc.ID,
+		AccessMode:      svc.AccessMode,
+		APIKeyHeader:    svc.APIKeyHeader,
+		LocalHost:       tn.LocalAddr,
+		TunnelID:        tn.ID,
+		UserID:          userID,
+		ClientSessionID: sessionID,
+	}
+	if ipgeo.Enabled {
+		r.IPAllowCIDRs = ipgeo.AllowCIDRs
+		r.IPBlockCIDRs = ipgeo.BlockCIDRs
+		r.IPAllowCountries = ipgeo.AllowCountries
+		r.IPBlockCountries = ipgeo.BlockCountries
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
@@ -216,17 +218,19 @@ func (a proxyDialerAdapter) LookupByServiceID(ctx context.Context, serviceID str
 		return nil, fmt.Errorf("proxy lookup by service id: ip-geo config: %w", err)
 	}
 	r := &proxy.Resolved{
-		ServiceID:        svc.ID,
-		AccessMode:       svc.AccessMode,
-		APIKeyHeader:     svc.APIKeyHeader,
-		LocalHost:        tn.LocalAddr,
-		TunnelID:         tn.ID,
-		UserID:           userID,
-		ClientSessionID:  sessionID,
-		IPAllowCIDRs:     ipgeo.AllowCIDRs,
-		IPBlockCIDRs:     ipgeo.BlockCIDRs,
-		IPAllowCountries: ipgeo.AllowCountries,
-		IPBlockCountries: ipgeo.BlockCountries,
+		ServiceID:       svc.ID,
+		AccessMode:      svc.AccessMode,
+		APIKeyHeader:    svc.APIKeyHeader,
+		LocalHost:       tn.LocalAddr,
+		TunnelID:        tn.ID,
+		UserID:          userID,
+		ClientSessionID: sessionID,
+	}
+	if ipgeo.Enabled {
+		r.IPAllowCIDRs = ipgeo.AllowCIDRs
+		r.IPBlockCIDRs = ipgeo.BlockCIDRs
+		r.IPAllowCountries = ipgeo.AllowCountries
+		r.IPBlockCountries = ipgeo.BlockCountries
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
