@@ -7,8 +7,8 @@ name: burrow-e2e-full
 services:
   relay:
     build:
-      context: ../../..
-      dockerfile: test/integration/full/Dockerfile.relay
+      context: ../..
+      dockerfile: test/harness/Dockerfile.relay
     image: burrow-e2e-relay-full:dev
     environment:
       BURROW_ADMIN_EMAIL: admin@e2e.local
@@ -53,8 +53,8 @@ services:
 
   client-ai:
     build:
-      context: ../../..
-      dockerfile: test/integration/full/Dockerfile.client-ai
+      context: ../..
+      dockerfile: test/harness/Dockerfile.client-ai
     image: burrow-e2e-client-ai:dev
     depends_on:
       relay: { condition: service_healthy }
@@ -65,8 +65,8 @@ services:
 
   client-tcp:
     build:
-      context: ../../..
-      dockerfile: test/integration/full/Dockerfile.client-tcp
+      context: ../..
+      dockerfile: test/harness/Dockerfile.client-tcp
     image: burrow-e2e-client-tcp:dev
     depends_on:
       relay: { condition: service_healthy }
@@ -76,8 +76,8 @@ services:
 
   client-multi:
     build:
-      context: ../../..
-      dockerfile: test/integration/full/Dockerfile.client-multi
+      context: ../..
+      dockerfile: test/harness/Dockerfile.client-multi
     image: burrow-e2e-client-multi:dev
     depends_on:
       relay: { condition: service_healthy }

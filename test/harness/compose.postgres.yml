@@ -1,6 +1,6 @@
 # test-only — never deploy this shape.
 # Postgres profile override — apply with:
-#   docker compose -f compose.full.yml -f compose.full.postgres.yml up -d --build --wait
+#   docker compose -f compose.full.yml -f compose.postgres.yml up -d --build --wait
 
 services:
   postgres:

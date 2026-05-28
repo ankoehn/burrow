@@ -8,7 +8,7 @@ services:
   relay:
     build:
       context: ../..
-      dockerfile: test/integration/Dockerfile.relay
+      dockerfile: test/harness/Dockerfile.relay-min
     image: burrow-e2e-relay:dev
     environment:
       BURROW_ADMIN_EMAIL: admin@e2e.local
@@ -33,7 +33,7 @@ services:
   client:
     build:
       context: ../..
-      dockerfile: test/integration/Dockerfile.client
+      dockerfile: test/harness/Dockerfile.client
     image: burrow-e2e-client:dev
     depends_on:
       relay:
