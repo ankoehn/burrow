@@ -114,14 +114,7 @@ import (
 // Retry seam in chain.go Step 9. None of these are present at tip
 // 7805962 so the test cannot meaningfully exercise failover today.
 func TestE2EFailover_OnConnectionError(t *testing.T) {
-	t.Skip("v0.4.0 Task 7 wiring deferral: " +
-		"aigw.Chain.run consults Router.Pick log-only (chain.go ~line 477); " +
-		"v04_loader.decodeServiceAIConfig skips the routing block " +
-		"(v04_loader.go:145); v04_wiring.go uses routeLookupNoop " +
-		"(v04_wiring.go:143); internal/proxy has no Router awareness. " +
-		"Closing the wiring requires a dedicated follow-up commit " +
-		"crossing internal/aigw, internal/proxy, and cmd/server. " +
-		"Tracked as Task 7 follow-up in the integration report.")
+	t.Skip("failover/circuit-breaker not implemented (route.Router runs with routeLookupNoop) — see docs/BACKLOG_failover.md")
 }
 
 // TestE2EFailover_CircuitBreakerTrip — Task 7, sub-test 2.
@@ -141,13 +134,7 @@ func TestE2EFailover_OnConnectionError(t *testing.T) {
 // this e2e exercises the end-to-end signal flow that's not yet
 // connected.
 func TestE2EFailover_CircuitBreakerTrip(t *testing.T) {
-	t.Skip("v0.4.0 Task 7 wiring deferral: circuit breaker is exercised " +
-		"by internal/route unit tests but the proxy hot path does not " +
-		"call Router.Trip()/ReportSuccess() on upstream outcomes. " +
-		"Closing this requires the same Pick → Director plumbing as " +
-		"TestE2EFailover_OnConnectionError plus a per-upstream-outcome " +
-		"reporter in internal/proxy. Tracked as Task 7 follow-up in " +
-		"the integration report.")
+	t.Skip("failover/circuit-breaker not implemented (route.Router runs with routeLookupNoop) — see docs/BACKLOG_failover.md")
 }
 
 // TestE2EFailover_IdempotencyKeyRule — Task 7, sub-test 3.
@@ -171,10 +158,5 @@ func TestE2EFailover_CircuitBreakerTrip(t *testing.T) {
 // Step 9 needs and that v04_wiring.go's noop Lookup makes impossible
 // today. See the package doc-comment for the full chain.
 func TestE2EFailover_IdempotencyKeyRule(t *testing.T) {
-	t.Skip("v0.4.0 Task 7 wiring deferral: the idempotency-key retry " +
-		"rule depends on the same Pick → Director plumbing as the " +
-		"two sibling failover tests, plus a bytes-streamed-yet flag " +
-		"on the upstream-side response writer in chain.go Step 9. " +
-		"Neither is wired at tip 7805962. Tracked as Task 7 " +
-		"follow-up in the integration report.")
+	t.Skip("failover/circuit-breaker not implemented (route.Router runs with routeLookupNoop) — see docs/BACKLOG_failover.md")
 }
