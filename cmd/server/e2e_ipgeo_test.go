@@ -332,6 +332,71 @@ func TestE2EIPGeo_CIDRAllowBlock(t *testing.T) {
 	}
 }
 
+// TestE2EIPGeo_BlockCIDR proves the production proxy (the one booted by
+// bootE2EStack, wired via proxyDialerAdapter + SetServiceIPGeo) returns 403
+// when the visitor's real TCP source IP is in a blocked CIDR and 200 once the
+// block is cleared.
+//
+// The visitor always connects from 127.0.0.1 (loopback). No trusted-proxy list
+// is set on the stack, so clientip.Resolve returns the raw TCP peer IP.
+// Blocking 127.0.0.0/8 therefore blocks the test's own visitor requests.
+func TestE2EIPGeo_BlockCIDR(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip e2e in -short")
+	}
+	s := bootE2EStack(t)
+
+	// Upstream returns 200 with a known body when the proxy lets traffic through.
+	s.setUpstreamHandler(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok-ipgeo")
+	})
+
+	wrapped := db.Wrap(s.db)
+	hc := s.visitorClient(t)
+	target := "https://" + s.hostWithPort() + "/"
+
+	// ------------------------------------------------------------------
+	// Arm 1: block the loopback CIDR → proxy must return 403.
+	// ------------------------------------------------------------------
+	must(t, wrapped.SetServiceIPGeo(context.Background(), db.ServiceIPGeoConfig{
+		ServiceID:      s.serviceID,
+		Enabled:        true,
+		AllowCIDRs:     []string{},
+		BlockCIDRs:     []string{"127.0.0.0/8"},
+		AllowCountries: []string{},
+		BlockCountries: []string{},
+	}), "SetServiceIPGeo(block loopback)")
+
+	resp1, err := hc.Get(target)
+	must(t, err, "GET (blocked)")
+	body1 := readAllString(t, resp1)
+	if resp1.StatusCode != http.StatusForbidden {
+		t.Fatalf("arm1: want 403, got %d body=%s", resp1.StatusCode, body1)
+	}
+
+	// ------------------------------------------------------------------
+	// Arm 2: clear the block (Enabled=false) → proxy must return 200.
+	// ------------------------------------------------------------------
+	must(t, wrapped.SetServiceIPGeo(context.Background(), db.ServiceIPGeoConfig{
+		ServiceID:      s.serviceID,
+		Enabled:        false,
+		AllowCIDRs:     []string{},
+		BlockCIDRs:     []string{},
+		AllowCountries: []string{},
+		BlockCountries: []string{},
+	}), "SetServiceIPGeo(clear)")
+
+	resp2, err := hc.Get(target)
+	must(t, err, "GET (cleared)")
+	body2 := readAllString(t, resp2)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("arm2: want 200, got %d body=%s", resp2.StatusCode, body2)
+	}
+	if body2 != "ok-ipgeo" {
+		t.Errorf("arm2: upstream body: want ok-ipgeo, got %q", body2)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Minimal API harness for the /geo/status step.
 // ---------------------------------------------------------------------------
