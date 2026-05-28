@@ -6,7 +6,7 @@ import path from "node:path";
 import { COMPOSE_FILE, COMPOSE_POSTGRES_OVERRIDE } from "./env";
 
 function repoRoot(): string {
-  return path.resolve(process.cwd(), "..", "..", "..");
+  return path.resolve(process.cwd(), "..", "..");
 }
 
 function compose(args: string): void {

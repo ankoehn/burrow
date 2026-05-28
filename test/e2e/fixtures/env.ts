@@ -1,5 +1,5 @@
 // test-only — never deploy this shape.
-// MUST match test/integration/full/compose.full.yml. Change one, change both.
+// MUST match test/harness/compose.full.yml. Change one, change both.
 
 import { spawnSync } from "node:child_process";
 
@@ -25,8 +25,8 @@ export const TUNNEL_MULTI_B = "http://localhost:9004";   // client-multi svc-b
 
 export const TUNNEL_NAMES = ["ai", "tcp-echo", "svc-a", "svc-b"] as const;
 
-export const COMPOSE_FILE = "test/integration/full/compose.full.yml";
-export const COMPOSE_POSTGRES_OVERRIDE = "test/integration/full/compose.full.postgres.yml";
+export const COMPOSE_FILE = "test/harness/compose.full.yml";
+export const COMPOSE_POSTGRES_OVERRIDE = "test/harness/compose.postgres.yml";
 
 export const RESET_URL = `${DASHBOARD_URL}/api/v1/internal/test-reset`;
 

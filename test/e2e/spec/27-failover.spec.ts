@@ -12,9 +12,9 @@ import { AUTH_STORAGE_PATH } from "../fixtures/auth";
 import { adminHeaders } from "../fixtures/api";
 import { COMPOSE_FILE, HTTPS_INGRESS, aiHost } from "../fixtures/env";
 
-// process.cwd() === test/integration/full when Playwright runs; step back 3
+// process.cwd() === test/e2e when Playwright runs; step back 2
 // levels to reach the repo root where the compose file path is anchored.
-const REPO_ROOT = path.resolve(process.cwd(), "..", "..", "..");
+const REPO_ROOT = path.resolve(process.cwd(), "..", "..");
 
 test.use({ storageState: AUTH_STORAGE_PATH });
 test.slow(); // container restart adds latency

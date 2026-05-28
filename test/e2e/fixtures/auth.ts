@@ -2,7 +2,7 @@
 import type { Page } from "@playwright/test";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./env";
 
-// Relative to test/integration/full/ (where playwright.config.ts lives).
+// Relative to test/e2e/ (where playwright.config.ts lives).
 export const AUTH_STORAGE_PATH = "playwright-auth.json";
 
 export async function loginAsAdmin(page: Page): Promise<void> {

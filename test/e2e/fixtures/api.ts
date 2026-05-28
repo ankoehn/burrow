@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// process.cwd() === test/integration/full when Playwright runs (same pattern as cert.ts).
+// process.cwd() === test/e2e when Playwright runs (same pattern as cert.ts).
 const DEFAULT_STORAGE_PATH = "playwright-auth.json";
 
 export function readCSRFFromStorage(storagePath = DEFAULT_STORAGE_PATH): string {

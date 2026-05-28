@@ -15,7 +15,7 @@ import { AUTH_STORAGE_PATH } from "../fixtures/auth";
 import { HTTPS_INGRESS } from "../fixtures/env";
 import { adminHeaders } from "../fixtures/api";
 
-// process.cwd() === test/integration/full when Playwright runs
+// process.cwd() === test/e2e when Playwright runs
 // (same pattern as cert.ts — import.meta.url is not used to avoid
 // transform issues with the Playwright ESM runner on this harness).
 const CERTS_DIR = path.resolve(process.cwd(), "certs");
