@@ -45,17 +45,10 @@ test("25-quota-rate-limit: 429 + audit row", async ({ page, request }) => {
     statuses.push(r.status());
   }
 
-  // Cleanup before asserting so the rule doesn't persist on skip.
+  // Cleanup before asserting so the rule doesn't persist.
   await request.delete(`/api/v1/rate-limits/${rule.id}`, {
     headers: adminHeaders(),
   });
-
-  // Skip if the proxy-layer enforcement is not yet wired (all 200s).
-  // The rate-limit store is present (POST/DELETE succeed) but the quota
-  // middleware is not hooked into the reverse-proxy path in this build.
-  if (!statuses.slice(5).includes(429)) {
-    test.skip(true, "rate-limit enforcement not wired into proxy in this build");
-  }
 
   // At least one of the last 2 should be 429.
   expect(statuses.slice(5)).toContain(429);
