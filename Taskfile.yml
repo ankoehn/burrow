@@ -52,39 +52,39 @@ tasks:
         platforms: [windows]
 
   e2e:up:
-    desc: Build + start the basic e2e Docker Compose stack (foreground)
+    desc: Build + start the FULL e2e stack detached (leaves it running)
     cmds:
-      - docker compose -f test/integration/compose.e2e.yml up --build
+      - docker compose -f test/harness/compose.full.yml up -d --build --wait
 
-  e2e:smoke:
-    desc: Run the automated e2e smoke (brings stack up, asserts, tears down)
+  e2e:down:
+    desc: Stop the full e2e stack and remove its named volumes
+    cmds:
+      - docker compose -f test/harness/compose.full.yml down --volumes
+
+  integration:smoke:
+    desc: "Tier 1: minimal data-plane curl gate (relay + 1 client; up/assert/down)"
     cmds:
       - bash test/integration/smoke.sh
 
-  e2e:down:
-    desc: Stop the e2e stack and remove its named volumes
+  integration:smoke-full:
+    desc: "Tier 1: full-stack data-plane curl gate (dashboard + 3 TCP + AI SSE)"
     cmds:
-      - docker compose -f test/integration/compose.e2e.yml down --volumes
+      - bash test/integration/smoke-full.sh
 
-  e2e:ui:
-    desc: Run the Playwright UI mini-suite (brings stack up, runs 5 specs, tears down)
+  e2e:run:
+    desc: "Tier 2: bring up full stack + run the Playwright UI suite (up/test/down)"
     cmds:
-      - bash test/integration/smoke-ui.sh
+      - bash test/e2e/run.sh
 
-  e2e:full:
-    desc: Run the full e2e harness (4 containers + mockoai + 20 Playwright specs)
+  e2e:user:
+    desc: "Tier 3 helper: scripted user-acceptance walkthrough (mint -> connect -> ... -> restart)"
     cmds:
-      - bash test/integration/full/smoke-full.sh
-
-  e2e:smoke-user:
-    desc: Run the user-acceptance smoke (mint→connect→expose→gate→AI→quota→ipgeo→audit→restart)
-    cmds:
-      - bash test/integration/full/smoke-user.sh
+      - bash test/manual/smoke-user.sh
 
   e2e:lab:
     desc: Bring up the full e2e lab and print access credentials + endpoints
     cmds:
-      - docker compose -f test/integration/full/compose.full.yml up -d --wait
+      - docker compose -f test/harness/compose.full.yml up -d --wait
       - echo ""
       - echo "  Burrow e2e lab is up."
       - echo ""
