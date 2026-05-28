@@ -1,10 +1,10 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";
 
 test.use({ storageState: AUTH_STORAGE_PATH });
 
-test("15-audit-chain: UI mint â†’ token.mint audit row â†’ chain valid", async ({ page }) => {
+test("15-audit-chain: UI mint → token.mint audit row → chain valid", async ({ page }) => {
   // Mint a token so the audit chain has an entry.
   await page.goto("/tokens");
   const name = `audit-${Date.now()}`;

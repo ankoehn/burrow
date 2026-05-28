@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Plan-fidelity note: the plan-as-written expected svc-a + svc-b to appear on
 // /services. In v0.5.2, only HTTP-type tunnels become persisted Service rows

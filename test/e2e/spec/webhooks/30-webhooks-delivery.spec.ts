@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 30 â€” Webhook fire + UI delivery row.
+// Spec 30 — Webhook fire + UI delivery row.
 //
 // API drift vs plan (recorded, not escalated):
 //   D1  token.mint is not in the closed-event vocabulary (ClosedEvents in
@@ -40,7 +40,7 @@ test("30-webhooks-delivery: token.mint fires + row appears", async ({ page, requ
   try {
     // 2. Fire a synchronous test delivery via POST /webhooks/{id}/test.
     //    (token.mint is not in ClosedEvents; token creation does not publish
-    //    any webhook event â€” see D2 above.  DeliverNow fires webhook.test
+    //    any webhook event — see D2 above.  DeliverNow fires webhook.test
     //    synchronously so the delivery row exists before we navigate.)
     const testResp = await request.post(`/api/v1/webhooks/${webhookId}/test`, {
       headers: adminHeaders(),
@@ -48,7 +48,7 @@ test("30-webhooks-delivery: token.mint fires + row appears", async ({ page, requ
     if (testResp.status() === 404 || testResp.status() === 500) {
       test.skip(
         true,
-        "Webhook delivery worker not wired in this build â€” " +
+        "Webhook delivery worker not wired in this build — " +
           "no backend path publishes token.mint; " +
           "POST /webhooks/{id}/test also unavailable. " +
           "Refs internal/webhook/dispatcher.go ClosedEvents + " +
@@ -57,13 +57,13 @@ test("30-webhooks-delivery: token.mint fires + row appears", async ({ page, requ
     }
     expect(testResp.status()).toBe(204);
 
-    // 3. Open /webhooks â†’ wait for the delivery row to appear within 10s.
+    // 3. Open /webhooks → wait for the delivery row to appear within 10s.
     await page.goto("/webhooks");
     await expect(
       page.locator("tr").filter({ hasText: /webhook\.test|200/ }).first()
     ).toBeVisible({ timeout: 10_000 });
   } finally {
-    // 4. Cleanup â€” always delete the webhook so subsequent specs run clean.
+    // 4. Cleanup — always delete the webhook so subsequent specs run clean.
     await request.delete(`/api/v1/webhooks/${webhookId}`, {
       headers: adminHeaders(),
     });

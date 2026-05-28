@@ -1,8 +1,8 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Plan adaptation: /cost is actually /cost-budgets in v0.5.2. The Cost &
 // budgets page has metric tiles + a Budgets table. Without an active budget
-// or model pricing configured for "mock", the rows are zero â€” that's still
+// or model pricing configured for "mock", the rows are zero — that's still
 // a meaningful "page renders" signal.
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";
@@ -19,7 +19,7 @@ test("12-ai-gateway-metering-cost: chat-completions metered + cost page renders"
   });
   expect(res.status()).toBe(200);
 
-  // The Cost & budgets page renders â€” surface signal that metering wiring works.
+  // The Cost & budgets page renders — surface signal that metering wiring works.
   await page.goto("/cost");
   await expect(page.getByRole("heading", { name: /Cost.*budgets/i })).toBeVisible();
   // Metric tiles are present (24h / 7d / 30d windows).

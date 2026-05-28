@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 27 â€” Failover circuit breaker.
+// Spec 27 — Failover circuit breaker.
 // Configures a routing policy with 2 backends + circuit breaker.
 // Stops the primary upstream container, drives traffic, asserts
 // requests still succeed (failover) and audit shows ai.upstream_error.
@@ -40,10 +40,10 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
     }),
   });
   if (cfgResp.status() !== 204) {
-    test.skip(true, "failover not implemented â€” see docs/BACKLOG_failover.md");
+    test.skip(true, "failover not implemented — see docs/BACKLOG_failover.md");
   }
 
-  // 3. Stop mockoai and run test assertions â€” always restart in finally block.
+  // 3. Stop mockoai and run test assertions — always restart in finally block.
   try {
     const stopResult = spawnSync(
       "docker",
@@ -51,7 +51,7 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
       { stdio: "pipe", cwd: REPO_ROOT },
     );
     if (stopResult.status !== 0) {
-      test.skip(true, "failover not implemented â€” see docs/BACKLOG_failover.md");
+      test.skip(true, "failover not implemented — see docs/BACKLOG_failover.md");
     }
 
     // 4. Fire requests; expect either 200 (failover) or 5xx (no secondary configured).
@@ -85,7 +85,7 @@ test("27-failover: stop primary upstream, verify failover + audit", async ({ pag
         { stdio: "pipe" },
       );
       if (check.status === 0) break;
-      // Brief pause between health checks â€” use a sync-safe busy wait via spawnSync.
+      // Brief pause between health checks — use a sync-safe busy wait via spawnSync.
       spawnSync("docker", ["exec", "burrow-e2e-full-mockoai-1", "true"], { stdio: "pipe" });
       // Node sleep: busy-wait for ~1 s without shell dependency.
       const t = Date.now();

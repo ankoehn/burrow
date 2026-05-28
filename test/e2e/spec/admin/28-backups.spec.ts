@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 28 â€” Backup/restore UI round-trip.
+// Spec 28 — Backup/restore UI round-trip.
 
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs/promises";
@@ -24,7 +24,7 @@ test("28-backups: create + download + UI history", async ({ page }) => {
   const historyRow = page.locator('table[aria-label*="Backup" i] tr').nth(1);
   await expect(historyRow).toBeVisible({ timeout: 15_000 });
 
-  // Download â€” the UI uses apiFetch (XHR/fetch), not a browser anchor download,
+  // Download — the UI uses apiFetch (XHR/fetch), not a browser anchor download,
   // so we click and wait for the network request rather than a download event.
   const downloadBtn = historyRow.getByRole("button", { name: /Download/i });
   if (await downloadBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {

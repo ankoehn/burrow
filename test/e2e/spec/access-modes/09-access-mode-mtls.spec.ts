@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // v0.4 mTLS access-mode end-to-end. Replaces the prior "UI surface only"
 // version (Playwright 1.60+ supports per-request clientCertificates, so
@@ -7,8 +7,8 @@
 // Flow:
 //   1. UI: open /services/<ai-id>, switch to mTLS mode, paste test CA pem, save.
 //   2. Backend: hit https://<sub>.test.local:8443/healthz from a new request
-//      context WITH clientCertificates â†’ expect 200.
-//   3. Same without â†’ expect 401.
+//      context WITH clientCertificates → expect 200.
+//   3. Same without → expect 401.
 //   4. Reset to Open before exit so other specs aren't affected.
 
 import { test, expect, request as pwRequest } from "@playwright/test";
@@ -44,14 +44,14 @@ test("09-access-mode-mtls: real cert handshake gates proxy access", async ({ pag
 
   const host = aiHost(); // e.g., "xxx.test.local:8443"
 
-  // 3. Without cert â†’ 401.
+  // 3. Without cert → 401.
   const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
     headers: { host },
     ignoreHTTPSErrors: true,
   });
   expect(denied.status()).toBe(401);
 
-  // 4. With valid client cert â†’ 200.
+  // 4. With valid client cert → 200.
   const certCtx = await pwRequest.newContext({
     ignoreHTTPSErrors: true,
     clientCertificates: [{

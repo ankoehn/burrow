@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 33 â€” a UI-minted token connects a REAL client end-to-end.
+// Spec 33 — a UI-minted token connects a REAL client end-to-end.
 // Mints a client token via the Connect-a-client wizard UI, docker-runs a
 // throwaway burrow client with that exact token tunneling to mockoai:8081,
 // then proves the tunnel registers connected and a proxied request reaches
@@ -27,7 +27,7 @@ test("33-token-connect: UI-minted token connects a real client + traffic flows",
   await page.getByLabel("Client name").fill(TUNNEL_NAME);
   await page.getByRole("button", { name: /generate token/i }).click();
 
-  // Click Reveal to unmask the token (default is masked as bur_â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢).
+  // Click Reveal to unmask the token (default is masked as bur_••••••••).
   await page.getByRole("button", { name: /reveal token/i }).click();
 
   // Find the code element with the plaintext bur_ token (not the command block).
@@ -39,7 +39,7 @@ test("33-token-connect: UI-minted token connects a real client + traffic flows",
   let started = false;
   try {
     // 2. docker run the ephemeral client with that exact token.
-    // The wizard token is generic (POST /tokens with just a name) â€” not service-scoped.
+    // The wizard token is generic (POST /tokens with just a name) — not service-scoped.
     // The wizard example command uses --local 127.0.0.1:3000 --remote 9000 as
     // placeholders; we override --local to mockoai:8081 (reachable in-network)
     // and --remote 0 (auto-assign) so the relay creates the tunnel entry with
@@ -89,7 +89,7 @@ test("33-token-connect: UI-minted token connects a real client + traffic flows",
     expect(subdomain, "ephemeral tunnel should register connected with a subdomain").not.toBe("");
 
     // 4. Traffic through the HTTPS proxy to the ephemeral subdomain reaches mockoai.
-    // HTTP tunnels are host-routed on :8443 â€” send the Host header to target the tunnel.
+    // HTTP tunnels are host-routed on :8443 — send the Host header to target the tunnel.
     const resp = await request.get(`${HTTPS_INGRESS}/healthz`, {
       headers: { host: `${subdomain}.test.local:8443` },
       ignoreHTTPSErrors: true,

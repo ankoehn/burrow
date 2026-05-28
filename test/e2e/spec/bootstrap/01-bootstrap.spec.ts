@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 import { test, expect } from "@playwright/test";
 import { loginAsAdmin, AUTH_STORAGE_PATH } from "../../fixtures/auth";
 import { TUNNEL_NAMES } from "../../fixtures/env";

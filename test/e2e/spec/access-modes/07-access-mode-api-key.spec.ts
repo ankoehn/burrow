@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";
 import { HTTPS_INGRESS, aiHost } from "../../fixtures/env";
@@ -34,7 +34,7 @@ test("07-access-mode-api-key: api_key required; correct key 200; missing 401", a
 
   const host = aiHost();
   // With the correct API key (api_key_header defaults to "Authorization"; the
-  // proxy strips a "Bearer " prefix for that header â€” see internal/proxy/access.go).
+  // proxy strips a "Bearer " prefix for that header — see internal/proxy/access.go).
   const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
     headers: { host, authorization: `Bearer ${key}` },
     ignoreHTTPSErrors: true,

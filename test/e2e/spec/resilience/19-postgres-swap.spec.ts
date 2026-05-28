@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 // Runs ONLY in the `postgres` Playwright project. The filename contains
 // "postgres" so playwright.config.ts's grep matches.
 //

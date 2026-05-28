@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 25 â€” Quota rate-limit UI + audit trail.
+// Spec 25 — Quota rate-limit UI + audit trail.
 // Creates a rate-limit rule via the API (UI form would also work but
 // the API is faster + less brittle), fires 7 requests through the
 // proxy, asserts 429 fires by request 6-7, then opens /audit and
@@ -15,7 +15,7 @@ test.use({ storageState: AUTH_STORAGE_PATH });
 
 test("25-quota-rate-limit: 429 + audit row", async ({ page, request }) => {
   // 1. Create a rate-limit rule via the admin API.
-  // API drift: plan used `lim` + `subject: "*"` â€” actual handler uses
+  // API drift: plan used `lim` + `subject: "*"` — actual handler uses
   // `limit` (json:"limit") and requires subject="" for global scope.
   const createResp = await request.post("/api/v1/rate-limits", {
     headers: adminHeaders(),

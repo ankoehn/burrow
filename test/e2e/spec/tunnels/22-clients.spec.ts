@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 import { test, expect } from "@playwright/test";
 import { loginAsAdmin } from "../../fixtures/auth";
 
@@ -25,7 +25,7 @@ test("22-clients: Connect-a-client wizard mints a token", async ({ page }) => {
   await page.getByLabel("Client name").fill(`spec-22-${Date.now()}`);
   await page.getByRole("button", { name: /generate token/i }).click();
 
-  // Click Reveal to unmask the token (default is masked as bur_â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢).
+  // Click Reveal to unmask the token (default is masked as bur_••••••••).
   await page.getByRole("button", { name: /reveal token/i }).click();
 
   // Reveal dialog should expose a bur_ prefixed plaintext at least once.

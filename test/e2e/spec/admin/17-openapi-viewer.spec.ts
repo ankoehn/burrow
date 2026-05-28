@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // The OpenAPI viewer is server-side rendered under /api/v1/openapi/viewer/
 // (not a SPA route). Verify it renders, asserts no external CDN scripts,

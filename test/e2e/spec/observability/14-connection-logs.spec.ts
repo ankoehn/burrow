@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Plan adaptation: ConnectionLogs is its own page (/connection-logs) â€” there
+// Plan adaptation: ConnectionLogs is its own page (/connection-logs) — there
 // isn't a per-service tab in v0.5.2's ServiceDetail. We drive TCP traffic
 // against the tcp-echo tunnel, then assert the global /connection-logs
 // table has at least one row.

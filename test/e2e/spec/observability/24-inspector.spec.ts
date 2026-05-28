@@ -1,8 +1,8 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 24 â€” Request inspector page + replay.
+// Spec 24 — Request inspector page + replay.
 // Drives one chat-completion request, sees a new row in the inspector,
-// expands it for headers/body, triggers Replay â†’ expects a second row.
+// expands it for headers/body, triggers Replay → expects a second row.
 
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";
@@ -19,7 +19,7 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
   if (!ai) throw new Error("ai service not found");
 
   // Ensure inspector.enabled=true so the chain captures requests. The
-  // PUT /ai-config endpoint tolerates missing sections â€” only validates
+  // PUT /ai-config endpoint tolerates missing sections — only validates
   // cache.semantic.{min_similarity,embedding_mode} if present.
   const aiCfgResp = await request.put(`/api/v1/services/${ai.id}/ai-config`, {
     headers: adminHeaders(),
@@ -49,7 +49,7 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
   expect(r.status()).toBe(200);
 
   // Now navigate to the inspector page. The initial list query fetches
-  // /services/{id}/inspector/requests from DB â€” the captured row will be
+  // /services/{id}/inspector/requests from DB — the captured row will be
   // present without relying on SSE delivery timing.
   await page.goto(`/inspector/${ai.id}`);
   await expect(page.getByRole("heading", { name: /Request inspector/i })).toBeVisible();
@@ -61,7 +61,7 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
   await expect(requestRows.first()).toBeVisible({ timeout: 10_000 });
 
   // Click the first (newest) row. The row's onClick calls nav(/inspector/{svcId}/{id})
-  // which changes the URL â€” this proves we clicked a real data row and
+  // which changes the URL — this proves we clicked a real data row and
   // `selected` state was set.
   await requestRows.first().click();
   await page.waitForURL(`/inspector/${ai.id}/**`, { timeout: 10_000 });

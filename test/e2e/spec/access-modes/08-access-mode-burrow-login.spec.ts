@@ -1,11 +1,11 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Plan-fidelity note: a true visitor flow needs a browser context with the
 // custom hostname resolved (hosts file or --resolve at the curl layer). The
 // /etc/hosts entry is optional in the harness, so this spec verifies the
 // burrow_login signal via the proxy's HTTP response (302 to the auth gate)
-// using a no-session APIRequestContext + Host header â€” equivalent to the
-// runbook Â§6c assertion without requiring hosts-file entries.
+// using a no-session APIRequestContext + Host header — equivalent to the
+// runbook §6c assertion without requiring hosts-file entries.
 import { test, expect, request as playwrightRequest } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";
 import { HTTPS_INGRESS, aiHost } from "../../fixtures/env";

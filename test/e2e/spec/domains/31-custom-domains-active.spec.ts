@@ -1,12 +1,12 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 31 â€” Custom domain cert pair + status active + cert serves.
+// Spec 31 — Custom domain cert pair + status active + cert serves.
 //
 // Uses wildcard.example.com.crt / .key (signed by the test CA, SANs cover
 // *.example.com and example.com) so the SAN check in validateCertAndKey
 // passes for any api<ts>.example.com hostname.  The compose harness already
 // loads BURROW_CERT_VALIDATION_ROOTS_FILE=ca.crt so chain validation also
-// passes â€” this spec should run without skipping on the mock profile.
+// passes — this spec should run without skipping on the mock profile.
 
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs/promises";
@@ -16,7 +16,7 @@ import { HTTPS_INGRESS } from "../../fixtures/env";
 import { adminHeaders } from "../../fixtures/api";
 
 // process.cwd() === test/e2e when Playwright runs
-// (same pattern as cert.ts â€” import.meta.url is not used to avoid
+// (same pattern as cert.ts — import.meta.url is not used to avoid
 // transform issues with the Playwright ESM runner on this harness).
 const CERTS_DIR = path.resolve(process.cwd(), "certs");
 
@@ -52,7 +52,7 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
     if (body["reason"] === "chain_invalid" || body["error"]?.includes("chain")) {
       test.skip(
         true,
-        "Custom domain cert chain validation failed (chain_invalid) â€” " +
+        "Custom domain cert chain validation failed (chain_invalid) — " +
         "the compose harness relay does not have BURROW_CERT_VALIDATION_ROOTS_FILE " +
         "pointing to the test CA. Fix: ensure the relay container env is set.",
       );
@@ -73,16 +73,16 @@ test("31-custom-domains-active: upload pair, status active, cert serves", async 
       page.locator("tr").filter({ hasText: hostname }).first().getByText(/active|pending/i)
     ).toBeVisible({ timeout: 10_000 });
 
-    // 3. Curl the hostname â†’ 200.
+    // 3. Curl the hostname → 200.
     const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
       headers: { host: `${hostname}:8443` },
       ignoreHTTPSErrors: true,
     });
     expect(ok.status()).toBe(200);
   } finally {
-    // 4. Cleanup â€” always delete the domain so subsequent specs run clean.
+    // 4. Cleanup — always delete the domain so subsequent specs run clean.
     if (!domainId) {
-      // POST succeeded but we haven't parsed the id yet â€” re-fetch list.
+      // POST succeeded but we haven't parsed the id yet — re-fetch list.
       const listAfter = await request.get(`/api/v1/services/${ai.id}/domains`);
       const domains = (await listAfter.json()) as { id: string; hostname: string }[];
       const mine = domains.find((d) => d.hostname === hostname);

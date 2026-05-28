@@ -1,4 +1,4 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Custom domains UI surface check + (optional) end-to-end add flow.
 // The full happy-path requires file uploads of the wildcard cert pair; the

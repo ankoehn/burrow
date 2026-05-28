@@ -1,7 +1,7 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Plan-fidelity note: the AccessModePanel radio labels are full strings
-// like "Open â€” raw passthrough" (not just "Open") and the save button is
+// like "Open — raw passthrough" (not just "Open") and the save button is
 // "Save changes" (not "Save"). The plan's selectors didn't match.
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../../fixtures/auth";

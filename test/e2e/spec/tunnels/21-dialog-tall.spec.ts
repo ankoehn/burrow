@@ -1,7 +1,7 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
 // Regression guard for dialog viewport overflow (B2).
-// At 1440Ã—900 the Services Configure dialog content (~1100 px) previously
+// At 1440×900 the Services Configure dialog content (~1100 px) previously
 // spilled above the viewport top with no scroll. This spec ensures the
 // dialog box stays entirely within the viewport after the max-height /
 // internal-scroll fix.
@@ -13,7 +13,7 @@ test.use({
   viewport: { width: 1440, height: 900 },
 });
 
-test("21-dialog-tall: Configure dialog fits within the viewport at 1440Ã—900", async ({ page }) => {
+test("21-dialog-tall: Configure dialog fits within the viewport at 1440×900", async ({ page }) => {
   await page.goto("/tunnels");
 
   const aiRow = page.locator('table[aria-label="Tunnels"] tr').filter({ hasText: "ai" });

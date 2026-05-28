@@ -1,6 +1,6 @@
-﻿// test-only â€” never deploy this shape.
+// test-only — never deploy this shape.
 //
-// Spec 29 â€” IP/geo CIDR block via UI + proxy enforcement.
+// Spec 29 — IP/geo CIDR block via UI + proxy enforcement.
 //
 // UI deviations from plan (verified against IPGeoPanel.tsx):
 //   - No "Configure" button on the service page for ip-geo; IPGeoPanel renders
@@ -13,7 +13,7 @@
 //     mismatch means the UI mutation silently 404s on the real stack. UI visual
 //     behaviour is verified but backend state is confirmed via direct API calls.
 //
-// Proxy enforcement: wired in internal/proxy/proxy.go (ipGeoDenied â†’ 403).
+// Proxy enforcement: wired in internal/proxy/proxy.go (ipGeoDenied → 403).
 //   block_cidrs ["0.0.0.0/0"] blocks every IP, guaranteeing a 403 regardless
 //   of the host's Docker-bridge IP as seen by the relay (no trusted-proxy
 //   hop in the compose stack, so RemoteAddr is used directly). Clearing the
@@ -56,12 +56,12 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   // 2. Exercise the UI "Add CIDR" dialog (visual path).
   //    Note: the UI PUT currently targets /ipgeo (no hyphen) which 404s
   //    on the real server (/ip-geo with hyphen). The panel renders the
-  //    dialog correctly â€” we verify the interaction but not the outcome
+  //    dialog correctly — we verify the interaction but not the outcome
   //    in the DB (the direct API path below is the authoritative check).
   // ------------------------------------------------------------------
   await addCidr.click();
 
-  // Custom <Select> (id="cidr-list") â€” click trigger to open, then pick "Block CIDR".
+  // Custom <Select> (id="cidr-list") — click trigger to open, then pick "Block CIDR".
   const listTrigger = page.locator("#cidr-list");
   if (await listTrigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await listTrigger.click();
@@ -85,7 +85,7 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   await page.waitForTimeout(500);
 
   // ------------------------------------------------------------------
-  // 3-7. Block â†’ assert 403 â†’ clear â†’ assert 200.
+  // 3-7. Block → assert 403 → clear → assert 200.
   //      The cleanup PUT is in a finally block so the 0.0.0.0/0 policy is
   //      ALWAYS disabled even if an assertion throws, preventing the ai
   //      service from being blocked for subsequent specs (cascade risk).
@@ -111,7 +111,7 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
     const geo = (await geoCfg.json()) as { block_cidrs: string[] };
     expect(geo.block_cidrs).toContain("0.0.0.0/0");
 
-    // 5. Proxy enforcement check (REAL assertion â€” no skip).
+    // 5. Proxy enforcement check (REAL assertion — no skip).
     //    The relay enforces ip-geo in internal/proxy/proxy.go before the
     //    access-mode check. With 0.0.0.0/0 blocked the request must 403.
     const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
@@ -120,7 +120,7 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
     });
     expect(denied.status()).toBe(403);
 
-    // 6. Clean up â€” PUT empty list so subsequent specs see a clean state.
+    // 6. Clean up — PUT empty list so subsequent specs see a clean state.
     //    Also executed unconditionally in finally below.
     const cleanup = await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
       headers: adminHeaders(),
