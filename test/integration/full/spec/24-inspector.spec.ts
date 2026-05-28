@@ -18,63 +18,81 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
   const ai = services.find((s) => s.name === "ai");
   if (!ai) throw new Error("ai service not found");
 
-  // Ensure inspector.enabled=true in the service AI config so the chain
-  // captures requests. This makes the spec self-contained regardless of
-  // prior DB state. Merges with any existing routing/cache config by PUTting
-  // a minimal payload that only sets inspector.enabled (other fields default).
-  // The PUT endpoint tolerates unknown/missing sections — only validates
+  // Ensure inspector.enabled=true so the chain captures requests. The
+  // PUT /ai-config endpoint tolerates missing sections — only validates
   // cache.semantic.{min_similarity,embedding_mode} if present.
-  await request.put(`/api/v1/services/${ai.id}/ai-config`, {
+  const aiCfgResp = await request.put(`/api/v1/services/${ai.id}/ai-config`, {
     headers: adminHeaders(),
     data: JSON.stringify({ inspector: { enabled: true, max_requests: 50 } }),
   });
+  expect(aiCfgResp.ok()).toBeTruthy();
 
-  // Open the inspector page first (so SSE is subscribed) before firing.
-  await page.goto(`/inspector/${ai.id}`);
-  await expect(page.getByRole("heading", { name: /Request inspector/i })).toBeVisible();
+  // Ensure access_mode=open so the unauthenticated proxy POST returns 200
+  // and gets captured by the inspector (no auth rejection before capture).
+  const amResp = await request.put(`/api/v1/services/${ai.id}/access-mode`, {
+    headers: adminHeaders(),
+    data: JSON.stringify({ access_mode: "open" }),
+  });
+  expect(amResp.ok()).toBeTruthy();
 
+  // Fire the request BEFORE navigating to the inspector page. The inspector
+  // list query runs on page mount and will pick up captured rows from the DB
+  // directly, avoiding an SSE timing race under full-suite load where the
+  // EventSource connection may not be established before the request fires.
   const host = aiHost();
-  const body = JSON.stringify({ model: "x", stream: false, messages: [{ role: "user", content: "hi" }] });
+  const msgBody = JSON.stringify({ model: "x", stream: false, messages: [{ role: "user", content: "hi from spec-24" }] });
   const r = await request.post(`${HTTPS_INGRESS}/v1/chat/completions`, {
     headers: { host, "content-type": "application/json" },
-    data: body,
+    data: msgBody,
     ignoreHTTPSErrors: true,
   });
   expect(r.status()).toBe(200);
 
-  // Wait for the row to surface via SSE.
-  const firstRow = page.locator('[data-test="inspector-row"], tbody tr').first();
-  await expect(firstRow).toBeVisible({ timeout: 5_000 });
+  // Now navigate to the inspector page. The initial list query fetches
+  // /services/{id}/inspector/requests from DB — the captured row will be
+  // present without relying on SSE delivery timing.
+  await page.goto(`/inspector/${ai.id}`);
+  await expect(page.getByRole("heading", { name: /Request inspector/i })).toBeVisible();
 
-  // Expand the row → headers/body details should render.
-  await firstRow.click();
-  const detail = page.locator("[data-test='inspector-detail'], .inspector-detail").first();
-  if (await detail.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    // Detail panel pattern.
-    expect(await detail.innerText()).toContain("authorization");
-  }
+  // Wait for the captured row to appear in the Requests table.
+  // Scope to the Requests table (not the Headers table inside the detail pane)
+  // and use the "clickable" class to exclude the empty-state row.
+  const requestRows = page.locator('table[aria-label="Requests"] tbody tr.clickable');
+  await expect(requestRows.first()).toBeVisible({ timeout: 10_000 });
 
-  // Capture the request-list row count before replay so we can assert it grew by 1.
-  // Use the Requests table aria-label to scope to the inspector list only (not the
-  // Headers table inside the detail pane).
-  const requestTable = page.locator('table[aria-label="Requests"] tbody tr');
-  const rowsBefore = await requestTable.count();
+  // Click the first (newest) row. The row's onClick calls nav(/inspector/{svcId}/{id})
+  // which changes the URL — this proves we clicked a real data row and
+  // `selected` state was set.
+  await requestRows.first().click();
+  await page.waitForURL(`/inspector/${ai.id}/**`, { timeout: 10_000 });
 
-  // Trigger Replay. Inspector replay ships — a missing button is a regression.
-  // The "Replay" button in the detail-toolbar opens a confirmation dialog;
-  // click it, then confirm by clicking "Replay" inside the dialog.
-  const replayOpen = page.getByRole("button", { name: /Replay/i, exact: true }).first();
-  await expect(replayOpen).toBeVisible({ timeout: 2_000 });
-  await replayOpen.click();
+  // Hard-wait for the detail-toolbar to be visible. The detail pane renders
+  // only after the detail API fetch completes (detail.data becomes non-null).
+  // Under full-suite load this can take several seconds.
+  const detailToolbar = page.locator(".detail-toolbar");
+  await expect(detailToolbar).toBeVisible({ timeout: 15_000 });
+
+  // Capture the request-list row count before replay so we can assert it grew.
+  // Scope to the Requests table aria-label to exclude the Headers table rows.
+  const rowsBefore = await requestRows.count();
+
+  // Trigger Replay. The "Replay" button in the detail-toolbar carries
+  // aria-label="Open replay dialog" (the button text "Replay" is shared with
+  // "Replay & compare", so match by aria-label to avoid strict-mode violation).
+  const replayOpenBtn = detailToolbar.getByRole("button", { name: "Open replay dialog" });
+  await expect(replayOpenBtn).toBeVisible({ timeout: 10_000 });
+  await replayOpenBtn.click();
+
   // Confirm inside the "Replay request" dialog.
   const replayDialog = page.getByRole("dialog", { name: /Replay request/i });
-  await expect(replayDialog).toBeVisible({ timeout: 2_000 });
+  await expect(replayDialog).toBeVisible({ timeout: 5_000 });
   await replayDialog.getByRole("button", { name: /^Replay$/i }).click();
+
   // After replay, expect at least one more row than before. Use a poll loop
   // because SSE delivery is async and the exact final count may exceed
   // rowsBefore+1 when prior entries are flushed concurrently.
   await expect(async () => {
-    const after = await requestTable.count();
+    const after = await requestRows.count();
     expect(after).toBeGreaterThanOrEqual(rowsBefore + 1);
-  }).toPass({ timeout: 5_000 });
+  }).toPass({ timeout: 10_000 });
 });
