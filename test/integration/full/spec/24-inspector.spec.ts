@@ -42,13 +42,10 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
     expect(await detail.innerText()).toContain("authorization");
   }
 
-  // Trigger Replay. Different UI variants may use button text or icon.
+  // Trigger Replay. Inspector replay ships — a missing button is a regression.
   const replay = page.getByRole("button", { name: /Replay/i }).first();
-  if (await replay.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await replay.click();
-    // After replay, expect at least 2 rows total.
-    await expect(page.locator('[data-test="inspector-row"], tbody tr')).toHaveCount(2, { timeout: 5_000 });
-  } else {
-    test.info().annotations.push({ type: "skip-replay", description: "Replay button not surfaced — backend covers this via TestE2EInspector_Replay" });
-  }
+  await expect(replay).toBeVisible({ timeout: 2_000 });
+  await replay.click();
+  // After replay, expect at least 2 rows total.
+  await expect(page.locator('[data-test="inspector-row"], tbody tr')).toHaveCount(2, { timeout: 5_000 });
 });
