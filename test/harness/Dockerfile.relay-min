@@ -17,7 +17,7 @@ RUN apk add --no-cache curl ca-certificates bash \
     && mkdir -p /data /run/burrow /certs \
     && chown -R 65532:65532 /data /run/burrow /certs
 COPY --from=builder /out/burrowd /usr/local/bin/burrowd
-COPY test/integration/relay-entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY test/harness/entrypoints/relay.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 USER 65532:65532
 ENV BURROW_DATABASE_PATH=/data/burrow.db \

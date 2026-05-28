@@ -3,7 +3,7 @@ FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/burrow ./cmd/client && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/upstream ./test/integration/upstream
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/upstream ./test/harness/upstream
 
 FROM alpine:3.20
 RUN apk add --no-cache curl bash
@@ -11,6 +11,6 @@ RUN adduser -D -u 65532 burrow && mkdir -p /run/burrow /etc/burrow && chown burr
 USER 65532
 COPY --from=build /out/burrow /usr/local/bin/burrow
 COPY --from=build /out/upstream /usr/local/bin/upstream
-COPY test/integration/full/burrow-multi.yaml /etc/burrow/burrow.yaml
-COPY test/integration/full/entrypoints/client-multi.sh /usr/local/bin/client-multi.sh
+COPY test/harness/burrow-multi.yaml /etc/burrow/burrow.yaml
+COPY test/harness/entrypoints/client-multi.sh /usr/local/bin/client-multi.sh
 ENTRYPOINT ["/usr/local/bin/client-multi.sh"]

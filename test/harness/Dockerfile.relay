@@ -14,7 +14,7 @@ RUN apk add --no-cache curl bash ca-certificates
 RUN adduser -D -u 65532 burrow && mkdir -p /data /run/burrow /certs && chown burrow:burrow /data /run/burrow /certs
 USER 65532
 COPY --from=build /out/burrowd /usr/local/bin/burrowd
-COPY test/integration/full/entrypoints/relay-full.sh /usr/local/bin/relay-full.sh
+COPY test/harness/entrypoints/relay-full.sh /usr/local/bin/relay-full.sh
 ENV BURROW_DATABASE_PATH=/data/burrow.db \
     BURROW_LOG_LEVEL=info \
     BURROW_LOG_FORMAT=text \

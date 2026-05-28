@@ -8,7 +8,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/burrow ./cmd/client \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/upstream ./test/integration/upstream
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/upstream ./test/harness/upstream
 
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache curl ca-certificates bash \
@@ -17,7 +17,7 @@ RUN apk add --no-cache curl ca-certificates bash \
     && chown -R 65532:65532 /run/burrow
 COPY --from=builder /out/burrow    /usr/local/bin/burrow
 COPY --from=builder /out/upstream  /usr/local/bin/upstream
-COPY test/integration/client-entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY test/harness/entrypoints/client.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 USER 65532:65532
 ENV UPSTREAM_ADDR=127.0.0.1:8081 \

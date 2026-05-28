@@ -9,8 +9,8 @@ RUN apk add --no-cache curl bash ca-certificates
 RUN adduser -D -u 65532 burrow && mkdir -p /run/burrow && chown burrow:burrow /run/burrow
 USER 65532
 COPY --from=build /out/burrow /usr/local/bin/burrow
-COPY test/integration/full/entrypoints/client-ai.sh /usr/local/bin/client-ai.sh
-COPY test/integration/full/certs/ca.crt /usr/local/share/ca-certificates/burrow-test-ca.crt
+COPY test/harness/entrypoints/client-ai.sh /usr/local/bin/client-ai.sh
+COPY test/harness/certs/ca.crt /usr/local/share/ca-certificates/burrow-test-ca.crt
 ENV BURROW_RELAY=relay.test.local:7000 \
     BURROW_UPSTREAM=mockoai:8081 \
     BURROW_REMOTE_PORT=9001 \
