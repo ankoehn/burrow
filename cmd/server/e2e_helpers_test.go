@@ -48,6 +48,7 @@ import (
 	"github.com/ankoehn/burrow/internal/client"
 	"github.com/ankoehn/burrow/internal/db"
 	"github.com/ankoehn/burrow/internal/devcert"
+	"github.com/ankoehn/burrow/internal/guardrails"
 	"github.com/ankoehn/burrow/internal/proxy"
 	"github.com/ankoehn/burrow/internal/proxy/customdomain"
 	"github.com/ankoehn/burrow/internal/quota"
@@ -202,6 +203,9 @@ type bootE2ECfg struct {
 	// plus any custom rules) passed as NewChain's redactEngine arg.
 	redactEnabled bool
 	redactRules   []redact.Rule
+	// guardrailsEnabled, when true, installs a real guardrails.Engine as the
+	// AI chain's guardrails engine (5th NewChain arg).
+	guardrailsEnabled bool
 }
 
 // withConnLogSink returns a bootE2EStack option that registers a proxy
@@ -269,6 +273,12 @@ func withE2EQuota(_ ...quota.Limit) bootE2EStackOption {
 // chain's redaction engine, so redaction runs on the real proxy data path.
 func withE2ERedaction(custom ...redact.Rule) bootE2EStackOption {
 	return func(c *bootE2ECfg) { c.redactEnabled = true; c.redactRules = custom }
+}
+
+// withE2EGuardrails installs a real guardrails.Engine so prompt-injection /
+// refuse policy runs on the real proxy data path.
+func withE2EGuardrails() bootE2EStackOption {
+	return func(c *bootE2ECfg) { c.guardrailsEnabled = true }
 }
 
 // withProxyIdleTimeout returns a bootE2EStack option that sets a per-request
@@ -438,7 +448,11 @@ func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 			t.Fatalf("redact.NewEngine: %v", err)
 		}
 	}
-	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, redactEngine, nil, nil, nil, meterSink, s.log)
+	var guardEngine *guardrails.Engine
+	if cfg.guardrailsEnabled {
+		guardEngine = guardrails.NewEngine()
+	}
+	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, redactEngine, guardEngine, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
 	if cfg.quotaEnabled {
 		// Build a real quota.Engine backed by the test DB (mirrors
