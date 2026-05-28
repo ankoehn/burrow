@@ -75,3 +75,30 @@ tasks:
     desc: Run the full e2e harness (4 containers + mockoai + 20 Playwright specs)
     cmds:
       - bash test/integration/full/smoke-full.sh
+
+  e2e:smoke-user:
+    desc: Run the user-acceptance smoke (mint→connect→expose→gate→AI→quota→ipgeo→audit→restart)
+    cmds:
+      - bash test/integration/full/smoke-user.sh
+
+  e2e:lab:
+    desc: Bring up the full e2e lab and print access credentials + endpoints
+    cmds:
+      - docker compose -f test/integration/full/compose.full.yml up -d --wait
+      - echo ""
+      - echo "  Burrow e2e lab is up."
+      - echo ""
+      - echo "  Dashboard:   http://localhost:8080"
+      - echo "  Admin email: admin@e2e.local"
+      - echo "  Password:    e2e-pass"
+      - echo ""
+      - echo "  Ports:"
+      - echo "    8080  UI + admin API"
+      - echo "    7000  client control plane"
+      - echo "    8443  HTTPS proxy ingress (host-routed tunnels)"
+      - echo "    9001  TCP tunnel (ai)"
+      - echo "    9002  TCP tunnel (tcp-echo)"
+      - echo "    9003  TCP tunnel (multi-a)"
+      - echo "    9004  TCP tunnel (multi-b)"
+      - echo "    7800  MCP listener"
+      - echo ""
