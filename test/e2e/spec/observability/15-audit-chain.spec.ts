@@ -25,10 +25,16 @@ test("15-audit-chain: UI mint → token.mint audit row → chain valid", async (
   const table = page.locator('table[aria-label="Audit events"]');
   await expect(table.locator("tbody tr").first()).toBeVisible({ timeout: 5_000 });
 
-  // Verify chain.
+  // The filtered table must contain a row whose Action cell is exactly "token.mint".
+  // Action string is locked: internal/audit/actions.go ActionTokenMint = "token.mint".
+  await expect
+    .poll(async () => table.locator("tbody tr").filter({ hasText: "token.mint" }).count(), {
+      timeout: 5_000,
+      message: "Expected at least one row with Action=token.mint after UI mint",
+    })
+    .toBeGreaterThanOrEqual(1);
+
+  // Verify chain — expect a green success notice (POST /audit/verify).
   await page.getByRole("button", { name: "Verify chain" }).click();
-  // Expect either a success notice OR a "no events" notice (both = valid).
-  await page.waitForTimeout(2_000);
-  // The page should still render without an error toast.
-  await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
+  await expect(page.locator(".notice-inline.ok")).toContainText(/Chain valid from/, { timeout: 5_000 });
 });
