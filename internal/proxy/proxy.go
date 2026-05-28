@@ -391,6 +391,14 @@ func (p *Proxy) serveCustomDomain(w http.ResponseWriter, r *http.Request, host, 
 	logStatus := StatusClosedClean
 	defer p.recordOnClose(r, res, resolvedClientIP, started, rc, ww, &logStatus)
 
+	// Step 1b: enforce ip-geo block/allow policy BEFORE access-mode check.
+	if denied, reason := p.ipGeoDenied(res, resolvedClientIP); denied {
+		p.log.Info("ip-geo deny", "service_id", res.ServiceID, "ip", resolvedClientIP, "reason", reason)
+		logStatus = StatusRejected
+		http.Error(w, "forbidden: ip not allowed", http.StatusForbidden)
+		return
+	}
+
 	// Step 2: enforce access mode BEFORE opening a stream.
 	ok, status, body, hdr := p.checker.Allow(ctx, res, r)
 	if !ok {
@@ -527,6 +535,14 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 	// keeps the row recordable even on client cancel.
 	logStatus := StatusClosedClean
 	defer p.recordOnClose(r, res, resolvedClientIP, started, rc, ww, &logStatus)
+
+	// Step 1b: enforce ip-geo block/allow policy BEFORE access-mode check.
+	if denied, reason := p.ipGeoDenied(res, resolvedClientIP); denied {
+		p.log.Info("ip-geo deny", "service_id", res.ServiceID, "ip", resolvedClientIP, "reason", reason)
+		logStatus = StatusRejected
+		http.Error(w, "forbidden: ip not allowed", http.StatusForbidden)
+		return
+	}
 
 	// Step 2: enforce access mode BEFORE opening a stream.
 	ok, status, body, hdr := p.checker.Allow(ctx, res, r)
@@ -677,6 +693,23 @@ func (p *Proxy) serveResolved(w http.ResponseWriter, r *http.Request, res *Resol
 		// Emit audit row for AI-gateway upstream 5xx responses (non-chain path).
 		p.emitAIUpstreamErrorAudit(ctx, res.ServiceID, res.APIKeyHeader, upstreamHost, ww.statusCode)
 	}
+}
+
+// ipGeoDenied reports whether the resolved client IP is denied by the
+// service's ip-geo policy. Returns (false, "") when no policy is set or the
+// IP can't be parsed (fail-open only on a missing/empty policy, never on a
+// configured block).
+func (p *Proxy) ipGeoDenied(res *Resolved, clientIP string) (bool, string) {
+	policy, err := CompileIPGeoPolicy(res.IPAllowCIDRs, res.IPBlockCIDRs, res.IPAllowCountries, res.IPBlockCountries)
+	if err != nil || policy.IsEmpty() {
+		return false, ""
+	}
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return false, ""
+	}
+	allowed, reason := NewIPGeoEngine(policy, nil).Allow(ip)
+	return !allowed, reason
 }
 
 // emitAIUpstreamErrorAudit writes an audit.ActionAIUpstreamError row when
