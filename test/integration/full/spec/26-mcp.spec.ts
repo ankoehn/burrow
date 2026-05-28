@@ -13,9 +13,6 @@ test.use({ storageState: AUTH_STORAGE_PATH });
 test("26-mcp: tool inventory — API returns ≥10 tools; UI surface optional", async ({ page, request }) => {
   // 1. API: backend must expose ≥10 MCP tools.
   const apiResp = await request.get("/api/v1/mcp/tools");
-  if (apiResp.status() === 404 || apiResp.status() === 500) {
-    test.skip(true, "MCP API not available in this build");
-  }
   expect(apiResp.status(), "GET /api/v1/mcp/tools").toBe(200);
   const tools = (await apiResp.json()) as unknown[];
   expect(Array.isArray(tools), "tools is array").toBe(true);
