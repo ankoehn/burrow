@@ -13,12 +13,11 @@
 //     mismatch means the UI mutation silently 404s on the real stack. UI visual
 //     behaviour is verified but backend state is confirmed via direct API calls.
 //
-// Proxy enforcement note:
-//   - The aigw chain's IPGeo field is a nil stub (no middleware wired in the
-//     full compose stack). Blocking 127.0.0.1/32 writes to the DB but the
-//     relay proxy does NOT enforce it at request time. The 403 assertion is
-//     skipped with a clear annotation; the backend CRUD + cleanup are verified.
-//   - Tracked in BACKLOG as "F: ip-geo proxy wiring in full stack".
+// Proxy enforcement: wired in internal/proxy/proxy.go (ipGeoDenied → 403).
+//   block_cidrs ["0.0.0.0/0"] blocks every IP, guaranteeing a 403 regardless
+//   of the host's Docker-bridge IP as seen by the relay (no trusted-proxy
+//   hop in the compose stack, so RemoteAddr is used directly). Clearing the
+//   policy (enabled:false) restores 200. Both arms are asserted live.
 
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../fixtures/auth";
@@ -75,7 +74,7 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   // Fill the CIDR input (id="cidr-input", placeholder="10.0.0.0/8").
   const cidrInput = page.locator("#cidr-input");
   if (await cidrInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await cidrInput.fill("127.0.0.1/32");
+    await cidrInput.fill("0.0.0.0/0");
   }
 
   // Confirm via the dialog "Add" button (exact text match, not "Add CIDR").
@@ -87,11 +86,13 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
 
   // ------------------------------------------------------------------
   // 3. Write the block CIDR via direct API (authoritative path).
+  //    0.0.0.0/0 blocks every IPv4 address, guaranteeing a 403 regardless
+  //    of which Docker-bridge IP the relay sees as the request source.
   //    The UI URL mismatch means we use the correct /ip-geo URL directly.
   // ------------------------------------------------------------------
   const putResp = await request.put(`/api/v1/services/${ai.id}/ip-geo`, {
     headers: adminHeaders(),
-    data: { enabled: true, allow_cidrs: [], block_cidrs: ["127.0.0.1/32"], allow_countries: [], block_countries: [] },
+    data: { enabled: true, allow_cidrs: [], block_cidrs: ["0.0.0.0/0"], allow_countries: [], block_countries: [] },
   });
   expect(putResp.status()).toBe(204);
 
@@ -103,26 +104,19 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   });
   expect(geoCfg.status()).toBe(200);
   const geo = (await geoCfg.json()) as { block_cidrs: string[] };
-  expect(geo.block_cidrs).toContain("127.0.0.1/32");
+  expect(geo.block_cidrs).toContain("0.0.0.0/0");
 
   // ------------------------------------------------------------------
-  // 5. Proxy enforcement check.
-  //    The aigw chain's IPGeo field is a nil stub in the full compose
-  //    stack — the middleware is not wired, so no 403 is returned.
-  //    This assertion is skipped with a clear annotation.
-  //    When the proxy wiring lands, remove this comment block and
-  //    uncomment the two assertions below.
+  // 5. Proxy enforcement check (REAL assertion — no skip).
+  //    The relay enforces ip-geo in internal/proxy/proxy.go before the
+  //    access-mode check. With 0.0.0.0/0 blocked the request must 403.
   // ------------------------------------------------------------------
   const host = aiHost();
-  // NOTE: proxy ip-geo enforcement not wired in compose stack (aigw stub).
-  // When wired, uncomment:
-  //   const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
-  //     headers: { host },
-  //     ignoreHTTPSErrors: true,
-  //   });
-  //   expect(denied.status()).toBe(403);
-  void host;      // suppress unused-variable lint
-  void HTTPS_INGRESS; // suppress unused-variable lint
+  const denied = await request.get(`${HTTPS_INGRESS}/healthz`, {
+    headers: { host },
+    ignoreHTTPSErrors: true,
+  });
+  expect(denied.status()).toBe(403);
 
   // ------------------------------------------------------------------
   // 6. Clean up — PUT empty list so subsequent specs see a clean state.
@@ -134,7 +128,7 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   expect(cleanup.status()).toBe(204);
 
   // ------------------------------------------------------------------
-  // 7. Confirm cleanup.
+  // 7. Confirm proxy passes after clearing the block policy.
   // ------------------------------------------------------------------
   const afterCfg = await request.get(`/api/v1/services/${ai.id}/ip-geo`, {
     headers: adminHeaders(),
@@ -143,11 +137,9 @@ test("29-ipgeo: CIDR block enforces 403; remove restores 200", async ({ page, re
   const after = (await afterCfg.json()) as { block_cidrs: string[] };
   expect(after.block_cidrs).toHaveLength(0);
 
-  // NOTE: proxy 200 after cleanup also skipped (middleware not wired).
-  // When wired, uncomment:
-  //   const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
-  //     headers: { host },
-  //     ignoreHTTPSErrors: true,
-  //   });
-  //   expect(ok.status()).toBe(200);
+  const ok = await request.get(`${HTTPS_INGRESS}/healthz`, {
+    headers: { host },
+    ignoreHTTPSErrors: true,
+  });
+  expect(ok.status()).toBe(200);
 });
