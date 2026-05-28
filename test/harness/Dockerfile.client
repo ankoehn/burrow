@@ -1,4 +1,4 @@
-# test/integration/Dockerfile.client
+# test/harness/Dockerfile.client
 # Two-stage: golang-alpine builds BOTH `burrow` (client CLI) and the upstream
 # binary; alpine runtime carries them + a bash entrypoint.
 

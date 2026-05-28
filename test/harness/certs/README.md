@@ -12,4 +12,4 @@ NEVER:
 - Re-use the CA outside this harness.
 - Trust them in a real browser session.
 
-Used by `test/integration/full/compose.full.yml` (mounted into the relay container) and trusted by the Playwright config in Plan 3 via CA mount.
+Used by `test/harness/compose.full.yml` (mounted into the relay container) and trusted by the Playwright config (`test/e2e/`) via CA mount.

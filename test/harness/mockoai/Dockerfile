@@ -1,5 +1,5 @@
 # test-only — never deploy this shape.
-# test/integration/full/mockoai/Dockerfile
+# test/harness/mockoai/Dockerfile
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY . .

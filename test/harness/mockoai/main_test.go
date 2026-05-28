@@ -1,4 +1,4 @@
-// test/integration/full/mockoai/main_test.go
+// test/harness/mockoai/main_test.go
 // test-only — never deploy this shape.
 package main
 

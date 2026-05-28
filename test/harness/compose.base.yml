@@ -1,6 +1,6 @@
-# test/integration/compose.e2e.yml
+# test/harness/compose.base.yml
 # Basic 2-container e2e harness: relay (burrowd) + client (burrow + upstream).
-# Run from repo root: `docker compose -f test/integration/compose.e2e.yml ...`
+# Run from repo root: `docker compose -f test/harness/compose.base.yml ...`
 
 name: burrow-e2e
 

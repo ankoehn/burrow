@@ -1,4 +1,4 @@
-// test/integration/full/mockoai/main.go
+// test/harness/mockoai/main.go
 // test-only — never deploy this shape.
 //
 // Mock OpenAI-compatible server for Burrow e2e tests.

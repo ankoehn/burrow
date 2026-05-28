@@ -1,5 +1,5 @@
 # test-only — never deploy this shape.
-# test/integration/full/compose.full.yml
+# test/harness/compose.full.yml
 # 4-container e2e harness: relay + client-ai + client-tcp + client-multi + mockoai.
 
 name: burrow-e2e-full

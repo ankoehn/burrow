@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/integration/relay-entrypoint.sh
+# test/harness/entrypoints/relay.sh
 # Boots burrowd with dev certs, polls its own /healthz, mints a token,
 # writes it to the shared /run/burrow/token volume, then waits on burrowd.
 

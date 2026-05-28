@@ -1,4 +1,4 @@
-// test/integration/upstream/main_test.go
+// test/harness/upstream/main_test.go
 package main
 
 import (

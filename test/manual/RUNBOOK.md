@@ -22,7 +22,7 @@ Plan 3's Playwright suite codifies each section as an automated spec.
 Bring up the stack and verify the proven smoke shape before starting:
 
 ```bash
-docker compose -f test/integration/full/compose.full.yml up -d --wait
+docker compose -f test/harness/compose.full.yml up -d --wait
 
 # Discover the AI tunnel's auto-assigned subdomain (changes per boot):
 AI=$(docker logs burrow-e2e-full-relay-1 2>&1 \
@@ -50,8 +50,8 @@ Optional — add to `/etc/hosts` (or `C:\Windows\System32\drivers\etc\hosts` on 
 ```
 
 Optional — trust the test CA at the OS level to eliminate browser warnings:
-- Linux: `sudo cp test/integration/full/certs/ca.crt /usr/local/share/ca-certificates/burrow-test-ca.crt && sudo update-ca-certificates`
-- macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain test/integration/full/certs/ca.crt`
+- Linux: `sudo cp test/harness/certs/ca.crt /usr/local/share/ca-certificates/burrow-test-ca.crt && sudo update-ca-certificates`
+- macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain test/harness/certs/ca.crt`
 - Windows: import `certs\ca.crt` into "Trusted Root Certification Authorities" via certmgr.msc
 
 ## Table of contents
@@ -67,7 +67,7 @@ Optional — trust the test CA at the OS level to eliminate browser warnings:
 9. [Custom domains (per-service CNAME + cert pair)](#9-custom-domains)
 10. [Connection logs (drive TCP traffic → entry + NDJSON export)](#10-connection-logs)
 11. [Audit + Webhooks + OpenAPI viewer + Retention](#11-audit--webhooks--openapi--retention)
-12. [Postgres swap (compose.full.postgres.yml profile)](#12-postgres-swap)
+12. [Postgres swap (compose.postgres.yml profile)](#12-postgres-swap)
 13. [Reconnect (restart relay container)](#13-reconnect)
 
 ## Sign-off
@@ -159,7 +159,7 @@ After all 13 sections pass, append:
 - Per-service bytes counters move.
 
 ### Gotchas ⚠
-- The basic upstream binary (`test/integration/upstream/main.go`) only exposes `/healthz` and `/echo`. Other paths return 404 from upstream; that is upstream behavior, not a tunnel defect.
+- The basic upstream binary (`test/harness/upstream/main.go`) only exposes `/healthz` and `/echo`. Other paths return 404 from upstream; that is upstream behavior, not a tunnel defect.
 
 ### Findings
 - [ ]
@@ -269,7 +269,7 @@ echo "AI subdomain: $AI"
 1. Access tab → mode "mTLS" → upload trust anchor PEM → save. ⚠ Burrow does NOT sign client certs; you supply both the trust anchor (CA cert) AND mint/issue client certs separately.
 2. To test, generate a client cert against the same test CA:
    ```bash
-   cd test/integration/full/certs
+   cd test/harness/certs
    MSYS_NO_PATHCONV=1 openssl req -new -newkey rsa:2048 -nodes \
      -keyout client.key -out client.csr \
      -subj "/C=US/O=Burrow Test/CN=e2e-mtls-client"
@@ -372,9 +372,9 @@ echo "AI subdomain: $AI"
 ### Gotchas ⚠
 - Semantic cache only fires when v0.5 semantic backend is compiled in (`-tags=semantic_cache`). The default integration build does NOT include it — the Semantic tab will show "Not available" or zeros. To exercise this section, rebuild with:
   ```bash
-  docker compose -f test/integration/full/compose.full.yml build \
+  docker compose -f test/harness/compose.full.yml build \
     --build-arg GO_BUILD_TAGS=integration,semantic_cache relay
-  docker compose -f test/integration/full/compose.full.yml up -d --wait
+  docker compose -f test/harness/compose.full.yml up -d --wait
   ```
 - mockoai's deterministic 4-dim SHA256-seeded embeddings (`/v1/embeddings`) only give meaningful similarity for prompts that share leading bytes. The "France" example may not cross the 0.85 threshold against a SHA256 seed; lower the threshold to 0.50 or use prompts that share the same first character if you need a guaranteed hit.
 - mockoai always returns the same canned content (`Hello from mockoai.`), so prompt B's response body looks identical to A regardless of cache state. The cache signal is the `Burrow-Cache:` header, not the body.
@@ -390,7 +390,7 @@ echo "AI subdomain: $AI"
 
 ### Steps
 1. `/services` → `ai` → "Custom domains" tab → "Add domain".
-2. Domain: `api.test.local`; upload cert pair: `test/integration/full/certs/wildcard.test.local.crt` + `wildcard.test.local.key` (covers `*.test.local`).
+2. Domain: `api.test.local`; upload cert pair: `test/harness/certs/wildcard.test.local.crt` + `wildcard.test.local.key` (covers `*.test.local`).
 3. Save → row appears with status `active` (or `pending` initially, transitioning to `active` after the daily status tick).
 4. From shell:
    ```bash
@@ -489,15 +489,15 @@ echo "AI subdomain: $AI"
 **Goal:** Confirm the same UI works against the Postgres backend.
 
 ### Steps
-1. Tear down SQLite stack: `docker compose -f test/integration/full/compose.full.yml down --volumes`.
+1. Tear down SQLite stack: `docker compose -f test/harness/compose.full.yml down --volumes`.
 2. Bring up with Postgres override:
    ```bash
    docker compose \
-     -f test/integration/full/compose.full.yml \
-     -f test/integration/full/compose.full.postgres.yml \
+     -f test/harness/compose.full.yml \
+     -f test/harness/compose.postgres.yml \
      up -d --build --wait
    ```
-3. Verify: `docker compose -f .../compose.full.yml -f .../compose.full.postgres.yml ps` shows `postgres` healthy and `relay` healthy.
+3. Verify: `docker compose -f .../compose.full.yml -f .../compose.postgres.yml ps` shows `postgres` healthy and `relay` healthy.
 4. Re-run a subset of the above sections: §1 Bootstrap, §2 Tunnels, §4 Tokens, §11a Audit (Verify chain). Each should pass identically.
 5. Verify the relay is actually using Postgres:
    ```bash
@@ -512,10 +512,10 @@ echo "AI subdomain: $AI"
    (Or check `/settings` → "Database" surface in the UI if shipped.)
 7. Tear down + return to SQLite for subsequent sections:
    ```bash
-   docker compose -f test/integration/full/compose.full.yml \
-                  -f test/integration/full/compose.full.postgres.yml \
+   docker compose -f test/harness/compose.full.yml \
+                  -f test/harness/compose.postgres.yml \
                   down --volumes
-   docker compose -f test/integration/full/compose.full.yml up -d --wait
+   docker compose -f test/harness/compose.full.yml up -d --wait
    ```
 
 ### Expected ✅
@@ -525,7 +525,7 @@ echo "AI subdomain: $AI"
 - `/api/v1/database` returns `{"driver":"postgres", "alpha":true, ...}`.
 
 ### Gotchas ⚠
-- The relay image needs `-tags=integration,postgres` (handled by `GO_BUILD_TAGS` build arg in `compose.full.postgres.yml`).
+- The relay image needs `-tags=integration,postgres` (handled by `GO_BUILD_TAGS` build arg in `compose.postgres.yml`).
 - First boot under Postgres re-runs all migrations against a fresh DB — may take ~5s longer than SQLite warm boot.
 - v0.5 Postgres is marked alpha (`Database.Alpha=true`). Some surfaces (e.g. semantic cache aggregator) may have SQLite-specific assumptions; capture any in Findings.
 - Don't try to run `docker compose` with only one of the two `-f` files when bringing the Postgres stack down — pass both, otherwise compose can't find the postgres service.
@@ -541,7 +541,7 @@ echo "AI subdomain: $AI"
 
 ### Steps
 1. With stack up, navigate `/tunnels`. Confirm all 4 tunnels connected.
-2. From shell: `docker compose -f test/integration/full/compose.full.yml restart relay`.
+2. From shell: `docker compose -f test/harness/compose.full.yml restart relay`.
 3. Within 5-10s, dashboard may show "disconnected" badges (—) OR redirect to /login if session lost.
 4. If logged out, re-login.
 5. Within 30s, all 4 tunnels show `connected` again.

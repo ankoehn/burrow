@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-only — never deploy this shape.
-# test/integration/full/entrypoints/relay-full.sh
+# test/harness/entrypoints/relay-full.sh
 # Boots burrowd with the test wildcard cert (mounted at /certs), seeds an
 # admin user, mints 3 client tokens (one per client container), writes
 # them to the shared /run/burrow/ volume.

@@ -1,6 +1,6 @@
 # test-only — never deploy this shape.
-# test/integration/full/Dockerfile.relay
-# Extends the basic harness pattern (test/integration/Dockerfile.relay):
+# test/harness/Dockerfile.relay
+# Extends the basic harness pattern (test/harness/Dockerfile.relay-min):
 # adds cert mount + integration build tag + GO_BUILD_TAGS arg so the
 # compose Postgres override (T17) can swap "integration,postgres" in.
 FROM golang:1.26-alpine AS build

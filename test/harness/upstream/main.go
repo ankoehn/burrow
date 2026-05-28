@@ -1,4 +1,4 @@
-// test/integration/upstream/main.go
+// test/harness/upstream/main.go
 // Tiny stdlib-only HTTP service used as the upstream behind a burrow tunnel
 // in the basic e2e Docker Compose harness. Two endpoints: /healthz and /echo.
 // No external dependencies — keeps the test-infra footprint zero.

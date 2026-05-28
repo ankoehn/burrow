@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-only — never deploy this shape.
-# test/integration/full/certs/gen.sh
+# test/harness/certs/gen.sh
 # Regenerates the test CA + *.test.local wildcard cert pair. Idempotent.
 # Requires openssl (any modern version).
 

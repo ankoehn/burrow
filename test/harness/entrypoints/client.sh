@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/integration/client-entrypoint.sh
+# test/harness/entrypoints/client.sh
 # Waits for the relay to write /run/burrow/token, starts the upstream service
 # in the background, then runs `burrow connect` (foreground).
 

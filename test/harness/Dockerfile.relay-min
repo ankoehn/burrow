@@ -1,4 +1,4 @@
-# test/integration/Dockerfile.relay
+# test/harness/Dockerfile.relay-min
 # Two-stage build: golang-alpine builder → minimal alpine runtime.
 # Builds ONLY burrowd (not the client) — the client container builds its own burrow binary.
 
