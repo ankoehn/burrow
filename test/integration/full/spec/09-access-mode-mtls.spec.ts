@@ -30,9 +30,7 @@ test("09-access-mode-mtls: real cert handshake gates proxy access", async ({ pag
 
   // 2. Switch to mTLS, paste the test CA pem.
   const mtls = page.getByRole("radio", { name: /mTLS/ });
-  if (!(await mtls.isVisible({ timeout: 2_000 }).catch(() => false))) {
-    test.skip(true, "mTLS UI not present — feature not shipped in this build");
-  }
+  await expect(mtls).toBeVisible({ timeout: 2_000 });
   await mtls.click();
 
   const caPem = await fs.readFile(CA_CERT_PATH, "utf8");
