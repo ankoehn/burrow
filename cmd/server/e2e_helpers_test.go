@@ -50,6 +50,7 @@ import (
 	"github.com/ankoehn/burrow/internal/devcert"
 	"github.com/ankoehn/burrow/internal/proxy"
 	"github.com/ankoehn/burrow/internal/proxy/customdomain"
+	"github.com/ankoehn/burrow/internal/quota"
 	"github.com/ankoehn/burrow/internal/server"
 	"github.com/ankoehn/burrow/internal/store"
 )
@@ -92,6 +93,11 @@ type e2eStack struct {
 	subdomain string
 	hostname  string // "<sub>.test.local"
 	userID    string
+
+	// quotaEngine is non-nil when the stack was booted with withE2EQuota.
+	// Tests that seed rate_limits rows via seedRateLimit may call
+	// quotaEngine.Reload to pick up the new rows before firing requests.
+	quotaEngine *quota.Engine
 
 	cleanupFns []func()
 }
@@ -185,6 +191,12 @@ type bootE2ECfg struct {
 	// cmd/server/main.go. Default (nil) preserves the v0.3.0 listener shape
 	// (static Certificates: []tls.Certificate{wildcard}).
 	cdCertStore *customdomain.Store
+	// quotaEnabled, when true, builds a real quota.Engine from the test DB and
+	// assigns it to the AI chain's RateLimit middleware field.  Tests that need
+	// enforcement call withE2EQuota() and then seed rate_limits rows via
+	// seedRateLimit (which calls quotaEngine.Reload after each insert so the
+	// in-memory snapshot is current before requests are fired).
+	quotaEnabled bool
 }
 
 // withConnLogSink returns a bootE2EStack option that registers a proxy
@@ -235,6 +247,17 @@ func withCustomDomainCertStore(store *customdomain.Store) bootE2EStackOption {
 	return func(c *bootE2ECfg) {
 		c.cdCertStore = store
 	}
+}
+
+// withE2EQuota enables a real quota.Engine in the booted stack, wiring it into
+// the AI chain's RateLimit field (mirrors cmd/server/v04_wiring.go). The engine
+// reads its rules from the test DB, so callers seed rules via seedRateLimit
+// after bootE2EStack returns; seedRateLimit calls s.quotaEngine.Reload so the
+// in-memory snapshot is current before requests are fired. The rules parameter
+// is accepted for documentation/clarity but the engine always loads from DB —
+// use seedRateLimit to insert the actual rule rows.
+func withE2EQuota(_ ...quota.Limit) bootE2EStackOption {
+	return func(c *bootE2ECfg) { c.quotaEnabled = true }
 }
 
 // withProxyIdleTimeout returns a bootE2EStack option that sets a per-request
@@ -398,6 +421,18 @@ func bootE2EStack(t *testing.T, opts ...bootE2EStackOption) *e2eStack {
 	meterSink.Log = s.log
 	aiChain := aigw.NewChain(cacheEngine, cfg.semCache, nil, nil, nil, nil, nil, meterSink, s.log)
 	aiChain.Loader = chainConfigLoader{db: db.Wrap(d), log: s.log}
+	if cfg.quotaEnabled {
+		// Build a real quota.Engine backed by the test DB (mirrors
+		// cmd/server/v04_wiring.go). quota.New loads the current rate_limits
+		// snapshot and wires the same *db.DB as the dailyUsage store so
+		// window=day checks query real usage_events rows. Tests call
+		// seedRateLimit to insert rules after boot; seedRateLimit calls
+		// s.quotaEngine.Reload to refresh the in-memory snapshot before
+		// making requests.
+		qe := quota.New(db.Wrap(d))
+		s.quotaEngine = qe
+		aiChain.RateLimit = buildQuotaMiddleware(qe, nil)
+	}
 	proxyOpts := []proxy.Option{
 		proxy.WithGate(gate),
 		proxy.WithIngressPort(s.proxyPort),
