@@ -96,30 +96,15 @@ jobs:
           go-version: "1.25"
       - run: go test -fuzz=FuzzTemplateRender -fuzztime=60s ./internal/webhook/template/
 
-  e2e-compose-ui:
+  e2e-dataplane:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: test/integration/package-lock.json
-      # The existing curl data-plane gate. Cheap and quick; gates the heavier UI suite.
+      # Tier-1 data-plane gates: minimal stack, then full stack (curl only, no browser).
       - run: bash test/integration/smoke.sh
-      # Playwright suite — brings stack back up, runs 5 specs, tears down.
-      - run: bash test/integration/smoke-ui.sh
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
-        with:
-          name: e2e-compose-ui-playwright-report
-          path: |
-            test/integration/playwright-report/
-            test/integration/test-results/
-          retention-days: 7
+      - run: bash test/integration/smoke-full.sh
 
-  e2e-compose-full:
+  e2e-ui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -127,14 +112,14 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: test/integration/full/package-lock.json
-      - run: bash test/integration/full/smoke-full.sh
+          cache-dependency-path: test/e2e/package-lock.json
+      - run: bash test/e2e/run.sh
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: e2e-compose-full-report
+          name: e2e-ui-report
           path: |
-            test/integration/full/playwright-report/
-            test/integration/full/test-results/
+            test/e2e/playwright-report/
+            test/e2e/test-results/
           retention-days: 7
