@@ -353,6 +353,13 @@ func (s *Store) ServiceForSubdomain(ctx context.Context, sub string) (db.Service
 	return s.q.GetServiceBySubdomain(ctx, sub)
 }
 
+// GetServiceIPGeo returns the ip-geo policy config for the given service.
+// This is a hot-path helper used by the proxy router; it has NO permission gate.
+// Returns a zero-value config (Enabled=false, empty slices) when no row exists.
+func (s *Store) GetServiceIPGeo(ctx context.Context, serviceID string) (db.ServiceIPGeoConfig, error) {
+	return s.q.GetServiceIPGeo(ctx, serviceID)
+}
+
 // RoleAllowed reports whether the given role is in the service's access policy.
 // This is a hot-path helper used by the proxy auth middleware; it has NO
 // permission gate.

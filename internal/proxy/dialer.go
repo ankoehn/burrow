@@ -60,6 +60,13 @@ type Resolved struct {
 	TunnelID        string
 	UserID          string
 	ClientSessionID string
+	// IP/geo allow/block policy (string CIDRs + ISO country codes). Empty =
+	// no restriction. Compiled per-request by the proxy (Task C2) via
+	// proxy.CompileIPGeoPolicy.
+	IPAllowCIDRs     []string
+	IPBlockCIDRs     []string
+	IPAllowCountries []string
+	IPBlockCountries []string
 }
 
 // StreamDialer is the interface that the proxy uses to:

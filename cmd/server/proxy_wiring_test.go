@@ -177,6 +177,15 @@ func (f *fakeStoreSubdomain) ServiceForSubdomain(_ context.Context, sub string) 
 	return f.svc, f.err
 }
 
+func (f *fakeStoreSubdomain) GetServiceIPGeo(_ context.Context, _ string) (db.ServiceIPGeoConfig, error) {
+	return db.ServiceIPGeoConfig{
+		AllowCIDRs:     []string{},
+		BlockCIDRs:     []string{},
+		AllowCountries: []string{},
+		BlockCountries: []string{},
+	}, nil
+}
+
 // httpTunnelLookup is the narrow interface test double for
 // proxyDialerAdapter.Lookup (the server side).
 type fakeHTTPTunnelLookup struct {

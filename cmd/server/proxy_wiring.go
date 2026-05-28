@@ -100,6 +100,7 @@ func isUNIQUESubdomainError(err error) bool {
 // the store layer. *store.Store satisfies it implicitly.
 type subdomainStore interface {
 	ServiceForSubdomain(ctx context.Context, sub string) (db.Service, error)
+	GetServiceIPGeo(ctx context.Context, serviceID string) (db.ServiceIPGeoConfig, error)
 }
 
 // tunnelStreamOpener is the narrow interface proxyDialerAdapter needs from
@@ -153,14 +154,22 @@ func (a proxyDialerAdapter) Lookup(ctx context.Context, sub string) (*proxy.Reso
 		return nil, proxy.ErrNotFound
 	}
 	userID, sessionID := a.lookupSessionFields(tn.ID)
+	ipgeo, err := a.st.GetServiceIPGeo(ctx, svc.ID)
+	if err != nil {
+		return nil, fmt.Errorf("proxy lookup: ip-geo config: %w", err)
+	}
 	r := &proxy.Resolved{
-		ServiceID:       svc.ID,
-		AccessMode:      svc.AccessMode,
-		APIKeyHeader:    svc.APIKeyHeader,
-		LocalHost:       tn.LocalAddr,
-		TunnelID:        tn.ID,
-		UserID:          userID,
-		ClientSessionID: sessionID,
+		ServiceID:        svc.ID,
+		AccessMode:       svc.AccessMode,
+		APIKeyHeader:     svc.APIKeyHeader,
+		LocalHost:        tn.LocalAddr,
+		TunnelID:         tn.ID,
+		UserID:           userID,
+		ClientSessionID:  sessionID,
+		IPAllowCIDRs:     ipgeo.AllowCIDRs,
+		IPBlockCIDRs:     ipgeo.BlockCIDRs,
+		IPAllowCountries: ipgeo.AllowCountries,
+		IPBlockCountries: ipgeo.BlockCountries,
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
@@ -202,14 +211,22 @@ func (a proxyDialerAdapter) LookupByServiceID(ctx context.Context, serviceID str
 		return nil, fmt.Errorf("proxy lookup by service id: service for subdomain: %w", err)
 	}
 	userID, sessionID := a.lookupSessionFields(tn.ID)
+	ipgeo, err := a.st.GetServiceIPGeo(ctx, svc.ID)
+	if err != nil {
+		return nil, fmt.Errorf("proxy lookup by service id: ip-geo config: %w", err)
+	}
 	r := &proxy.Resolved{
-		ServiceID:       svc.ID,
-		AccessMode:      svc.AccessMode,
-		APIKeyHeader:    svc.APIKeyHeader,
-		LocalHost:       tn.LocalAddr,
-		TunnelID:        tn.ID,
-		UserID:          userID,
-		ClientSessionID: sessionID,
+		ServiceID:        svc.ID,
+		AccessMode:       svc.AccessMode,
+		APIKeyHeader:     svc.APIKeyHeader,
+		LocalHost:        tn.LocalAddr,
+		TunnelID:         tn.ID,
+		UserID:           userID,
+		ClientSessionID:  sessionID,
+		IPAllowCIDRs:     ipgeo.AllowCIDRs,
+		IPBlockCIDRs:     ipgeo.BlockCIDRs,
+		IPAllowCountries: ipgeo.AllowCountries,
+		IPBlockCountries: ipgeo.BlockCountries,
 	}
 	if svc.MTLSCAPEM != "" {
 		r.MTLSCAPEM = []byte(svc.MTLSCAPEM)
