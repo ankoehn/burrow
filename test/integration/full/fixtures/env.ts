@@ -30,15 +30,54 @@ export const COMPOSE_POSTGRES_OVERRIDE = "test/integration/full/compose.full.pos
 
 export const RESET_URL = `${DASHBOARD_URL}/api/v1/internal/test-reset`;
 
-// Discovers the AI tunnel's auto-assigned subdomain by tailing the relay log.
+// Discovers the AI tunnel's auto-assigned subdomain by querying the services API.
+// Uses the session cookie from playwright-auth.json for authentication.
 // HTTP tunnels register a random subdomain at session start. Cached after first
 // call — call resetAiSubdomainCache() when the tunnel is known to have re-registered
 // (e.g. after composeRestartRelay()).
+//
+// Strategy: query GET /api/v1/services (authenticated) and find the service with
+// name === "ai" that is currently connected. This is authoritative and immune to
+// stale relay-log entries left by ephemeral tunnels from spec 33 (token-connect).
 let _aiSubdomain: string | undefined;
 export function aiSubdomain(): string {
   if (_aiSubdomain) return _aiSubdomain;
-  // Use spawnSync to avoid shell-pipe issues on Windows (cmd.exe lacks grep/tail).
-  // Pull docker logs and filter in Node rather than relying on POSIX shell tools.
+
+  // Try the API approach: GET /api/v1/services with the saved session cookie.
+  // spawnSync curl.exe is available on Windows and POSIX; we use the system curl.
+  try {
+    const storagePath = "playwright-auth.json";
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const storage = JSON.parse(readFileSync(storagePath, "utf8")) as {
+      cookies: { name: string; value: string }[];
+    };
+    const sessionCookie = storage.cookies?.find((c) => c.name === "burrow_session")?.value ?? "";
+    if (sessionCookie) {
+      const result = spawnSync(
+        "curl",
+        ["-sk", "http://localhost:8080/api/v1/services", "-H", `Cookie: burrow_session=${sessionCookie}`],
+        { encoding: "utf8" },
+      );
+      if (result.status === 0 && result.stdout) {
+        const services = JSON.parse(result.stdout) as {
+          name: string;
+          subdomain: string;
+          connected: boolean;
+        }[];
+        const ai = services.find((s) => s.name === "ai" && s.connected && s.subdomain);
+        if (ai) {
+          _aiSubdomain = ai.subdomain;
+          return _aiSubdomain;
+        }
+      }
+    }
+  } catch {
+    // Fall through to log-based approach.
+  }
+
+  // Fallback: parse relay docker logs. Note: this may resolve to a stale ephemeral
+  // subdomain if other tunnels registered after the AI tunnel. Only used when the
+  // API approach fails (e.g. before spec 01 runs).
   const logs = spawnSync(
     "docker",
     ["logs", "burrow-e2e-full-relay-1"],

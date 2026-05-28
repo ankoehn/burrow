@@ -6,6 +6,7 @@
 
 import { test, expect } from "@playwright/test";
 import { AUTH_STORAGE_PATH } from "../fixtures/auth";
+import { adminHeaders } from "../fixtures/api";
 import { HTTPS_INGRESS, aiHost } from "../fixtures/env";
 
 test.use({ storageState: AUTH_STORAGE_PATH });
@@ -16,6 +17,17 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
   const services = (await list.json()) as { id: string; name: string }[];
   const ai = services.find((s) => s.name === "ai");
   if (!ai) throw new Error("ai service not found");
+
+  // Ensure inspector.enabled=true in the service AI config so the chain
+  // captures requests. This makes the spec self-contained regardless of
+  // prior DB state. Merges with any existing routing/cache config by PUTting
+  // a minimal payload that only sets inspector.enabled (other fields default).
+  // The PUT endpoint tolerates unknown/missing sections — only validates
+  // cache.semantic.{min_similarity,embedding_mode} if present.
+  await request.put(`/api/v1/services/${ai.id}/ai-config`, {
+    headers: adminHeaders(),
+    data: JSON.stringify({ inspector: { enabled: true, max_requests: 50 } }),
+  });
 
   // Open the inspector page first (so SSE is subscribed) before firing.
   await page.goto(`/inspector/${ai.id}`);
@@ -42,10 +54,27 @@ test("24-inspector: row appears + replay creates a second row", async ({ page, r
     expect(await detail.innerText()).toContain("authorization");
   }
 
+  // Capture the request-list row count before replay so we can assert it grew by 1.
+  // Use the Requests table aria-label to scope to the inspector list only (not the
+  // Headers table inside the detail pane).
+  const requestTable = page.locator('table[aria-label="Requests"] tbody tr');
+  const rowsBefore = await requestTable.count();
+
   // Trigger Replay. Inspector replay ships — a missing button is a regression.
-  const replay = page.getByRole("button", { name: /Replay/i }).first();
-  await expect(replay).toBeVisible({ timeout: 2_000 });
-  await replay.click();
-  // After replay, expect at least 2 rows total.
-  await expect(page.locator('[data-test="inspector-row"], tbody tr')).toHaveCount(2, { timeout: 5_000 });
+  // The "Replay" button in the detail-toolbar opens a confirmation dialog;
+  // click it, then confirm by clicking "Replay" inside the dialog.
+  const replayOpen = page.getByRole("button", { name: /Replay/i, exact: true }).first();
+  await expect(replayOpen).toBeVisible({ timeout: 2_000 });
+  await replayOpen.click();
+  // Confirm inside the "Replay request" dialog.
+  const replayDialog = page.getByRole("dialog", { name: /Replay request/i });
+  await expect(replayDialog).toBeVisible({ timeout: 2_000 });
+  await replayDialog.getByRole("button", { name: /^Replay$/i }).click();
+  // After replay, expect at least one more row than before. Use a poll loop
+  // because SSE delivery is async and the exact final count may exceed
+  // rowsBefore+1 when prior entries are flushed concurrently.
+  await expect(async () => {
+    const after = await requestTable.count();
+    expect(after).toBeGreaterThanOrEqual(rowsBefore + 1);
+  }).toPass({ timeout: 5_000 });
 });
