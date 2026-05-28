@@ -91,7 +91,7 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Test-only: under -tags=integration, registers
-		// POST /api/v1/internal/test-reset (used by the test/integration/full
+		// POST /api/v1/internal/test-reset (used by the test/e2e
 		// e2e harness). Default builds compile a no-op stub — see
 		// router_integration.go + router_integration_stub.go. The build tag
 		// is the security boundary; release binaries never see this route.

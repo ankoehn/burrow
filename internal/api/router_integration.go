@@ -3,7 +3,7 @@
 // test-only — never deploy this shape.
 //
 // Build-tagged registration of the /api/v1/internal/test-reset endpoint
-// used by the test/integration/full e2e harness (Playwright + manual
+// used by the test/e2e e2e harness (Playwright + manual
 // runbook). Compiled into the binary ONLY when `go build -tags=integration`
 // is set. The default build picks up the no-op stub in
 // router_integration_stub.go instead, so production binaries never expose
