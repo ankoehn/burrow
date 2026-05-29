@@ -1,6 +1,7 @@
 // test-only — never deploy this shape.
-// Runs ONLY in the `postgres` Playwright project. The filename contains
-// "postgres" so playwright.config.ts's grep matches.
+// Runs ONLY in the `postgres` Playwright project, selected by `testMatch` on
+// this filename in playwright.config.ts. Self-authenticates via loginAsAdmin,
+// so it needs no bootstrap-seeded storageState.
 //
 // Assumes the stack is up with the Postgres override:
 //   docker compose -f compose.full.yml -f compose.full.postgres.yml up -d --build --wait

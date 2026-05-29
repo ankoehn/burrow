@@ -25,7 +25,11 @@ export default defineConfig({
     {
       name: "postgres",
       use: { ...devices["Desktop Chrome"] },
-      grep: /postgres/,
+      // Run ONLY the Postgres-parity spec. NOTE: `grep` matches the
+      // project-prefixed test title, so a `/postgres/` grep matched the
+      // project NAME "postgres" on every test and ran the whole suite.
+      // `testMatch` filters by file PATH, which is immune to that.
+      testMatch: /19-postgres-swap\.spec\.ts$/,
     },
   ],
   outputDir: "./test-results",
