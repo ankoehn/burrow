@@ -15,7 +15,9 @@ test("35-create-service: pre-provision a service through the UI dialog", async (
   // ^[a-z0-9_-]{3,64}$ — keep it lowercase letters/digits/hyphen. The backend
   // stores the optional Title as the service's display name.
   const serviceId = `uitest-${Date.now()}`;
-  const title = "UI created service";
+  // Unique title too — the backend enforces a unique service name, so a
+  // hardcoded title would collide with a leftover on a non-fresh stack.
+  const title = `UI test ${serviceId}`;
 
   try {
     await page.goto("/services");
