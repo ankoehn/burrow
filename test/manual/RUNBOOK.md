@@ -303,13 +303,26 @@ echo "AI subdomain: $AI"
 **Goal:** v0.4 AI gateway middleware chain works end-to-end via mockoai.
 
 ### Steps
-1. `/ai/endpoints` → confirm `ai` service auto-registered (or click "Register endpoint" → select `ai` service → save).
-2. `/tokens` → mint `ai-key-1` → copy.
-3. Discover AI subdomain:
+1. **Turn the `ai` service into an AI endpoint.** An AI endpoint is simply an HTTP
+   service in **api_key** access mode — there is NO separate "Register endpoint"
+   button. Go to `/services` → `ai` → **Configure** → select **API key** →
+   **Save changes**.
+2. `/ai/endpoints` → the `ai` row now appears with status **Connected**.
+   (Services left in *open* mode are intentionally NOT listed here — that empty
+   list is expected until at least one service is in api_key mode.)
+3. **Link check — every AI-gateway page must render (no blank page / error).**
+   Click each AI-gateway nav link and confirm content renders:
+   - `/ai/endpoints` (list) → click `ai` → `/ai/endpoints/<id>` (detail page:
+     **Routing**, **Backends**, **Recent requests** sections all render)
+   - `/cache` → both the **Exact match** AND **Semantic** tabs render (the
+     Semantic tab must not blank out)
+   - `/cost`, `/guardrails`, and `/inspector/<ai-service-id>` each render
+4. `/tokens` → mint `ai-key-1` → copy.
+5. Discover AI subdomain:
    ```bash
    AI=$(docker logs burrow-e2e-full-relay-1 | grep "http tunnel registered" | tail -1 | grep -oE 'subdomain=[a-z0-9]+' | cut -d= -f2)
    ```
-4. From shell, hit chat-completions:
+6. From shell, hit chat-completions:
    ```bash
    curl --ssl-no-revoke -k --resolve "$AI.test.local:8443:127.0.0.1" \
         -fsS -N -X POST https://$AI.test.local:8443/v1/chat/completions \
@@ -317,20 +330,30 @@ echo "AI subdomain: $AI"
         -H "Content-Type: application/json" \
         -d '{"model":"mock","stream":true,"messages":[{"role":"user","content":"hi"}]}'
    ```
-5. Expect SSE stream with `data: {...}` chunks + `[DONE]` (5 chunks total: 4 content + 1 DONE).
-6. `/ai/endpoints` → click `ai` → endpoint detail page → Metering tab → 1 request, ~12 tokens in/out (mockoai's hard-coded usage values).
-7. `/cost` → cost row for `ai-key-1` shows `$0.0000X` (small but non-zero if mock-model pricing is configured; else $0).
-8. Repeat the curl 20 times rapidly → trigger rate limit → expect 429 on later calls.
-9. After rate limit fires, `/audit` should have a `ratelimit.enforced` entry.
+7. Expect SSE stream with `data: {...}` chunks + `[DONE]` (5 chunks total: 4 content + 1 DONE).
+8. `/ai/endpoints` → click `ai` → endpoint detail page renders. ⚠ The Requests /
+   Tokens / Cost / Cache-hit tiles currently read **0** — see Gotchas (server-side
+   usage aggregation is not wired yet). That is expected, not a failure.
+9. Repeat the curl 20 times rapidly → trigger rate limit → expect 429 on later calls.
+10. After rate limit fires, `/audit` should have a `ratelimit.enforced` entry.
 
 ### Expected ✅
+- Every AI-gateway page in step 3 renders (no blank page).
 - SSE streams without buffering (chunks arrive sequentially, not in one batch).
-- Metering increments per request.
-- Cost updates (or stays $0 if no pricing configured — acceptable).
 - Rate limit triggers 429.
 - Audit chain captures `ratelimit.enforced`.
+- ⚠ Per-endpoint metering tiles (requests/tokens/cost/cache) reading **0** is
+  currently EXPECTED — proof of proxying is the SSE stream + the audit /
+  connection-log entries, not the metric tiles.
 
 ### Gotchas ⚠
+- **Per-endpoint metering is not aggregated yet.** `GET /ai/endpoints` and
+  `GET /ai/endpoints/{id}/metrics` (internal/api/ai_endpoint_handlers.go) return
+  hard-zeroed requests/tokens/cost/cache values — a documented TODO pending
+  `usage_events` aggregation on the proxy hot-path. So the metric tiles on
+  `/ai/endpoints`, the endpoint detail page, and the `$` figures on `/cost` will
+  read 0 even after real traffic. Don't flag this as a regression; verify
+  proxying via the SSE stream + `ratelimit.enforced` audit row instead.
 - mockoai's `/v1/chat/completions` doesn't honor the bearer token (it accepts every request). The bearer is checked by Burrow's proxy access-mode gate BEFORE the request reaches mockoai. So 401 without bearer means Burrow's gate fired; 200 with bearer means Burrow accepted + proxied.
 - Mock-oai cost depends on `model_aliases` + `cost_pricing` config. If pricing isn't set for `mock`/`claude-mock`, cost stays $0.0000. Either configure pricing OR accept $0 as the pass condition.
 - The `mock` model name isn't mapped to a real provider — Burrow won't try to forward to OpenAI/Anthropic. mockoai is the upstream.
