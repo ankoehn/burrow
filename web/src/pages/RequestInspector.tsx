@@ -8,6 +8,7 @@ import {
   Badge, Button, Dialog, Input, PageHeader, SkeletonRows, Tabs,
 } from "@/components/ds";
 import type { InspectorEntry, ServiceAIConfig } from "@/lib/contract";
+import { withAIConfigDefaults } from "@/lib/aiConfig";
 
 function RedactedHeaders({ headers }: { headers: Record<string, string> }) {
   const entries = Object.entries(headers);
@@ -42,7 +43,8 @@ export default function RequestInspector() {
 
   const cfg = useQuery({
     queryKey: ["service", serviceId, "ai-config"],
-    queryFn: () => apiFetch<ServiceAIConfig>(`/services/${serviceId}/ai-config`),
+    queryFn: () =>
+      apiFetch<Partial<ServiceAIConfig>>(`/services/${serviceId}/ai-config`).then(withAIConfigDefaults),
     retry: false,
     enabled: Boolean(serviceId),
   });

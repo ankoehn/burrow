@@ -7,6 +7,7 @@ import {
   Button, Dialog, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows, Switch, Tabs,
 } from "@/components/ds";
 import type { CacheSettings, SemanticCacheSettings, CacheStatsV5, Service, ServiceAIConfig } from "@/lib/contract";
+import { withAIConfigDefaults } from "@/lib/aiConfig";
 import { formatBytes } from "@/lib/format";
 
 interface CacheSettingsPayload {
@@ -145,7 +146,8 @@ function SemanticPanel() {
   // Fetch the per-service AI config for the selected service
   const aiConfigQuery = useQuery({
     queryKey: ["service", selectedServiceId, "ai-config"],
-    queryFn: () => apiFetch<ServiceAIConfig>(`/services/${selectedServiceId}/ai-config`),
+    queryFn: () =>
+      apiFetch<Partial<ServiceAIConfig>>(`/services/${selectedServiceId}/ai-config`).then(withAIConfigDefaults),
     enabled: !!selectedServiceId,
     retry: false,
   });
