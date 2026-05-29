@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, type MockDb, type CacheSettingsPayload } from "@/mocks/db";
-import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, CustomDomain, CreateCustomDomainInput, RetentionSettings } from "@/lib/contract";
+import type { AiEndpoint, CostSummary, ModelAliasV5, Provider, ServiceAIConfig, CustomDomain, CreateCustomDomainInput, RetentionSettings, GuardrailSettings } from "@/lib/contract";
 
 const VALID_PROVIDERS = new Set<string>(["ollama", "vllm", "openai-compat", "openai", "anthropic", "other"]);
 
@@ -523,9 +523,10 @@ export const handlers = [
     gate(request, { admin: true }) ?? json(db.guardrailSettings)),
   http.put("/api/v1/guardrails/settings", async ({ request }) => {
     const g = gate(request, { admin: true }); if (g) return g;
-    const b = await body<MockDb["guardrailSettings"]>(request);
+    // PUT accepts the FLAT global settings; GET returns them nested under `global`.
+    const b = await body<GuardrailSettings>(request);
     if (!b) return err(400, "invalid guardrail settings");
-    db.guardrailSettings = b;
+    db.guardrailSettings = { global: b, per_service: db.guardrailSettings.per_service };
     return noContent();
   }),
   http.get("/api/v1/guardrails/patterns", ({ request }) =>

@@ -163,6 +163,21 @@ export interface GuardrailSettings {
   enabled: boolean;
   action: "log_only" | "refuse_403" | "refuse_safe";
 }
+export interface GuardrailPattern {
+  id: string;
+  description: string;
+}
+export interface GuardrailPerServiceSetting {
+  service_id: string;
+  enabled: boolean | null;
+  action: string | null;
+}
+// GET /guardrails/settings returns the global settings nested under `global`
+// plus any per-service overrides. PUT accepts the flat GuardrailSettings body.
+export interface GuardrailSettingsResponse {
+  global: GuardrailSettings;
+  per_service: GuardrailPerServiceSetting[];
+}
 export interface InspectorSettings {
   enabled: boolean;
   max_requests: number;

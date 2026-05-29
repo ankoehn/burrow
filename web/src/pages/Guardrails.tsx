@@ -9,7 +9,8 @@ import {
   Button, FormField, Input, PageHeader, Select, SkeletonRows, Switch,
 } from "@/components/ds";
 import type {
-  GuardrailSettings, RedactionRule, RedactionSettings,
+  GuardrailPattern, GuardrailSettings, GuardrailSettingsResponse,
+  RedactionRule, RedactionSettings,
 } from "@/lib/contract";
 
 interface RulesResponse {
@@ -67,7 +68,7 @@ function RulesTable({ name, rules }: { name: string; rules: RedactionRule[] }) {
   );
 }
 
-function PatternList({ patterns }: { patterns: string[] }) {
+function PatternList({ patterns }: { patterns: GuardrailPattern[] }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -81,7 +82,7 @@ function PatternList({ patterns }: { patterns: string[] }) {
       </button>
       {open && (
         <ul className="mono small">
-          {patterns.map((p) => <li key={p}>{p}</li>)}
+          {patterns.map((p) => <li key={p.id}>{p.description}</li>)}
         </ul>
       )}
     </div>
@@ -108,12 +109,12 @@ export default function Guardrails() {
   });
   const guardSettings = useQuery({
     queryKey: ["guardrails", "settings"],
-    queryFn: () => apiFetch<GuardrailSettings>("/guardrails/settings"),
+    queryFn: () => apiFetch<GuardrailSettingsResponse>("/guardrails/settings"),
     retry: false,
   });
   const patterns = useQuery({
     queryKey: ["guardrails", "patterns"],
-    queryFn: () => apiFetch<string[]>("/guardrails/patterns"),
+    queryFn: () => apiFetch<GuardrailPattern[]>("/guardrails/patterns"),
     retry: false,
   });
 
@@ -128,7 +129,7 @@ export default function Guardrails() {
     }
   }, [redactSettings.data, redactDraft]);
   useEffect(() => {
-    if (guardSettings.data && !guardDraft) setGuardDraft(guardSettings.data);
+    if (guardSettings.data && !guardDraft) setGuardDraft(guardSettings.data.global);
   }, [guardSettings.data, guardDraft]);
 
   const saveRedact = useMutation({

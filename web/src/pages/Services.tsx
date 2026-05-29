@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
-import { Button, Badge, Dialog, EmptyState, ErrorNotice, FormField, FormFieldGroup, Input, PageHeader, Select, SkeletonRows } from "@/components/ds";
+import { Button, Badge, Dialog, EmptyState, ErrorNotice, FormField, FormFieldGroup, Input, PageHeader, SkeletonRows } from "@/components/ds";
 import { Toaster } from "@/components/ui/sonner";
 import type { Service, AccessMode } from "@/lib/contract";
 import { AccessModePanel, type AccessModePanelHandle } from "@/components/AccessModePanel";
@@ -67,22 +67,21 @@ export default function Services() {
   // P2-1: minimal "New service" dialog. POST /services is admin-only on the
   // backend (v0.5.2 P3.6); 403 here surfaces a friendly message.
   const [newOpen, setNewOpen] = useState(false);
-  const [nsName, setNsName] = useState("");
-  const [nsType, setNsType] = useState<"http" | "tcp">("http");
-  const [nsLocal, setNsLocal] = useState("127.0.0.1:3000");
+  const [nsServiceId, setNsServiceId] = useState("");
+  const [nsTitle, setNsTitle] = useState("");
   const [nsErr, setNsErr] = useState<string | null>(null);
   const createService = useMutation({
     mutationFn: () =>
       apiFetch<Service>("/services", {
         method: "POST",
-        body: JSON.stringify({ name: nsName, type: nsType, local_addr: nsLocal }),
+        body: JSON.stringify({ service_id: nsServiceId, title: nsTitle || undefined }),
       }),
     onSuccess: () => {
-      toast.success(`Service ${nsName} created.`);
+      toast.success(`Service ${nsServiceId} created.`);
       qc.invalidateQueries({ queryKey: ["services"] });
       setNewOpen(false);
-      setNsName("");
-      setNsLocal("127.0.0.1:3000");
+      setNsServiceId("");
+      setNsTitle("");
       setNsErr(null);
     },
     onError: (e: unknown) => {
@@ -238,7 +237,7 @@ export default function Services() {
             <Button variant="secondary" onClick={() => setNewOpen(false)}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={!nsName || createService.isPending}
+              disabled={!nsServiceId || createService.isPending}
               onClick={() => createService.mutate()}
             >
               {createService.isPending ? "Creating…" : "Create"}
@@ -247,22 +246,11 @@ export default function Services() {
         }
       >
         <FormFieldGroup>
-          <FormField label="Name" htmlFor="ns-name" w="md">
-            <Input id="ns-name" placeholder="e.g. web-prod" value={nsName} onChange={(e) => setNsName(e.target.value)} />
+          <FormField label="Service ID" htmlFor="ns-service-id" w="md">
+            <Input id="ns-service-id" className="mono" placeholder="e.g. web-prod (a-z 0-9 - _, 3–64)" value={nsServiceId} onChange={(e) => setNsServiceId(e.target.value)} />
           </FormField>
-          <FormField label="Type" htmlFor="ns-type" w="md">
-            <Select
-              id="ns-type"
-              value={nsType}
-              onChange={(v) => setNsType(v as "http" | "tcp")}
-              options={[
-                { value: "http", label: "HTTP" },
-                { value: "tcp", label: "TCP" },
-              ]}
-            />
-          </FormField>
-          <FormField label="Local address" htmlFor="ns-local" w="md">
-            <Input id="ns-local" className="mono" value={nsLocal} onChange={(e) => setNsLocal(e.target.value)} placeholder="127.0.0.1:3000" />
+          <FormField label="Title" htmlFor="ns-title" w="md">
+            <Input id="ns-title" placeholder="optional display name" value={nsTitle} onChange={(e) => setNsTitle(e.target.value)} />
           </FormField>
         </FormFieldGroup>
         {nsErr && <p role="alert" className="notice-inline error">{nsErr}</p>}

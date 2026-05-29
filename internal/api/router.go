@@ -209,6 +209,7 @@ func NewRouter(d Deps) http.Handler {
 			// PUT /services/{id}/ai-config stores the per-service AI config
 			// blob, validating cache.semantic.{min_similarity,embedding_mode}.
 			r.With(d.requireAdminOrAIConfigureAny).Delete("/cache/semantic/entries", d.DeleteSemanticCacheEntries)
+			r.Get("/services/{serviceID}/ai-config", d.GetServiceAIConfig)
 			r.Put("/services/{serviceID}/ai-config", d.PutServiceAIConfig)
 			// v0.5.0 Task 5: upstream-credential injection (spec Part B.2).
 			// GET slots is gated by admin OR ai:configure:any (global resource).

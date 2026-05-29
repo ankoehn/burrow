@@ -700,6 +700,23 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/v1/services/{serviceID}/ai-config:
+    get:
+      tags: [services, cache]
+      summary: Read per-service AI gateway configuration
+      description: >
+        Returns the stored service-level AI config blob, or an empty object
+        ({}) when none has been written yet. Permission: service owner OR
+        ai:configure:any (admin).
+      parameters: [ { $ref: '#/components/parameters/PathServiceID' } ]
+      responses:
+        '200':
+          description: The stored AI config blob (or {} if unset).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Empty' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [services, cache]
       summary: Store per-service AI gateway configuration

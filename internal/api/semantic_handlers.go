@@ -182,6 +182,73 @@ func (d Deps) PutServiceAIConfig(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetServiceAIConfig handles GET /api/v1/services/{serviceID}/ai-config.
+//
+// Permission: service owner OR ai:configure:any (admin) — the same gate as
+// PutServiceAIConfig. Returns 200 with the stored raw JSON blob, or an empty
+// object ({}) when no config has been written for the service yet. This is the
+// read side the dashboard's AI-endpoint detail page loads on mount.
+func (d Deps) GetServiceAIConfig(w http.ResponseWriter, r *http.Request) {
+	serviceID := chi.URLParam(r, "serviceID")
+	if serviceID == "" {
+		writeErr(w, http.StatusBadRequest, "service id is required")
+		return
+	}
+
+	// Auth: owner OR ai:configure:any (mirror PutServiceAIConfig exactly).
+	role, err := d.callerRole(r)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	uid := userID(r.Context())
+
+	if !authz.Can(role, authz.PermAIConfigureAny) {
+		if !authz.Can(role, authz.PermAIConfigureOwn) {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if d.CacheServices == nil {
+			writeErr(w, http.StatusInternalServerError, "service lookup unavailable")
+			return
+		}
+		owner, err := d.CacheServices.GetServiceOwner(r.Context(), serviceID)
+		if errors.Is(err, db.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "service not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "service lookup failed")
+			return
+		}
+		if owner != uid {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+	} else if d.CacheServices != nil {
+		if _, err := d.CacheServices.GetServiceOwner(r.Context(), serviceID); errors.Is(err, db.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "service not found")
+			return
+		}
+	}
+
+	if d.ServiceAIConfigs == nil {
+		writeErr(w, http.StatusInternalServerError, "ai config store unavailable")
+		return
+	}
+	raw, ok, err := d.ServiceAIConfigs.GetServiceAIConfigRaw(r.Context(), serviceID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read ai config failed")
+		return
+	}
+	if !ok || len(raw) == 0 {
+		raw = []byte("{}")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
 // validateServiceAIConfigCacheBlock validates the cache sub-object of an
 // ai-config blob. It checks only the semantic sub-block fields that have
 // spec-mandated validation rules (A.3). All other fields pass through.

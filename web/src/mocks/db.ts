@@ -2,7 +2,7 @@ import type {
   UserAdmin, RoleSummary, Session, ClientDetail, SettingsMap,
   Service, ServiceApiKey, CostSummary, ServiceAIConfig,
   InspectorEntry, CacheSettings, RedactionRule, RedactionSettings,
-  GuardrailSettings, Budget, PricingTable, AuditEvent, Webhook,
+  GuardrailPattern, GuardrailSettingsResponse, Budget, PricingTable, AuditEvent, Webhook,
   WebhookDelivery, ProvisioningKey, ProvisioningPending,
   AutomationToken, BackupRow, CacheStatsV5, SemanticCacheSettings,
   ModelAliasV5, UpstreamCredentialBinding, CustomDomain,
@@ -57,8 +57,8 @@ export interface MockDb {
   cacheStats: CacheStatsV5;
   redactionRules: { built_in: RedactionRule[]; custom: RedactionRule[] };
   redactionSettings: RedactionSettings;
-  guardrailSettings: GuardrailSettings;
-  guardrailPatterns: string[];
+  guardrailSettings: GuardrailSettingsResponse;
+  guardrailPatterns: GuardrailPattern[];
   budgets: Budget[];
   pricing: PricingTable;
   audit: AuditEvent[];
@@ -191,13 +191,13 @@ function seed(): MockDb {
       custom: [],
     },
     redactionSettings: { enabled: true, redact_for_logs_only: false, rule_ids: ["email"], presidio_enabled: false, presidio_url: "http://localhost:5000" },
-    guardrailSettings: { enabled: false, action: "log_only" },
+    guardrailSettings: { global: { enabled: false, action: "log_only" }, per_service: [] },
     guardrailPatterns: [
-      "ignore previous instructions",
-      "you are now",
-      "system prompt",
-      "jailbreak",
-      "developer mode",
+      { id: "ignore_prev", description: "ignore previous instructions" },
+      { id: "you_are_now", description: "you are now" },
+      { id: "system_prompt", description: "system prompt" },
+      { id: "jailbreak", description: "jailbreak" },
+      { id: "dev_mode", description: "developer mode" },
     ],
     budgets: [
       { id: "bdg_ci", scope: "api_key", subject_id: "sak_ci01", daily_usd: 10, action_on_exceed: "alert_webhook", alert_webhook_id: null, current_usd: 5, exceeded: false },
