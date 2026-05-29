@@ -134,6 +134,11 @@ export default function Webhooks() {
       apiFetch<void>(`/webhooks/${editWebhook!.id}`, {
         method: "PUT",
         body: JSON.stringify({
+          // The backend PutWebhook validator requires a non-empty `name`
+          // (internal/api/webhook_handlers.go validateWebhookReq) and persists
+          // it verbatim, so we must echo the existing name on edit — otherwise
+          // every save 400s with "name is required" (and would blank the name).
+          name: editWebhook!.name,
           url: editUrl,
           events: editEvents,
           payload_template: editTemplate.payload_template,
