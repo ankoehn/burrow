@@ -1017,8 +1017,8 @@ export const handlers = [
       return err(400, "redaction_retention_days out of range");
     if (b.connection_logs_retention_days != null && (b.connection_logs_retention_days < 1 || b.connection_logs_retention_days > 3650))
       return err(400, "connection_logs_retention_days out of range");
-    if (b.connection_log_rollups_retention_days != null && (b.connection_log_rollups_retention_days < 0 || b.connection_log_rollups_retention_days > 3650))
-      return err(400, "connection_log_rollups_retention_days out of range");
+    if (b.connection_logs_rollups_retention_days != null && (b.connection_logs_rollups_retention_days < 0 || b.connection_logs_rollups_retention_days > 3650))
+      return err(400, "connection_logs_rollups_retention_days out of range");
     if (b.webhook_deliveries_retention_days != null && (b.webhook_deliveries_retention_days < 1 || b.webhook_deliveries_retention_days > 365))
       return err(400, "webhook_deliveries_retention_days out of range");
     if (b.inspector_retention_count != null && (b.inspector_retention_count < 1 || b.inspector_retention_count > 1000))

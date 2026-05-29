@@ -18,7 +18,7 @@ const FIELD_META: {
   { key: "usage_retention_days",                   label: "Usage events (days)",            min: 1, max: 3650, placeholder: "90" },
   { key: "redaction_retention_days",               label: "Redaction events (days)",        min: 1, max: 3650, placeholder: "30" },
   { key: "connection_logs_retention_days",         label: "Connection logs (days)",         min: 1, max: 3650, placeholder: "30" },
-  { key: "connection_log_rollups_retention_days",  label: "Connection log rollups (days)",  min: 0, max: 3650, placeholder: "0" },
+  { key: "connection_logs_rollups_retention_days", label: "Connection log rollups (days)",  min: 0, max: 3650, placeholder: "0" },
   { key: "webhook_deliveries_retention_days",      label: "Webhook deliveries (days)",      min: 1, max: 365,  placeholder: "30" },
   { key: "inspector_retention_count",              label: "Inspector ring-buffer size",     min: 1, max: 1000, placeholder: "100" },
 ];

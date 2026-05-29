@@ -571,7 +571,7 @@ export interface RetentionSettings {
   usage_retention_days: number;
   redaction_retention_days: number;
   connection_logs_retention_days: number;
-  connection_log_rollups_retention_days: number;
+  connection_logs_rollups_retention_days: number;
   webhook_deliveries_retention_days: number;
   inspector_retention_count: number;
   audit_retention_note: string;

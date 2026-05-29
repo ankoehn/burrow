@@ -178,7 +178,7 @@ describe("contract", () => {
     const retention: RetentionSettings = {
       audit_retention_days: 0, usage_retention_days: 90,
       redaction_retention_days: 30, connection_logs_retention_days: 30,
-      connection_log_rollups_retention_days: 0,
+      connection_logs_rollups_retention_days: 0,
       webhook_deliveries_retention_days: 30,
       inspector_retention_count: 100,
       audit_retention_note: "Audit retention only deletes the six rate-limited leaf event types — see docs.",
