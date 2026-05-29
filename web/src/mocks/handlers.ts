@@ -441,7 +441,14 @@ export const handlers = [
     const list = db.inspectorEntries[String(params.id)] ?? [];
     const orig = list.find((e) => e.id === params.rid);
     if (!orig) return err(404, "request not found");
-    return json({ original: orig, replayed: orig, diff: "" });
+    // Wire shape must match internal/api/inspector_handlers.go: diff is the
+    // OBJECT {headers:string[], body:string}, NOT a string. A string here let
+    // a real React #31 crash (rendering the object in <pre>) ship undetected.
+    return json({
+      original: orig,
+      replayed: orig,
+      diff: { headers: [], body: "" },
+    });
   }),
   http.get("/api/v1/services/:id/inspector/requests/:rid", ({ request, params }) => {
     const g = gate(request); if (g) return g;

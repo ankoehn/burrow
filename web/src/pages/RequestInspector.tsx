@@ -85,9 +85,14 @@ export default function RequestInspector() {
       toast.error(e instanceof ApiError ? e.message : "Couldn't replay request."),
   });
 
+  // The server returns the structured diff shape
+  // {original, replayed, diff:{headers:string[], body:string}} — see
+  // internal/api/inspector_handlers.go compareDiff. `diff` is an OBJECT, not a
+  // string: rendering it directly in JSX throws React error #31 and blanks the
+  // page, so we keep the typed shape and render its parts below.
   const compare = useMutation({
     mutationFn: () =>
-      apiFetch<{ diff: string }>(
+      apiFetch<{ diff: { headers: string[]; body: string } }>(
         `/services/${serviceId}/inspector/requests/${selected}/replay-compare`,
         { method: "POST", body: "{}" },
       ),
@@ -237,7 +242,22 @@ export default function RequestInspector() {
         title="Replay & compare"
         footer={<Button variant="secondary" onClick={() => setCompareOpen(false)}>Close</Button>}
       >
-        <pre className="mono small">{compare.data?.diff ?? "(no diff)"}</pre>
+        {compare.isPending ? (
+          <p className="muted">Running replay…</p>
+        ) : compare.data ? (
+          <>
+            <h3>Response header changes</h3>
+            {compare.data.diff.headers.length === 0 ? (
+              <p className="muted">No header changes.</p>
+            ) : (
+              <pre className="mono small">{compare.data.diff.headers.join("\n")}</pre>
+            )}
+            <h3>Body diff</h3>
+            <pre className="mono small">{compare.data.diff.body || "(no body diff)"}</pre>
+          </>
+        ) : (
+          <p className="muted">(no diff)</p>
+        )}
       </Dialog>
       <Toaster />
     </div>
