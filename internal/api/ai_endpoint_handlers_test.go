@@ -183,3 +183,82 @@ func TestAIEndpointMetrics_404OnMissing(t *testing.T) {
 		t.Fatalf("want 404, got %d body=%s", resp.StatusCode, readBody(t, resp))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Wired-metrics path: when AIMetrics is set, handlers surface real aggregates.
+// ---------------------------------------------------------------------------
+
+type fakeAIMetrics struct {
+	counts map[string]db.AIEndpointCount
+	agg    db.AIEndpointAgg
+}
+
+func (f *fakeAIMetrics) AIEndpointCounts24h(context.Context) (map[string]db.AIEndpointCount, error) {
+	return f.counts, nil
+}
+func (f *fakeAIMetrics) AIEndpointMetrics24h(context.Context, string) (db.AIEndpointAgg, error) {
+	return f.agg, nil
+}
+
+func TestAIEndpoints_ListSurfacesMetrics(t *testing.T) {
+	ss := &fakeServiceStore{
+		listSvcs: []store.ServiceView{
+			{ID: "svc-ai", Name: "my-llm", Type: "http", AccessMode: "api_key"},
+		},
+	}
+	d := newAIEndpointDeps(ss, newFakeModelAliasStore())
+	d.AIMetrics = &fakeAIMetrics{counts: map[string]db.AIEndpointCount{"svc-ai": {Requests: 42, CacheHits: 7}}}
+
+	srv, c := newAIEndpointServer(t, d)
+	defer srv.Close()
+
+	resp := c.get(t, "/api/v1/ai/endpoints")
+	var out []aiEndpointResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(out) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(out))
+	}
+	if out[0].Requests24h != 42 {
+		t.Errorf("requests_24h: got %d want 42", out[0].Requests24h)
+	}
+	if out[0].CacheHits24h != 7 {
+		t.Errorf("cache_hits_24h: got %d want 7", out[0].CacheHits24h)
+	}
+}
+
+func TestAIEndpointMetrics_SurfacesAggregates(t *testing.T) {
+	ss := &fakeServiceStore{
+		getSvc: store.ServiceDetail{
+			ServiceView: store.ServiceView{ID: "svc-ai", Name: "my-llm", Type: "http", AccessMode: "api_key"},
+		},
+	}
+	agg := db.AIEndpointAgg{Requests: 10, TokensIn: 100, TokensOut: 200, CacheHits: 4}
+	agg.PerMinute[59] = 3
+	d := newAIEndpointDeps(ss, newFakeModelAliasStore())
+	d.AIMetrics = &fakeAIMetrics{agg: agg}
+
+	srv, c := newAIEndpointServer(t, d)
+	defer srv.Close()
+
+	resp := c.get(t, "/api/v1/ai/endpoints/svc-ai/metrics")
+	var out endpointMetricsResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if out.Requests24h != 10 {
+		t.Errorf("requests_24h: got %d want 10", out.Requests24h)
+	}
+	if out.TokensIn24h != 100 || out.TokensOut24h != 200 {
+		t.Errorf("tokens: got %d/%d want 100/200", out.TokensIn24h, out.TokensOut24h)
+	}
+	if out.CacheHitRatio24h != 0.4 {
+		t.Errorf("cache_hit_ratio_24h: got %v want 0.4", out.CacheHitRatio24h)
+	}
+	if len(out.RequestsPerMinute) != 60 || out.RequestsPerMinute[59] != 3 {
+		t.Errorf("requests_per_minute: got len=%d [59]=%d want len=60 [59]=3", len(out.RequestsPerMinute), out.RequestsPerMinute[59])
+	}
+}

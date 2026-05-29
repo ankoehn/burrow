@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Dialog, Input, Switch, Tabs } from "@/components/ds";
@@ -191,7 +190,6 @@ export function CustomRoleEditor({ open, roleName, onClose }: CustomRoleEditorPr
           ]}
         />
         {err && <p role="alert" className="notice-inline error">{err}</p>}
-        <Toaster />
       </Dialog>
 
       <Dialog

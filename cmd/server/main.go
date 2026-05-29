@@ -541,6 +541,7 @@ func main() {
 					RateLimits:        v04.QuotaEngine,
 					Budgets:           db.Wrap(database),
 					CostEngine:        v04.CostEngine,
+					AIMetrics:         db.Wrap(database),
 					CacheEngine:       v04.CacheEngine,
 					CacheServices:     cacheServiceLookupAdapter{db: db.Wrap(database)},
 					InspectorRings:    v04.InspectorMgr,

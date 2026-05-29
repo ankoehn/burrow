@@ -116,6 +116,8 @@ func (f *fakeCostEngine) CurrentUsdFor(_ context.Context, _ db.Budget) (float64,
 	return 0, nil
 }
 
+func (f *fakeCostEngine) UsdFor(_ string, _, _ int) float64 { return 0 }
+
 // --- /cost/pricing -----------------------------------------------------------
 
 func TestCostHandler_GetPricing_Empty(t *testing.T) {

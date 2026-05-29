@@ -602,6 +602,10 @@ func (*fullDepsStub) CurrentUsdFor(context.Context, db.Budget) (float64, error) 
 	stubPanic("CurrentUsdFor")
 	return 0, nil
 }
+func (*fullDepsStub) UsdFor(string, int, int) float64 {
+	stubPanic("UsdFor")
+	return 0
+}
 
 // AuditQueryStore.
 func (*fullDepsStub) ListAuditEvents(context.Context, db.AuditQuery) ([]db.AuditEvent, error) {

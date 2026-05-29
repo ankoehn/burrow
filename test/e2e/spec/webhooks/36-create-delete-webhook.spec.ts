@@ -23,13 +23,10 @@ test("36-create-delete-webhook: create via UI (reveal secret) then delete via UI
 
     await addDialog.locator("#wh-name").fill(name);
     await addDialog.locator("#wh-url").fill("https://example.com/hook");
-    // The dialog defaults to the event "audit.tokens.create", which the backend
-    // (internal/webhook/dispatcher.go known-events set) does NOT accept and
-    // rejects with "events contains an unknown event". Uncheck it and select a
-    // valid event ("service.created") so the create succeeds.
+    // The dialog now defaults to a valid event (the first of WEBHOOK_EVENTS,
+    // synced to the backend ClosedEvents vocabulary). Add one more valid event.
     // The DS Checkbox renders a <button role="checkbox" id="ev-…"> (NOT an
     // <input>); its accessible name is the event string. Target by role.
-    await addDialog.getByRole("checkbox", { name: "audit.tokens.create", exact: true }).uncheck();
     await addDialog.getByRole("checkbox", { name: "service.created", exact: true }).check();
     await addDialog.getByRole("button", { name: "Create", exact: true }).click();
 

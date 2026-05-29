@@ -214,6 +214,14 @@ const LoginRateLimitPerIP = 10
 const LoginRateLimitGlobal = 60
 
 // Deps are the API's injected dependencies.
+// AIMetricsStore is the read surface for AI-endpoint usage aggregation over the
+// usage_events table (populated by the proxy hot path). *db.DB satisfies it.
+// Nil-safe: when unset, the AI-endpoint handlers report zeroed metering.
+type AIMetricsStore interface {
+	AIEndpointCounts24h(ctx context.Context) (map[string]db.AIEndpointCount, error)
+	AIEndpointMetrics24h(ctx context.Context, serviceID string) (db.AIEndpointAgg, error)
+}
+
 type Deps struct {
 	Users         UserStore
 	Tunnels       TunnelLister
@@ -318,6 +326,10 @@ type Deps struct {
 	// PUT return 500, while GET /budgets still returns the configured
 	// rows with current_usd=0.
 	CostEngine CostEngine
+	// AIMetrics aggregates usage_events into the per-endpoint request/token/
+	// cache numbers shown by GET /ai/endpoints and .../{id}/metrics. *db.DB
+	// satisfies it; nil reports zeroed metering (early-wiring/test default).
+	AIMetrics AIMetricsStore
 	// AuditEvents is the read surface backing GET /audit/events (the
 	// admin UI's audit log table) and POST /audit/verify (for resolving
 	// first_id/last_id within a range). *db.DB satisfies it. Nil disables

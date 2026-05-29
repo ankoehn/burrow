@@ -25,6 +25,9 @@ type CostEngine interface {
 	ReplacePricing(p cost.Pricing)
 	Summary(ctx context.Context, window string) (cost.Summary, error)
 	CurrentUsdFor(ctx context.Context, b db.Budget) (float64, error)
+	// UsdFor prices (tokensIn, tokensOut) for a model/kind via the pricing
+	// table; unknown keys return 0. Used to derive per-endpoint cost.
+	UsdFor(model string, tokensIn, tokensOut int) float64
 }
 
 // BudgetStore is the narrow CRUD surface the budget handlers consume.

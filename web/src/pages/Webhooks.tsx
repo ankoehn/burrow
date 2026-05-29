@@ -9,24 +9,29 @@ import { WebhookTemplateEditor } from "@/components/WebhookTemplateEditor";
 import type { WebhookTemplateEditorValue } from "@/components/WebhookTemplateEditor";
 import type { CreatedWebhook, Webhook, WebhookDelivery } from "@/lib/contract";
 
-// Full list of known webhook events (v0.4.0 original + v0.5.0 additions).
+// Subscribable webhook events. MUST stay in sync with the backend closed
+// vocabulary `ClosedEvents` in internal/webhook/dispatcher.go — the API rejects
+// any event not in that set. (`webhook.test` is intentionally omitted: it is
+// fired directly by the "Send test event" action, not via subscription.)
 const WEBHOOK_EVENTS = [
-  // v0.4.0 events
-  "audit.tokens.create",
-  "quota.exceeded",
-  "budget.exceeded",
-  "redaction.applied",
   "tunnel.connected",
   "tunnel.disconnected",
   "tunnel.failed",
+  "access.denied",
+  "quota.exceeded",
+  "budget.exceeded",
+  "redaction.applied",
+  "guardrail.refused",
   "cert.expiring",
-  // v0.5.0 events
+  "audit.exported",
+  "backup.completed",
   "ai.upstream_error",
   "ai.cache_promotion",
   "audit.policy_change",
   "service.created",
   "service.deleted",
   "connection.session_summary",
+  "custom_domain.cert.expiring",
 ];
 
 function copy(text: string) {
@@ -82,7 +87,7 @@ export default function Webhooks() {
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const [addEvents, setAddEvents] = useState<string[]>(["audit.tokens.create"]);
+  const [addEvents, setAddEvents] = useState<string[]>([WEBHOOK_EVENTS[0]]);
   const [createdSecret, setCreatedSecret] = useState<{ webhook: Webhook; signing_secret: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -96,10 +101,10 @@ export default function Webhooks() {
   function openEdit(w: Webhook) {
     setEditWebhook(w);
     setEditUrl(w.url);
-    setEditEvents(w.events.length > 0 ? w.events : ["audit.tokens.create"]);
+    setEditEvents(w.events.length > 0 ? w.events : [WEBHOOK_EVENTS[0]]);
     const wAny = w as unknown as Record<string, unknown>;
     setEditTemplate({
-      event: w.events[0] ?? "audit.tokens.create",
+      event: w.events[0] ?? WEBHOOK_EVENTS[0],
       payload_template: typeof wAny["payload_template"] === "string" ? wAny["payload_template"] : "",
     });
     setEditErr(null);
@@ -117,7 +122,7 @@ export default function Webhooks() {
       setAddOpen(false);
       setName("");
       setUrl("");
-      setAddEvents(["audit.tokens.create"]);
+      setAddEvents([WEBHOOK_EVENTS[0]]);
       setErr(null);
     },
     onError: (e: unknown) =>

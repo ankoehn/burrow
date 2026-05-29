@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { Button, Badge, Dialog, PageHeader, SkeletonRows } from "@/components/ds";
 import { CustomRoleEditor } from "@/components/CustomRoleEditor";
+import { Toaster } from "@/components/ui/sonner";
 import type { RoleSummary, RoleDetail } from "@/lib/contract";
 
 function RoleDetailDialog({ name, onClose }: { name: string | null; onClose: () => void }) {
@@ -101,6 +102,7 @@ export default function Roles() {
         roleName={editorName}
         onClose={() => setEditorOpen(false)}
       />
+      <Toaster />
     </div>
   );
 }

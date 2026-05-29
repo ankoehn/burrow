@@ -20,6 +20,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/ankoehn/burrow/internal/db"
 )
 
 // aiEndpointResp is the JSON wire shape for one AI endpoint in the list
@@ -113,6 +115,15 @@ func (d Deps) GetAIEndpoints(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Trailing-24h request + cache-hit counts per service. Degrades to zeros
+	// when the metrics store isn't wired (early-wiring / handler tests).
+	counts := map[string]db.AIEndpointCount{}
+	if d.AIMetrics != nil {
+		if c, err := d.AIMetrics.AIEndpointCounts24h(r.Context()); err == nil {
+			counts = c
+		}
+	}
+
 	// Build response: include only api_key-mode services.
 	out := make([]aiEndpointResp, 0)
 	for _, sv := range svcs {
@@ -154,9 +165,9 @@ func (d Deps) GetAIEndpoints(w http.ResponseWriter, r *http.Request) {
 			ConcreteModel:   alias.ConcreteModel,
 			BackendType:     backendType,
 			APIKeyCount:     keyCount,
-			Requests24h:     0, // TODO: aggregate from usage_events
-			CacheHits24h:    0, // TODO: aggregate from usage_events
-			LatencyP95ms:    0, // TODO: aggregate from usage_events
+			Requests24h:     counts[sv.ID].Requests,
+			CacheHits24h:    counts[sv.ID].CacheHits,
+			LatencyP95ms:    0, // usage_events has no latency column — not derivable
 			Status:          status,
 			ClientSessionID: sessionID,
 		})
@@ -199,15 +210,33 @@ func (d Deps) GetAIEndpointMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 60 zeros — one per minute over the trailing hour.
+	// 60 buckets — one request count per minute over the trailing hour.
 	rpm := make([]int, 60)
+	resp := endpointMetricsResp{RequestsPerMinute: rpm}
 
-	writeJSON(w, http.StatusOK, endpointMetricsResp{
-		Requests24h:       0, // TODO: aggregate from usage_events
-		TokensIn24h:       0, // TODO: aggregate from usage_events
-		TokensOut24h:      0, // TODO: aggregate from usage_events
-		CostUSD24h:        0, // TODO: aggregate from usage_events
-		CacheHitRatio24h:  0, // TODO: aggregate from usage_events
-		RequestsPerMinute: rpm,
-	})
+	// Aggregate from usage_events when the metrics store is wired. Degrades to
+	// zeros on any read error (metrics are non-critical to the page rendering).
+	if d.AIMetrics != nil {
+		if agg, err := d.AIMetrics.AIEndpointMetrics24h(r.Context(), serviceID); err == nil {
+			resp.Requests24h = agg.Requests
+			resp.TokensIn24h = int(agg.TokensIn)
+			resp.TokensOut24h = int(agg.TokensOut)
+			if agg.Requests > 0 {
+				resp.CacheHitRatio24h = float64(agg.CacheHits) / float64(agg.Requests)
+			}
+			for i, v := range agg.PerMinute {
+				rpm[i] = v
+			}
+			// Cost from per-kind token subtotals via the pricing table.
+			if d.CostEngine != nil {
+				var usd float64
+				for _, k := range agg.ByKind {
+					usd += d.CostEngine.UsdFor(k.Kind, int(k.TokensIn), int(k.TokensOut))
+				}
+				resp.CostUSD24h = usd
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
