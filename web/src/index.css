@@ -1039,7 +1039,11 @@ button.sort-header:focus-visible {
   padding: 32px 32px 32px;
   max-width: 1200px;
   width: 100%;
-  margin: 0 auto;
+  /* Left-anchor under the fixed sidebar rather than centering in the remaining
+     space — centering left a large empty band between the sidebar and the
+     content on wide viewports (most noticeable on form pages like Settings). */
+  margin: 0;
+  margin-right: auto;
   box-sizing: border-box;
   flex: 1;
 }
