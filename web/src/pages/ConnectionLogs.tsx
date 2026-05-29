@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadFile } from "@/lib/api";
 import { formatTimestamp } from "@/lib/format";
 import { Button, Badge, EmptyState, PageHeader, SkeletonRows } from "@/components/ds";
 import type { ConnectionLog, ConnectionLogRollup, ConnectionLogKind, Service } from "@/lib/contract";
@@ -127,7 +127,7 @@ export default function ConnectionLogs() {
     if (since) p.set("since", since);
     if (until) p.set("until", until);
     if (searchQ) p.set("q", searchQ);
-    void apiFetch(`/connection-logs/export?${p.toString()}`);
+    void downloadFile(`/connection-logs/export?${p.toString()}`, "connection-logs.ndjson");
   }
 
   const logs = allLogs;

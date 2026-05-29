@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, downloadFile, ApiError } from "@/lib/api";
 import { Button, Dialog, EmptyState, PageHeader, SkeletonRows } from "@/components/ds";
 import { formatBytes } from "@/lib/format";
 import type { BackupRow } from "@/lib/contract";
@@ -103,7 +103,7 @@ export default function BackupRestore() {
                       </span>
                     </td>
                     <td className="col-actions">
-                      <Button variant="ghost" size="sm" onClick={() => { void apiFetch(`/backups/${b.id}/download`); }}>Download</Button>
+                      <Button variant="ghost" size="sm" onClick={() => { void downloadFile(`/backups/${b.id}/download`, `${b.id}.burrow`); }}>Download</Button>
                       {" "}
                       <Button variant="ghost" size="sm" onClick={() => verify.mutate(b.id)}>Verify</Button>
                       {" "}

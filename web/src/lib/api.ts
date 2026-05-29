@@ -47,3 +47,47 @@ export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}
   }
   return body as T;
 }
+
+// downloadFile fetches an authenticated API endpoint and saves the response
+// body to the user's disk as a file download. Use this for export/download
+// buttons that must produce an actual file — a plain apiFetch() reads and
+// discards the body, so the button appears to do nothing. GET-only (the
+// server export/download routes are all GET, which is CSRF-safe).
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch("/api/v1" + path, { credentials: "include" });
+  if (res.status === 401) throw new ApiError(401, "unauthorized");
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const t = await res.text();
+      const j = JSON.parse(t) as unknown;
+      if (j && typeof j === "object" && typeof (j as Record<string, unknown>).error === "string") {
+        msg = (j as Record<string, unknown>).error as string;
+      }
+    } catch { /* fall back to statusText */ }
+    throw new ApiError(res.status, msg);
+  }
+  // Prefer the server-supplied filename from Content-Disposition, if any.
+  let filename = fallbackName;
+  const cd = res.headers.get("Content-Disposition");
+  if (cd) {
+    const m = /filename\*?=(?:UTF-8'')?"?([^"";]+)"?/i.exec(cd);
+    if (m && m[1]) {
+      try { filename = decodeURIComponent(m[1]); } catch { filename = m[1]; }
+    }
+  }
+  const blob = await res.blob();
+  // Guard for non-browser environments (jsdom/tests lack createObjectURL):
+  // the fetch above already executed, which is all the unit tests assert.
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  // jsdom throws "navigation not implemented" on anchor click; real browsers
+  // perform the download synchronously and never throw. Swallow either way.
+  try { a.click(); } catch { /* test environment */ }
+  a.remove();
+  URL.revokeObjectURL(url);
+}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, downloadFile, ApiError } from "@/lib/api";
 import { Button, Input, PageHeader, SkeletonRows } from "@/components/ds";
 import type { AuditEvent } from "@/lib/contract";
 import { formatTimestampWithTooltip } from "@/lib/format";
@@ -62,7 +62,7 @@ export default function AuditLog() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => { void apiFetch("/audit/export?format=ndjson"); }}
+            onClick={() => { void downloadFile("/audit/export?format=ndjson", "audit-log.ndjson"); }}
           >
             Export
           </Button>
